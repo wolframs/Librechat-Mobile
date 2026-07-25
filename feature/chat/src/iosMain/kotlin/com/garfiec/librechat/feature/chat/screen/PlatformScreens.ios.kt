@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -44,6 +45,7 @@ import com.garfiec.librechat.core.common.EndpointConstants
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.feature.chat.components.ChatFloatingTopBar
+import com.garfiec.librechat.feature.chat.components.CacheTtlRail
 import com.garfiec.librechat.feature.chat.components.rememberChatOptionsSheetController
 import com.garfiec.librechat.feature.chat.components.IosChatInput
 import com.garfiec.librechat.feature.chat.components.LandingContent
@@ -295,10 +297,6 @@ actual fun ChatScreen(
                 tokenUsage = uiState.tokenUsage,
                 contextUsageEnabled = uiState.contextUsageEnabled,
                 contextBarPlacement = uiState.contextBarPlacement,
-                cacheTtlEnabled = uiState.cacheTtlEnabled,
-                cacheTtlAnchor = uiState.cacheTtlAnchor,
-                armedCacheTtl = uiState.armedCacheTtl,
-                onToggleCacheTtl = viewModel::toggleCacheTtlArm,
                 queuedPausedCount = uiState.pausedQueueCount,
                 isEditingQueued = uiState.isEditingQueued,
                 onCommitEdit = viewModel::commitQueuedEdit,
@@ -331,6 +329,17 @@ actual fun ChatScreen(
                     .align(Alignment.TopCenter)
                     .onSizeChanged { topBarHeightPx = it.height },
             )
+
+            if (uiState.cacheTtlEnabled) {
+                CacheTtlRail(
+                    anchor = uiState.cacheTtlAnchor,
+                    armed = uiState.armedCacheTtl,
+                    onClick = viewModel::toggleCacheTtlArm,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = 14.dp, y = statusBarTop + 64.dp),
+                )
+            }
         }
     }
 

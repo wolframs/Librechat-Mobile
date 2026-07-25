@@ -69,6 +69,7 @@ import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
 import com.garfiec.librechat.feature.chat.components.ChatFloatingTopBar
 import com.garfiec.librechat.feature.chat.components.ChatInput
+import com.garfiec.librechat.feature.chat.components.CacheTtlRail
 import com.garfiec.librechat.feature.chat.components.ChatRoot
 import com.garfiec.librechat.feature.chat.components.ChatOptionsPage
 import com.garfiec.librechat.feature.chat.components.ChatToolsSheetContent
@@ -488,10 +489,6 @@ actual fun ChatScreen(
                 tokenUsage = uiState.tokenUsage,
                 contextUsageEnabled = uiState.contextUsageEnabled,
                 contextBarPlacement = uiState.contextBarPlacement,
-                cacheTtlEnabled = uiState.cacheTtlEnabled,
-                cacheTtlAnchor = uiState.cacheTtlAnchor,
-                armedCacheTtl = uiState.armedCacheTtl,
-                onToggleCacheTtl = viewModel::toggleCacheTtlArm,
                 // After a Stop/error pause, the queue waits for an explicit nudge.
                 queuedPausedCount = uiState.pausedQueueCount,
                 onSendQueuedMessages = viewModel::sendQueuedNow,
@@ -525,6 +522,17 @@ actual fun ChatScreen(
                     .align(Alignment.TopCenter)
                     .onSizeChanged { topBarHeightPx = it.height },
             )
+
+            if (uiState.cacheTtlEnabled) {
+                CacheTtlRail(
+                    anchor = uiState.cacheTtlAnchor,
+                    armed = uiState.armedCacheTtl,
+                    onClick = viewModel::toggleCacheTtlArm,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = 14.dp, y = statusBarTop + 64.dp),
+                )
+            }
 
             // Pull-up sheet overlay (drawn last so scrim + sheet sit above the composer and top bar).
             // `pullUpVisible` is derived so the scrim/back-handler recompose only on the open<->closed

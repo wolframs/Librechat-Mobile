@@ -47,8 +47,6 @@ import com.garfiec.librechat.core.model.usage.TokenUsage
 import com.garfiec.librechat.feature.chat.model.McpServerDisplayData
 import com.garfiec.librechat.feature.chat.model.PromptMentionDisplayData
 import com.garfiec.librechat.feature.chat.viewmodel.ChatInputGates
-import com.garfiec.librechat.feature.chat.viewmodel.CacheTtl
-import com.garfiec.librechat.feature.chat.viewmodel.CacheTtlAnchor
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
@@ -103,10 +101,6 @@ fun ChatInput(
     tokenUsage: TokenUsage? = null,
     contextUsageEnabled: Boolean = false,
     contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,
-    cacheTtlEnabled: Boolean = false,
-    cacheTtlAnchor: CacheTtlAnchor? = null,
-    armedCacheTtl: CacheTtl? = null,
-    onToggleCacheTtl: () -> Unit = {},
 ) {
     val cdOpenToolsMenu = stringResource(Res.string.cd_open_tools_menu)
     val cdPasteImage = stringResource(Res.string.cd_paste_image)
@@ -177,9 +171,6 @@ fun ChatInput(
         tokenUsage = tokenUsage,
         contextUsageEnabled = contextUsageEnabled,
         contextBarPlacement = contextBarPlacement,
-        cacheTtlEnabled = cacheTtlEnabled,
-        cacheTtlAnchor = cacheTtlAnchor,
-        armedCacheTtl = armedCacheTtl,
     )
 
     CommonChatInputCore(
@@ -193,7 +184,6 @@ fun ChatInput(
         onCommitEdit = onCommitEdit,
         onCancelEdit = onCancelEdit,
         onCancelPendingSend = onCancelPendingSend,
-        onToggleCacheTtl = onToggleCacheTtl,
         queuedMessages = queuedMessages,
         onEditQueuedMessage = onEditQueuedMessage,
         onCancelQueuedMessage = onCancelQueuedMessage,
