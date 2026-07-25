@@ -169,6 +169,10 @@
     <string name="font_size_small">小</string>
     <string name="font_size_medium">中</string>
     <string name="font_size_large">大</string>
+    <string name="paragraph_spacing">段落間隔</string>
+    <string name="paragraph_spacing_compact">コンパクト</string>
+    <string name="paragraph_spacing_comfortable">快適</string>
+    <string name="paragraph_spacing_spacious">広め</string>
     <string name="latex_renderer">LaTeXレンダラー</string>
     <string name="latex_katex">KaTeX（レンダリング）</string>
     <string name="latex_katex_desc">WebView経由で完全なLaTeXをレンダリング</string>

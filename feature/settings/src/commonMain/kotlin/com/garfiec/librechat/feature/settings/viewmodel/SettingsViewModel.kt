@@ -7,6 +7,7 @@ import com.garfiec.librechat.core.data.datastore.ArtifactDisplayMode
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
@@ -213,6 +214,10 @@ class SettingsViewModel(
 
     fun setChatFontSize(size: ChatFontSize) {
         prefsController.setChatFontSize(size)
+    }
+
+    fun setChatParagraphSpacing(spacing: ChatParagraphSpacing) {
+        prefsController.setChatParagraphSpacing(spacing)
     }
 
     fun setStarredModelsDisplay(display: StarredModelsDisplay) {

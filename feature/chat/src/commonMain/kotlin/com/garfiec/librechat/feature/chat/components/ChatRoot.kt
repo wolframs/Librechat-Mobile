@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.ui.media.MediaActionBar
 import com.garfiec.librechat.core.ui.media.MediaPreviewState
@@ -33,6 +34,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun ChatRoot(
     inlineArtifactPrefs: InlineArtifactPrefs,
+    paragraphSpacing: ChatParagraphSpacing,
     mermaidRenderCache: MermaidRenderCache,
     parsedMarkdownCache: ParsedMarkdownCache,
     subagentProgress: Map<String, SubagentTrace>,
@@ -50,6 +52,7 @@ fun ChatRoot(
 
     CompositionLocalProvider(
         LocalInlineArtifactPrefs provides inlineArtifactPrefs,
+        LocalChatParagraphSpacing provides paragraphSpacing,
         LocalMermaidRenderCache provides mermaidRenderCache,
         LocalParsedMarkdownCache provides parsedMarkdownCache,
         LocalSubagentProgress provides subagentProgress,

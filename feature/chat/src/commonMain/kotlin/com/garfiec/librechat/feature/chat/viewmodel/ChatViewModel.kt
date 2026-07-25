@@ -299,6 +299,13 @@ class ChatViewModel(
     // stale state). The persisted value only seeds the session until the first tap.
     private val contextGaugeExpandedOverride = MutableStateFlow<Boolean?>(null)
 
+    private val chatTypographyPrefs: Flow<ChatTypographyPrefs> = combine(
+        settingsDataStore.chatFontSize,
+        settingsDataStore.chatParagraphSpacing,
+    ) { fontSize, paragraphSpacing ->
+        ChatTypographyPrefs(fontSize, paragraphSpacing)
+    }
+
     // Bundled into one source so the uiState combine below stays within Kotlin's
     // 5-argument typed `combine` ceiling.
     private val chatDisplayPrefs: Flow<ChatDisplayPrefs> = combine(
@@ -319,14 +326,15 @@ class ChatViewModel(
     val uiState: StateFlow<ChatUiState> = combine(
         _uiState,
         serverDataStore.currentUrlFlow,
-        settingsDataStore.chatFontSize,
+        chatTypographyPrefs,
         settingsDataStore.starredModelsDisplay,
         chatDisplayPrefs,
-    ) { state, url, fontSize, starredDisplay, displayPrefs ->
+    ) { state, url, typographyPrefs, starredDisplay, displayPrefs ->
         state.copy(
             prefs = ChatPrefsState(
                 serverUrl = url,
-                chatFontSize = fontSize,
+                chatFontSize = typographyPrefs.fontSize,
+                chatParagraphSpacing = typographyPrefs.paragraphSpacing,
                 starredModelsDisplay = starredDisplay,
                 chatHeaderContent = displayPrefs.content,
                 chatHeaderAlignment = displayPrefs.alignment,

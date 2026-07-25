@@ -5,6 +5,7 @@ import com.garfiec.librechat.core.common.ChatLayoutConstants
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
@@ -19,6 +20,7 @@ import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
 data class ChatPrefsState(
     val serverUrl: String = "",
     val chatFontSize: ChatFontSize = ChatFontSize.MEDIUM,
+    val chatParagraphSpacing: ChatParagraphSpacing = ChatParagraphSpacing.COMFORTABLE,
     /**
      * Mobile-only preference for how pinned models/agents are surfaced in [ModelSelectorSheet]:
      * off (float within group), grouped (collapsible top section), or top (flat top list).
@@ -34,6 +36,13 @@ data class ChatPrefsState(
     val contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,
     /** Whether the options-sheet context gauge's inline breakdown is expanded. */
     val contextGaugeExpanded: Boolean = false,
+)
+
+/** Chat typography preferences bundled to keep [ChatViewModel]'s typed combine at five sources. */
+@Immutable
+data class ChatTypographyPrefs(
+    val fontSize: ChatFontSize = ChatFontSize.MEDIUM,
+    val paragraphSpacing: ChatParagraphSpacing = ChatParagraphSpacing.COMFORTABLE,
 )
 
 /**

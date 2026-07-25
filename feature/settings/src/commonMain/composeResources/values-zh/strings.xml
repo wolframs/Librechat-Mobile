@@ -169,6 +169,10 @@
     <string name="font_size_small">小</string>
     <string name="font_size_medium">中</string>
     <string name="font_size_large">大</string>
+    <string name="paragraph_spacing">段落间距</string>
+    <string name="paragraph_spacing_compact">紧凑</string>
+    <string name="paragraph_spacing_comfortable">舒适</string>
+    <string name="paragraph_spacing_spacious">宽松</string>
     <string name="latex_renderer">LaTeX 渲染器</string>
     <string name="latex_katex">KaTeX（渲染）</string>
     <string name="latex_katex_desc">通过 WebView 完整渲染 LaTeX</string>

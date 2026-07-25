@@ -44,6 +44,7 @@ import com.garfiec.librechat.core.common.ChatLayoutConstants
 import com.garfiec.librechat.core.common.speech.sttLanguageOptions
 import com.garfiec.librechat.core.data.datastore.ArtifactDisplayMode
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
@@ -115,6 +116,7 @@ fun ChatSettingsContent(
             item(key = "chat_settings") {
                 ChatSettingsSection(
                     fontSize = uiState.chatFontSize,
+                    paragraphSpacing = uiState.chatParagraphSpacing,
                     autoScrollEnabled = uiState.autoScrollEnabled,
                     showThinkingBlocks = uiState.showThinkingBlocks,
                     contextBarPlacement = uiState.contextBarPlacement,
@@ -243,6 +245,17 @@ fun ChatSettingsContent(
                 onSave = saveAndClose(viewModel::setChatFontSize),
                 onDismiss = dismissDialog,
                 optionLabel = { fontSizeLabel(it) },
+            )
+        }
+
+        if (openDialog == ChatSettingDialog.PARAGRAPH_SPACING) {
+            RadioSelectionDialog(
+                title = stringResource(Res.string.paragraph_spacing),
+                options = ChatParagraphSpacing.entries,
+                selected = uiState.chatParagraphSpacing,
+                onSave = saveAndClose(viewModel::setChatParagraphSpacing),
+                onDismiss = dismissDialog,
+                optionLabel = { paragraphSpacingLabel(it) },
             )
         }
 

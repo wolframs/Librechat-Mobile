@@ -136,6 +136,7 @@ class DataStoreRoundTripTest {
         assertThat(store.autoReadEnabled.first()).isFalse()
         assertThat(store.dismissKeyboardOnSend.first()).isTrue()
         assertThat(store.chatFontSize.first()).isEqualTo(ChatFontSize.MEDIUM)
+        assertThat(store.chatParagraphSpacing.first()).isEqualTo(ChatParagraphSpacing.COMFORTABLE)
         assertThat(store.latexRenderer.first()).isEqualTo(LatexRenderer.KATEX)
         assertThat(store.showAvatars.first()).isTrue()
         assertThat(store.showBubbles.first()).isFalse()
@@ -179,6 +180,12 @@ class DataStoreRoundTripTest {
 
         store.setChatFontSize(ChatFontSize.SMALL)
         assertThat(store.chatFontSize.first()).isEqualTo(ChatFontSize.SMALL)
+
+        store.setChatParagraphSpacing(ChatParagraphSpacing.COMPACT)
+        assertThat(store.chatParagraphSpacing.first()).isEqualTo(ChatParagraphSpacing.COMPACT)
+
+        store.setChatParagraphSpacing(ChatParagraphSpacing.SPACIOUS)
+        assertThat(store.chatParagraphSpacing.first()).isEqualTo(ChatParagraphSpacing.SPACIOUS)
     }
 
     @Test

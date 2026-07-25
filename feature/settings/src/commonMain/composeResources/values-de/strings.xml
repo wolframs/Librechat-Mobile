@@ -169,6 +169,10 @@
     <string name="font_size_small">Klein</string>
     <string name="font_size_medium">Mittel</string>
     <string name="font_size_large">Groß</string>
+    <string name="paragraph_spacing">Absatzabstand</string>
+    <string name="paragraph_spacing_compact">Kompakt</string>
+    <string name="paragraph_spacing_comfortable">Komfortabel</string>
+    <string name="paragraph_spacing_spacious">Großzügig</string>
     <string name="latex_renderer">LaTeX-Renderer</string>
     <string name="latex_katex">KaTeX (gerendert)</string>
     <string name="latex_katex_desc">Vollständiges LaTeX-Rendering über WebView</string>

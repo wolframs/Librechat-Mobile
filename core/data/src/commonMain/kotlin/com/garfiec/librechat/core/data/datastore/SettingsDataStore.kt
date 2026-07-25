@@ -85,6 +85,10 @@ class SettingsDataStore(
         ChatFontSize.fromString(prefs[KEY_CHAT_FONT_SIZE])
     }
 
+    val chatParagraphSpacing: Flow<ChatParagraphSpacing> = dataStore.data.map { prefs ->
+        ChatParagraphSpacing.fromString(prefs[KEY_CHAT_PARAGRAPH_SPACING])
+    }
+
     val starredModelsDisplay: Flow<StarredModelsDisplay> = dataStore.data.map { prefs ->
         StarredModelsDisplay.fromString(prefs[KEY_STARRED_MODELS_DISPLAY])
     }
@@ -310,6 +314,12 @@ class SettingsDataStore(
     suspend fun setChatFontSize(size: ChatFontSize) {
         dataStore.edit { prefs ->
             prefs[KEY_CHAT_FONT_SIZE] = size.toStorageString()
+        }
+    }
+
+    suspend fun setChatParagraphSpacing(spacing: ChatParagraphSpacing) {
+        dataStore.edit { prefs ->
+            prefs[KEY_CHAT_PARAGRAPH_SPACING] = spacing.toStorageString()
         }
     }
 
@@ -659,6 +669,7 @@ class SettingsDataStore(
         private val KEY_SELECTED_LANGUAGE = stringPreferencesKey("selected_language")
         private val KEY_LATEX_RENDERER = stringPreferencesKey("latex_renderer")
         private val KEY_CHAT_FONT_SIZE = stringPreferencesKey("chat_font_size")
+        private val KEY_CHAT_PARAGRAPH_SPACING = stringPreferencesKey("chat_paragraph_spacing")
         private val KEY_STARRED_MODELS_DISPLAY = stringPreferencesKey("starred_models_display")
         private val KEY_CHAT_HEADER_CONTENT = stringPreferencesKey("chat_header_content")
         private val KEY_CHAT_HEADER_ALIGNMENT = stringPreferencesKey("chat_header_alignment")

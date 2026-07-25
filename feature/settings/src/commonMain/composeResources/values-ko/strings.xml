@@ -169,6 +169,10 @@
     <string name="font_size_small">작게</string>
     <string name="font_size_medium">보통</string>
     <string name="font_size_large">크게</string>
+    <string name="paragraph_spacing">문단 간격</string>
+    <string name="paragraph_spacing_compact">좁게</string>
+    <string name="paragraph_spacing_comfortable">편안하게</string>
+    <string name="paragraph_spacing_spacious">넓게</string>
     <string name="latex_renderer">LaTeX 렌더러</string>
     <string name="latex_katex">KaTeX (렌더링)</string>
     <string name="latex_katex_desc">WebView를 통한 완전한 LaTeX 렌더링</string>

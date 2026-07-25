@@ -4,6 +4,7 @@ import com.garfiec.librechat.core.common.AppInfo
 import com.garfiec.librechat.core.common.ChatLayoutConstants
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
@@ -91,6 +92,7 @@ class SettingsViewModelTest {
         every { themeDataStore.themeMode } returns MutableStateFlow(ThemeMode.SYSTEM)
         every { serverDataStore.currentUrlFlow } returns MutableStateFlow("https://chat.example.com")
         every { settingsDataStore.chatFontSize } returns MutableStateFlow(ChatFontSize.MEDIUM)
+        every { settingsDataStore.chatParagraphSpacing } returns MutableStateFlow(ChatParagraphSpacing.COMFORTABLE)
         every { settingsDataStore.autoScrollEnabled } returns MutableStateFlow(true)
         every { settingsDataStore.showThinkingBlocks } returns MutableStateFlow(true)
         every { settingsDataStore.autoReadEnabled } returns MutableStateFlow(false)

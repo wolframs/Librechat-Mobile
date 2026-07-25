@@ -5,10 +5,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.MarkdownColors
 import com.mikepenz.markdown.model.MarkdownTypography
 import com.mikepenz.markdown.model.State
+import com.mikepenz.markdown.model.markdownPadding
 import com.mikepenz.markdown.model.rememberMarkdownState
 
 /**
@@ -40,8 +42,8 @@ import com.mikepenz.markdown.model.rememberMarkdownState
  * of partial-content entries into the shared LRU and evict other messages'
  * settled ASTs. The terminal content is cached once the reply renders as settled.
  *
- * Padding/dimens/etc are left at library defaults — callers that need to
- * customize those should fall back to invoking [Markdown] directly.
+ * Parsed state is independent of presentation, so the chat-wide paragraph spacing
+ * can recompose all three rendering paths without invalidating the AST cache.
  *
  * [immediate] parses the *initial* content synchronously (no Loading frame on
  * first paint) — used for fully-settled artifact content. It only affects the
@@ -59,6 +61,9 @@ fun CachedMarkdown(
 ) {
     val cache = LocalParsedMarkdownCache.current
     val key = parsedMarkdownCacheKey(content)
+    val padding = markdownPadding(
+        block = LocalChatParagraphSpacing.current.blockSpacingDp.dp,
+    )
     // The last message opts into synchronous first-parse; see [LocalImmediateMarkdown].
     val immediate = immediate || LocalImmediateMarkdown.current
 
@@ -73,6 +78,7 @@ fun CachedMarkdown(
                 colors = colors,
                 typography = typography,
                 modifier = modifier,
+                padding = padding,
             )
             return
         }
@@ -114,5 +120,6 @@ fun CachedMarkdown(
         colors = colors,
         typography = typography,
         modifier = modifier,
+        padding = padding,
     )
 }

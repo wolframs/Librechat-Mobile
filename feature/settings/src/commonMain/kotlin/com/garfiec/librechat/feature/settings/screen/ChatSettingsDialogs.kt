@@ -33,6 +33,7 @@ import com.garfiec.librechat.core.data.datastore.ArtifactDisplayMode
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
@@ -44,6 +45,7 @@ import org.jetbrains.compose.resources.stringResource
 internal enum class ChatSettingDialog {
     CHAT_LAYOUT,
     FONT_SIZE,
+    PARAGRAPH_SPACING,
     LATEX_RENDERER,
     CONTEXT_BAR,
     STARRED_MODELS,
@@ -66,6 +68,13 @@ internal fun fontSizeLabel(size: ChatFontSize): String = when (size) {
     ChatFontSize.SMALL -> stringResource(Res.string.font_size_small)
     ChatFontSize.MEDIUM -> stringResource(Res.string.font_size_medium)
     ChatFontSize.LARGE -> stringResource(Res.string.font_size_large)
+}
+
+@Composable
+internal fun paragraphSpacingLabel(spacing: ChatParagraphSpacing): String = when (spacing) {
+    ChatParagraphSpacing.COMPACT -> stringResource(Res.string.paragraph_spacing_compact)
+    ChatParagraphSpacing.COMFORTABLE -> stringResource(Res.string.paragraph_spacing_comfortable)
+    ChatParagraphSpacing.SPACIOUS -> stringResource(Res.string.paragraph_spacing_spacious)
 }
 
 @Composable

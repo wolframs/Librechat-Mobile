@@ -169,6 +169,10 @@
     <string name="font_size_small">Мелкий</string>
     <string name="font_size_medium">Средний</string>
     <string name="font_size_large">Крупный</string>
+    <string name="paragraph_spacing">Интервал между абзацами</string>
+    <string name="paragraph_spacing_compact">Компактный</string>
+    <string name="paragraph_spacing_comfortable">Комфортный</string>
+    <string name="paragraph_spacing_spacious">Просторный</string>
     <string name="latex_renderer">Отрисовщик LaTeX</string>
     <string name="latex_katex">KaTeX (с отрисовкой)</string>
     <string name="latex_katex_desc">Полная отрисовка LaTeX через WebView</string>

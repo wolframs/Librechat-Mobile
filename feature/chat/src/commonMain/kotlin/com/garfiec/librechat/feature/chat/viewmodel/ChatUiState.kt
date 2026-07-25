@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import com.garfiec.librechat.core.common.EndpointConstants
 import com.garfiec.librechat.core.common.ToolConstants
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
@@ -100,6 +101,7 @@ data class ChatUiState(
     val fileUploadConfig: FileUploadConfig? get() = account.fileUploadConfig
     val serverUrl: String get() = prefs.serverUrl
     val chatFontSize: ChatFontSize get() = prefs.chatFontSize
+    val chatParagraphSpacing: ChatParagraphSpacing get() = prefs.chatParagraphSpacing
     val starredModelsDisplay: StarredModelsDisplay get() = prefs.starredModelsDisplay
     val chatHeaderContent: ChatHeaderContent get() = prefs.chatHeaderContent
     val chatHeaderAlignment: ChatHeaderAlignment get() = prefs.chatHeaderAlignment

@@ -6,6 +6,7 @@ import com.garfiec.librechat.core.data.datastore.ArtifactDisplayPrefs
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
@@ -27,6 +28,7 @@ private data class DataStorePreferences(
     val themeMode: ThemeMode,
     val serverUrl: String,
     val chatFontSize: ChatFontSize,
+    val chatParagraphSpacing: ChatParagraphSpacing = ChatParagraphSpacing.COMFORTABLE,
     val autoScrollEnabled: Boolean,
     val showThinkingBlocks: Boolean,
     val accentColor: Int = ThemeDataStore.DEFAULT_ACCENT_COLOR,
@@ -106,10 +108,13 @@ class SettingsPreferencesController(
         prefs.copy(accentColor = accent)
     }.combine(themeDataStore.useDynamicColor) { prefs, dynamic ->
         prefs.copy(useDynamicColor = dynamic)
+    }.combine(settingsDataStore.chatParagraphSpacing) { prefs, paragraphSpacing ->
+        prefs.copy(chatParagraphSpacing = paragraphSpacing)
     }.stateIn(scope, SharingStarted.Eagerly, DataStorePreferences(
         themeMode = ThemeMode.SYSTEM,
         serverUrl = "",
         chatFontSize = ChatFontSize.MEDIUM,
+        chatParagraphSpacing = ChatParagraphSpacing.COMFORTABLE,
         autoScrollEnabled = true,
         showThinkingBlocks = true,
     ))
@@ -230,6 +235,7 @@ class SettingsPreferencesController(
             dynamicColorSupported = supportsDynamicColor(),
             serverUrl = prefs.serverUrl,
             chatFontSize = prefs.chatFontSize,
+            chatParagraphSpacing = prefs.chatParagraphSpacing,
             autoScrollEnabled = prefs.autoScrollEnabled,
             showThinkingBlocks = prefs.showThinkingBlocks,
             autoReadEnabled = extra.autoRead,
@@ -279,6 +285,10 @@ class SettingsPreferencesController(
 
     fun setChatFontSize(size: ChatFontSize) {
         scope.launch { settingsDataStore.setChatFontSize(size) }
+    }
+
+    fun setChatParagraphSpacing(spacing: ChatParagraphSpacing) {
+        scope.launch { settingsDataStore.setChatParagraphSpacing(spacing) }
     }
 
     fun setStarredModelsDisplay(display: StarredModelsDisplay) {

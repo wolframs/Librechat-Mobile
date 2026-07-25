@@ -169,6 +169,10 @@
     <string name="font_size_small">صغير</string>
     <string name="font_size_medium">متوسط</string>
     <string name="font_size_large">كبير</string>
+    <string name="paragraph_spacing">تباعد الفقرات</string>
+    <string name="paragraph_spacing_compact">مضغوط</string>
+    <string name="paragraph_spacing_comfortable">مريح</string>
+    <string name="paragraph_spacing_spacious">واسع</string>
     <string name="latex_renderer">عارض LaTeX</string>
     <string name="latex_katex">KaTeX (معروض)</string>
     <string name="latex_katex_desc">عرض LaTeX كامل عبر WebView</string>

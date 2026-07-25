@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
@@ -35,6 +36,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 internal fun ChatSettingsSection(
     fontSize: ChatFontSize,
+    paragraphSpacing: ChatParagraphSpacing,
     autoScrollEnabled: Boolean,
     showThinkingBlocks: Boolean,
     contextBarPlacement: ContextBarPlacement,
@@ -90,6 +92,12 @@ internal fun ChatSettingsSection(
                     title = stringResource(Res.string.font_size),
                     value = fontSizeLabel(fontSize),
                     onClick = { onOpenDialog(ChatSettingDialog.FONT_SIZE) },
+                )
+
+                SelectorRow(
+                    title = stringResource(Res.string.paragraph_spacing),
+                    value = paragraphSpacingLabel(paragraphSpacing),
+                    onClick = { onOpenDialog(ChatSettingDialog.PARAGRAPH_SPACING) },
                 )
 
                 SelectorRow(

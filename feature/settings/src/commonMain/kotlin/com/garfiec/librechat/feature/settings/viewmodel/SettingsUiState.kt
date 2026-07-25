@@ -6,6 +6,7 @@ import com.garfiec.librechat.core.data.datastore.ArtifactDisplayPrefs
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
@@ -100,6 +101,7 @@ data class SettingsUiState(
     val isAdmin: Boolean = false,
     // Chat preferences
     val chatFontSize: ChatFontSize = ChatFontSize.MEDIUM,
+    val chatParagraphSpacing: ChatParagraphSpacing = ChatParagraphSpacing.COMFORTABLE,
     val autoScrollEnabled: Boolean = true,
     val showThinkingBlocks: Boolean = true,
     val contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,

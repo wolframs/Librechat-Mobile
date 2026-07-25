@@ -203,6 +203,7 @@ actual fun ChatScreen(
 
     ChatRoot(
         inlineArtifactPrefs = prefs.inlineArtifactPrefs,
+        paragraphSpacing = uiState.chatParagraphSpacing,
         mermaidRenderCache = viewModel.mermaidRenderCache,
         parsedMarkdownCache = viewModel.parsedMarkdownCache,
         subagentProgress = uiState.subagentProgress,

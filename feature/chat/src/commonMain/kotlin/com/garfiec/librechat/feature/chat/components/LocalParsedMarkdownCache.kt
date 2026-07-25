@@ -2,6 +2,7 @@ package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 
 val LocalParsedMarkdownCache = staticCompositionLocalOf<ParsedMarkdownCache> {
     error("LocalParsedMarkdownCache not provided; wrap chat content in ChatRoot { }")
@@ -16,3 +17,6 @@ val LocalParsedMarkdownCache = staticCompositionLocalOf<ParsedMarkdownCache> {
  * Defaults to false so off-screen / historical messages keep the cheap async path.
  */
 val LocalImmediateMarkdown = compositionLocalOf { false }
+
+/** Chat-wide vertical rhythm used by every native Markdown surface. */
+val LocalChatParagraphSpacing = compositionLocalOf { ChatParagraphSpacing.COMFORTABLE }
