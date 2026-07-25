@@ -54,6 +54,8 @@ data class ChatRequest(
     val files: List<FileReference>? = null,
     val addedConvo: AddedConversation? = null,
     val ephemeralAgent: EphemeralAgent? = null,
+    /** One-shot Anthropic prompt-cache lifetime for this fresh message. */
+    val cacheTTL: String? = null,
     /** When true, the server marks this conversation temporary (v0.8.6): skips
      *  title generation, keeps it out of normal history, and sets an `expiredAt`
      *  from the interface `temporaryChatRetention`. Sent on the chat request. */

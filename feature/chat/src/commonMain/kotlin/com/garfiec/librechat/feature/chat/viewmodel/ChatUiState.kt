@@ -85,6 +85,7 @@ data class ChatUiState(
     val selectedMcpServerNames: Set<String> get() = selection.selectedMcpServerNames
     val extendedEffortSupported: Boolean get() = selection.extendedEffortSupported
     val inputText: String get() = composer.inputText
+    val armedCacheTtl: CacheTtl? get() = composer.armedCacheTtl
     val sendBlockReason: SendBlockReason? get() = composer.sendBlockReason
     val editingQueuedItem: QueuedEditSession? get() = composer.editingQueuedItem
     val isAwaitingUploadSend: Boolean get() = composer.isAwaitingUploadSend
@@ -138,6 +139,14 @@ data class ChatUiState(
     val isTemporaryChat: Boolean get() = conversation.isTemporaryChat
     val sharedLinksEnabled: Boolean get() = conversation.sharedLinksEnabled
     val pendingNavigationConversationId: String? get() = conversation.pendingNavigationConversationId
+
+    /** The countdown is intentionally direct-Anthropic only, matching the web feature. */
+    val cacheTtlEnabled: Boolean
+        get() = selectedEndpoint == EndpointConstants.ANTHROPIC &&
+            modelParameters.dynamicValues["promptCache"]?.toBooleanStrictOrNull() != false
+
+    val cacheTtlAnchor: CacheTtlAnchor?
+        get() = newestCacheTtlAnchor(messages)
 
     /**
      * Whether the chat attach controls (Camera / Photos / Files) should be offered for

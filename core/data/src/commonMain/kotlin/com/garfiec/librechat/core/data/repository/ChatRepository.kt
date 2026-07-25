@@ -31,6 +31,7 @@ interface ChatRepository {
         addedConvo: AddedConversation? = null,
         ephemeralAgent: EphemeralAgent? = null,
         isTemporary: Boolean = false,
+        cacheTtl: String? = null,
         modelParams: JsonObject? = null,
     ): Flow<StreamEvent>
 

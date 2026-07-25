@@ -33,7 +33,7 @@ import com.garfiec.librechat.core.data.db.entity.PresetEntity
         DraftEntity::class,
         ArtifactShortcutEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -47,6 +47,8 @@ import com.garfiec.librechat.core.data.db.entity.PresetEntity
         AutoMigration(from = 5, to = 6),
         // 6 -> 7 adds the device-scoped artifact_shortcuts table (home-screen artifact snapshots).
         AutoMigration(from = 6, to = 7),
+        // 7 -> 8 persists the nullable Anthropic cacheTTL marker on messages.
+        AutoMigration(from = 7, to = 8),
     ],
 )
 @TypeConverters(Converters::class)

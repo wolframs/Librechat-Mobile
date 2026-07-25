@@ -34,6 +34,7 @@ fun Message.toEntity(): MessageEntity = MessageEntity(
     files = files?.let { json.encodeToString(ListSerializer(FileReference.serializer()), it) },
     attachments = attachments?.let { json.encodeToString(ListSerializer(Attachment.serializer()), it) },
     metadata = metadata?.toString(),
+    cacheTTL = cacheTTL,
     quotes = quotes?.let { json.encodeToString(ListSerializer(String.serializer()), it) },
     createdAt = parseTimestamp(createdAt),
     updatedAt = parseTimestamp(updatedAt),
@@ -68,6 +69,7 @@ fun MessageEntity.toModel(): Message = Message(
     metadata = metadata?.let {
         try { json.decodeFromString<JsonObject>(it) } catch (_: Exception) { null }
     },
+    cacheTTL = cacheTTL,
     quotes = quotes?.let {
         try { json.decodeFromString<List<String>>(it) } catch (_: Exception) { null }
     },

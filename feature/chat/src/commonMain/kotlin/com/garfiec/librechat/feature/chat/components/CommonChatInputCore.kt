@@ -42,13 +42,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
@@ -64,12 +72,23 @@ import com.garfiec.librechat.feature.chat.resources.cd_start_voice_recording
 import com.garfiec.librechat.feature.chat.resources.cd_stop_generation
 import com.garfiec.librechat.feature.chat.resources.cd_update_queued_message
 import com.garfiec.librechat.feature.chat.resources.editing_queued_message
+import com.garfiec.librechat.feature.chat.resources.cache_ttl_armed_1h
+import com.garfiec.librechat.feature.chat.resources.cache_ttl_armed_5m
+import com.garfiec.librechat.feature.chat.resources.cache_ttl_expired
+import com.garfiec.librechat.feature.chat.resources.cache_ttl_idle
+import com.garfiec.librechat.feature.chat.resources.cache_ttl_semantics
 import com.garfiec.librechat.feature.chat.resources.hint_message
 import com.garfiec.librechat.feature.chat.resources.hint_message_model
 import com.garfiec.librechat.feature.chat.resources.recording
 import com.garfiec.librechat.feature.chat.viewmodel.ChatInputGates
+import com.garfiec.librechat.feature.chat.viewmodel.CacheTtl
+import com.garfiec.librechat.feature.chat.viewmodel.CacheTtlAnchor
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
+import com.garfiec.librechat.feature.chat.viewmodel.cacheTtlRemainingMillis
+import com.garfiec.librechat.feature.chat.viewmodel.formatCacheTtlRemaining
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
+import kotlin.time.Clock
 
 @Immutable
 data class ChatInputState(
@@ -106,6 +125,9 @@ data class ChatInputState(
     /** User preference (Settings → Chat) for where the context gauge is surfaced. The composer
      *  only renders it when this is [ContextBarPlacement.ABOVE_INPUT]. */
     val contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,
+    val cacheTtlEnabled: Boolean = false,
+    val cacheTtlAnchor: CacheTtlAnchor? = null,
+    val armedCacheTtl: CacheTtl? = null,
 )
 
 /**
@@ -136,6 +158,8 @@ fun CommonChatInputCore(
     onCancelEdit: () -> Unit = {},
     /** Cancel a send parked behind an in-flight upload (see [ChatInputState.isAwaitingUploadSend]). */
     onCancelPendingSend: () -> Unit = {},
+    /** Cycle the one-shot Anthropic TTL arm: 1h → 5m → off. */
+    onToggleCacheTtl: () -> Unit = {},
     /** Queued follow-ups (ghost rows), pinned just above the composer. Hosted here — rather than
      *  in the scrolling message list — so the list's auto-scroll-to-bottom can't make the ghosts
      *  bounce as the reply streams. Empty list renders nothing. */
@@ -213,6 +237,17 @@ fun CommonChatInputCore(
                 )
             }
 
+            if (state.cacheTtlEnabled) {
+                CacheTtlPill(
+                    anchor = state.cacheTtlAnchor,
+                    armed = state.armedCacheTtl,
+                    onClick = onToggleCacheTtl,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(bottom = 6.dp),
+                )
+            }
+
             // Context-usage bar, between the chips and the composer row. Gated on the placement
             // preference (ABOVE_INPUT here), the server/version support flag, and a snapshot with
             // real usage. Other placements render in the "+" sheet / overflow menu instead.
@@ -259,6 +294,87 @@ fun CommonChatInputCore(
             }
         }
         bottomContent()
+    }
+}
+
+@Composable
+private fun CacheTtlPill(
+    anchor: CacheTtlAnchor?,
+    armed: CacheTtl?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fallbackAnchorTime = remember(anchor?.messageId) { Clock.System.now().toEpochMilliseconds() }
+    val anchorTime = anchor?.timestampMillis ?: fallbackAnchorTime
+    var nowMillis by remember(anchor?.messageId) {
+        mutableLongStateOf(Clock.System.now().toEpochMilliseconds())
+    }
+    LaunchedEffect(anchor?.messageId) {
+        while (true) {
+            delay(1_000)
+            nowMillis = Clock.System.now().toEpochMilliseconds()
+        }
+    }
+
+    val remaining = anchor?.let {
+        cacheTtlRemainingMillis(anchorTime, it.ttl, nowMillis)
+    }
+    val isExpired = remaining != null && remaining <= 0L
+    val label = when (armed) {
+        CacheTtl.ONE_HOUR -> stringResource(Res.string.cache_ttl_armed_1h)
+        CacheTtl.FIVE_MINUTES -> stringResource(Res.string.cache_ttl_armed_5m)
+        null -> when {
+            anchor == null -> stringResource(Res.string.cache_ttl_idle)
+            isExpired -> stringResource(Res.string.cache_ttl_expired)
+            else -> formatCacheTtlRemaining(remaining ?: 0L)
+        }
+    }
+
+    val containerColor = when (armed) {
+        CacheTtl.ONE_HOUR -> Color(0x33F59E0B)
+        CacheTtl.FIVE_MINUTES -> Color(0x332A9DF4)
+        null -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = when (armed) {
+        CacheTtl.ONE_HOUR -> Color(0xFFF59E0B)
+        CacheTtl.FIVE_MINUTES -> Color(0xFF38A8F8)
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val semanticsLabel = stringResource(Res.string.cache_ttl_semantics, label)
+
+    androidx.compose.material3.Surface(
+        onClick = onClick,
+        modifier = modifier.semantics {
+            contentDescription = semanticsLabel
+            role = Role.Button
+        },
+        shape = RoundedCornerShape(50),
+        color = containerColor,
+        contentColor = contentColor,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (armed == null && anchor != null && !isExpired) {
+                            Color(0xFF10B981)
+                        } else {
+                            contentColor
+                        },
+                    ),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+        }
     }
 }
 

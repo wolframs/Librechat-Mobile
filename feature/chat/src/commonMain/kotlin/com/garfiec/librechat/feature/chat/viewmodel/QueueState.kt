@@ -51,6 +51,8 @@ data class QueuedMessage(
     val mcpServerNames: Set<String> = emptySet(),
     /** Full composer parameters (web search, reasoning effort, etc.) — restored to the composer on edit. */
     val modelParameters: ModelParameters = ModelParameters.DEFAULT,
+    /** One-shot TTL captured when this message was queued; null means use the conversation default. */
+    val cacheTtl: CacheTtl? = null,
     /**
      * Non-default model params (provider-keyed) serialized for the wire, snapshotted at enqueue time
      * so a queued send carries the params it was composed with. Null when nothing was customized.
@@ -77,4 +79,5 @@ fun QueuedMessage.toComposerSnapshot(): ComposerSnapshot = ComposerSnapshot(
     enabledTools = enabledTools,
     mcpServerNames = mcpServerNames,
     modelParameters = modelParameters,
+    armedCacheTtl = cacheTtl,
 )

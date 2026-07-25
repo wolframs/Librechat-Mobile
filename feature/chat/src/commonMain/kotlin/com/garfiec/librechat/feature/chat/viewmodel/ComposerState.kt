@@ -12,6 +12,8 @@ import com.garfiec.librechat.feature.chat.components.AttachedFile
 @Immutable
 data class ComposerState(
     val inputText: String = "",
+    /** One-shot Anthropic prompt-cache TTL armed for the next fresh message. */
+    val armedCacheTtl: CacheTtl? = null,
     /** Set when a send was blocked for a selection/readiness reason. Resolved to a
      *  user-facing string in the Compose layer. Null means no send-block to show. */
     val sendBlockReason: SendBlockReason? = null,
@@ -55,6 +57,7 @@ data class ComposerSnapshot(
     val enabledTools: Set<String> = emptySet(),
     val mcpServerNames: Set<String> = emptySet(),
     val modelParameters: ModelParameters = ModelParameters.DEFAULT,
+    val armedCacheTtl: CacheTtl? = null,
 )
 
 /**

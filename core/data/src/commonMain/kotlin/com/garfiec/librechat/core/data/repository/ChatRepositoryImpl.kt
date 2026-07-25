@@ -47,6 +47,7 @@ class ChatRepositoryImpl(
         addedConvo: AddedConversation?,
         ephemeralAgent: EphemeralAgent?,
         isTemporary: Boolean,
+        cacheTtl: String?,
         modelParams: JsonObject?,
     ): Flow<StreamEvent> = flow {
         // Phase 1: POST to start the chat - get back a streamId (= conversationId)
@@ -71,6 +72,7 @@ class ChatRepositoryImpl(
             addedConvo = addedConvo,
             ephemeralAgent = ephemeralAgent,
             isTemporary = isTemporary,
+            cacheTtl = cacheTtl,
         )
         val startResponse = chatApi.startChat(endpoint, ChatPayloadBuilder.toBody(json, request, modelParams))
         val streamId = startResponse.conversationId

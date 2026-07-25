@@ -488,6 +488,10 @@ actual fun ChatScreen(
                 tokenUsage = uiState.tokenUsage,
                 contextUsageEnabled = uiState.contextUsageEnabled,
                 contextBarPlacement = uiState.contextBarPlacement,
+                cacheTtlEnabled = uiState.cacheTtlEnabled,
+                cacheTtlAnchor = uiState.cacheTtlAnchor,
+                armedCacheTtl = uiState.armedCacheTtl,
+                onToggleCacheTtl = viewModel::toggleCacheTtlArm,
                 // After a Stop/error pause, the queue waits for an explicit nudge.
                 queuedPausedCount = uiState.pausedQueueCount,
                 onSendQueuedMessages = viewModel::sendQueuedNow,

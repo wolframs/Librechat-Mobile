@@ -33,6 +33,9 @@ data class Message(
     val createdAt: String? = null,
     val updatedAt: String? = null,
     val title: String? = null,
+    /** Anthropic prompt-cache TTL actually used for this assistant turn (`5m` or `1h`).
+     *  Persisted by customized LibreChat backends and used by the live cache countdown. */
+    val cacheTTL: String? = null,
     // Skills invoked on this turn (v0.8.6). UI-metadata only — round-tripped so
     // the selection survives reload; pill rendering ships with the Skills
     // feature. [manualSkills] = user-invoked via the `$` popover this turn;

@@ -2,6 +2,7 @@ package com.garfiec.librechat.core.common
 
 object EndpointConstants {
     const val AGENTS = "agents"
+    const val ANTHROPIC = "anthropic"
 }
 
 object ToolConstants {

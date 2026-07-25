@@ -780,6 +780,14 @@ class ChatViewModel(
         }
     }
 
+    /** Cycle the next-message Anthropic cache lifetime: 1h → 5m → conversation default. */
+    fun toggleCacheTtlArm() {
+        if (!_uiState.value.cacheTtlEnabled) return
+        _uiState.update {
+            it.copy(composer = it.composer.copy(armedCacheTtl = it.armedCacheTtl.nextCacheTtlArm()))
+        }
+    }
+
     private fun consumeShareIntent() {
         val shareData = shareConsumer.consume() ?: return
         Logger.d { "consumeShareIntent: text=${shareData.text != null}, files=${shareData.fileRefs.size}" }
@@ -969,6 +977,7 @@ class ChatViewModel(
             enabledTools = state.enabledTools,
             mcpServerNames = state.selectedMcpServerNames,
             modelParameters = state.modelParameters,
+            armedCacheTtl = state.armedCacheTtl,
         )
     }
 
@@ -979,7 +988,10 @@ class ChatViewModel(
         fileDelegate.restoreAttachedFiles(snapshot.attachments)
         _uiState.update {
             it.copy(
-                composer = it.composer.copy(inputText = snapshot.text),
+                composer = it.composer.copy(
+                    inputText = snapshot.text,
+                    armedCacheTtl = snapshot.armedCacheTtl,
+                ),
                 selection = it.selection.copy(
                     selectedEndpoint = snapshot.endpoint,
                     selectedModel = snapshot.model,
@@ -1024,6 +1036,7 @@ class ChatViewModel(
             enabledTools = state.enabledTools,
             mcpServerNames = state.selectedMcpServerNames,
             modelParameters = state.modelParameters,
+            cacheTtl = state.armedCacheTtl.takeIf { state.cacheTtlEnabled },
             modelParamsPayload = requestBuilder.buildModelParams(),
             ephemeralAgent = requestBuilder.buildEphemeralAgent(),
             dispatch = requestBuilder.currentDispatch(),
@@ -1057,7 +1070,9 @@ class ChatViewModel(
     /** Clears the input, its persisted draft, and any attached files. */
     private fun clearComposer() {
         val draftKey = _uiState.value.conversationId ?: NEW_CHAT_DRAFT_KEY
-        _uiState.update { it.copy(composer = it.composer.copy(inputText = "")) }
+        _uiState.update {
+            it.copy(composer = it.composer.copy(inputText = "", armedCacheTtl = null))
+        }
         viewModelScope.launch { draftRepository.deleteDraft(draftKey) }
         fileDelegate.clearAttachedFiles()
     }
@@ -1157,6 +1172,7 @@ class ChatViewModel(
             addedConvo = effectiveAddedConvo,
             ephemeralAgent = spec.ephemeralAgent,
             isTemporary = spec.isTemporary,
+            cacheTtl = spec.cacheTtl?.wireValue,
             modelParams = spec.modelParamsPayload,
         )
         streamingManager.launchStream(stream) {

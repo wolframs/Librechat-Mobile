@@ -34,6 +34,7 @@ object ChatPayloadBuilder {
         addedConvo: AddedConversation? = null,
         ephemeralAgent: EphemeralAgent? = null,
         isTemporary: Boolean = false,
+        cacheTtl: String? = null,
     ): ChatRequest {
         val resolvedParentMessageId = parentMessageId ?: NO_PARENT
 
@@ -57,6 +58,7 @@ object ChatPayloadBuilder {
             files = files?.takeIf { it.isNotEmpty() },
             addedConvo = addedConvo,
             ephemeralAgent = ephemeralAgent,
+            cacheTTL = cacheTtl,
             isTemporary = if (isTemporary) true else null,
             // v0.8.7 #13815: the user's IANA zone (e.g. "America/New_York") so the server resolves
             // agent {{current_date}}/{{current_datetime}} to the user's wall clock, not its own.

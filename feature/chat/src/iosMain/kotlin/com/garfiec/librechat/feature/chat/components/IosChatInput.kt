@@ -31,6 +31,8 @@ import com.garfiec.librechat.feature.chat.resources.Res
 import com.garfiec.librechat.feature.chat.resources.cd_attach_file
 import com.garfiec.librechat.feature.chat.resources.cd_paste_image
 import com.garfiec.librechat.feature.chat.viewmodel.ChatInputGates
+import com.garfiec.librechat.feature.chat.viewmodel.CacheTtl
+import com.garfiec.librechat.feature.chat.viewmodel.CacheTtlAnchor
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import org.jetbrains.compose.resources.stringResource
 
@@ -81,6 +83,10 @@ fun IosChatInput(
     tokenUsage: TokenUsage? = null,
     contextUsageEnabled: Boolean = false,
     contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,
+    cacheTtlEnabled: Boolean = false,
+    cacheTtlAnchor: CacheTtlAnchor? = null,
+    armedCacheTtl: CacheTtl? = null,
+    onToggleCacheTtl: () -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -104,6 +110,9 @@ fun IosChatInput(
         tokenUsage = tokenUsage,
         contextUsageEnabled = contextUsageEnabled,
         contextBarPlacement = contextBarPlacement,
+        cacheTtlEnabled = cacheTtlEnabled,
+        cacheTtlAnchor = cacheTtlAnchor,
+        armedCacheTtl = armedCacheTtl,
     )
 
     CommonChatInputCore(
@@ -117,6 +126,7 @@ fun IosChatInput(
         onCommitEdit = onCommitEdit,
         onCancelEdit = onCancelEdit,
         onCancelPendingSend = onCancelPendingSend,
+        onToggleCacheTtl = onToggleCacheTtl,
         queuedMessages = queuedMessages,
         onEditQueuedMessage = onEditQueuedMessage,
         onCancelQueuedMessage = onCancelQueuedMessage,

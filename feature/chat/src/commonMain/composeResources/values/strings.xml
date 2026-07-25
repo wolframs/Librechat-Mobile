@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="cache_ttl_idle">cache</string>
+    <string name="cache_ttl_expired">cache expired</string>
+    <string name="cache_ttl_armed_1h">1h armed</string>
+    <string name="cache_ttl_armed_5m">5m armed</string>
+    <string name="cache_ttl_semantics">Prompt cache: %1$s. Tap to cycle the next message TTL through 1 hour, 5 minutes, and off.</string>
     <!-- Common actions -->
     <string name="cancel">Cancel</string>
     <string name="save">Save</string>

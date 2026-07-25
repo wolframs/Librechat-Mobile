@@ -32,6 +32,8 @@ data class MessageEntity(
     val files: String?,
     val attachments: String?,
     val metadata: String?,
+    /** Anthropic prompt-cache TTL used for the turn (`5m` or `1h`). */
+    val cacheTTL: String? = null,
     /** JSON-encoded `List<String>` of verbatim quote excerpts (v0.8.7). Null when absent. */
     val quotes: String? = null,
     val createdAt: Long,
