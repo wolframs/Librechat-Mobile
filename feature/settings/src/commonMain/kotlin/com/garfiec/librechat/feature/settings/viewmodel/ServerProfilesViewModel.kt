@@ -5,9 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.garfiec.librechat.core.common.identity.AccountState
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
+import com.garfiec.librechat.core.common.identity.deriveServerId
 import com.garfiec.librechat.core.data.datastore.AccountEntry
 import com.garfiec.librechat.core.data.datastore.AccountRoster
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
+import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -46,6 +48,7 @@ class ServerProfilesViewModel(
     accountRoster: AccountRoster,
     activeAccountProvider: ActiveAccountProvider,
     private val accountSwitcher: AccountSwitcher,
+    private val settingsDataStore: SettingsDataStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ServerProfilesUiState())
@@ -101,6 +104,9 @@ class ServerProfilesViewModel(
                         serverDataStore.clearServerUrl()
                     }
                     serverDataStore.forgetServer(profile.url)
+                    settingsDataStore.clearServerBannerDismissals(
+                        deriveServerId(profile.url).value,
+                    )
                 }
                 _uiState.value = _uiState.value.copy(
                     pendingForget = null,

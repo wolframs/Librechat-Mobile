@@ -32,9 +32,10 @@ import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.model.Banner
 
 /**
- * Renders a vertical stack of dismissible server banners.
+ * Renders a vertical stack of server banners.
  *
- * Banners are filtered against [dismissedIds] so dismissed banners stay hidden.
+ * Ordinary banners are filtered against [dismissedIds]. A server banner marked `persistable`
+ * follows LibreChat's upstream contract: it cannot be dismissed and therefore ignores that set.
  * Supports three visual types: "info" (blue), "warning" (amber), "error" (red).
  */
 @Composable
@@ -44,10 +45,7 @@ fun BannerDisplay(
     onDismiss: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val visibleBanners = banners.filter { banner ->
-        val id = banner.bannerId ?: return@filter false
-        id !in dismissedIds
-    }
+    val visibleBanners = visibleServerBanners(banners, dismissedIds)
 
     Column(modifier = modifier.fillMaxWidth()) {
         visibleBanners.forEach { banner ->
@@ -59,7 +57,11 @@ fun BannerDisplay(
             ) {
                 BannerCard(
                     banner = banner,
-                    onDismiss = { onDismiss(bannerId) },
+                    onDismiss = if (banner.persistable == true) {
+                        null
+                    } else {
+                        { onDismiss(bannerId) }
+                    },
                 )
             }
         }
@@ -69,7 +71,7 @@ fun BannerDisplay(
 @Composable
 private fun BannerCard(
     banner: Banner,
-    onDismiss: () -> Unit,
+    onDismiss: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val bannerType = banner.type ?: "info"
@@ -112,13 +114,23 @@ private fun BannerCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = contentColor,
             )
-            IconButton(onClick = onDismiss) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Dismiss banner",
-                    tint = contentColor,
-                )
+            if (onDismiss != null) {
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Dismiss banner",
+                        tint = contentColor,
+                    )
+                }
             }
         }
     }
+}
+
+internal fun visibleServerBanners(
+    banners: List<Banner>,
+    dismissedIds: Set<String>,
+): List<Banner> = banners.filter { banner ->
+    val id = banner.bannerId ?: return@filter false
+    banner.persistable == true || id !in dismissedIds
 }

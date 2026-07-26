@@ -28,6 +28,7 @@ val authModule = module {
             serverDataStore = get(),
             configRepository = get(),
             accountSwitcher = get(),
+            settingsDataStore = get(),
             addAccount = params.getOrNull() ?: false,
         )
     }

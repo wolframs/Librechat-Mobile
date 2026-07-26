@@ -5,6 +5,7 @@ import com.garfiec.librechat.core.common.identity.InMemoryActiveAccountProvider
 import com.garfiec.librechat.core.data.datastore.AccountEntry
 import com.garfiec.librechat.core.data.datastore.AccountRoster
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
+import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
@@ -91,11 +92,13 @@ class ServerProfilesViewModelTest {
             every { it.entriesFlow() } returns entries
         }
         val switcher = mockk<AccountSwitcher>(relaxed = true)
+        val settingsDataStore = mockk<SettingsDataStore>(relaxed = true)
         val viewModel = ServerProfilesViewModel(
             serverDataStore = serverDataStore,
             accountRoster = roster,
             activeAccountProvider = activeProvider,
             accountSwitcher = switcher,
+            settingsDataStore = settingsDataStore,
         )
         advanceUntilIdle()
 
@@ -108,6 +111,7 @@ class ServerProfilesViewModelTest {
             switcher.remove("a:active")
             serverDataStore.clearServerUrl()
             serverDataStore.forgetServer("https://a.example.com")
+            settingsDataStore.clearServerBannerDismissals(any())
         }
         assertThat(viewModel.uiState.value.pendingForget).isNull()
         assertThat(viewModel.uiState.value.isBusy).isFalse()

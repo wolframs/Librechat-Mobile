@@ -2,6 +2,7 @@ package com.garfiec.librechat.feature.auth.viewmodel
 
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
+import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.model.config.StartupConfig
@@ -36,6 +37,7 @@ class ServerUrlViewModelTest {
     private val serverDataStore = mockk<ServerDataStore>(relaxed = true)
     private val configRepository = mockk<ConfigRepository>(relaxed = true)
     private val accountSwitcher = mockk<AccountSwitcher>(relaxed = true)
+    private val settingsDataStore = mockk<SettingsDataStore>(relaxed = true)
 
     private val pendingUrl = "https://b.example.com"
     private val config = StartupConfig(serverDomain = pendingUrl)
@@ -62,6 +64,7 @@ class ServerUrlViewModelTest {
         serverDataStore = serverDataStore,
         configRepository = configRepository,
         accountSwitcher = accountSwitcher,
+        settingsDataStore = settingsDataStore,
         addAccount = addAccount,
     )
 

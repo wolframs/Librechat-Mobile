@@ -58,7 +58,8 @@ class NavHostViewModel(
     private val accountSwitcher: AccountSwitcher,
 ) : ViewModel() {
 
-    private val bannerStateHolder = BannerStateHolder(bannerRepository, viewModelScope)
+    private val bannerStateHolder =
+        BannerStateHolder(bannerRepository, settingsDataStore, serverUrlProvider, viewModelScope)
     private val versionCheckStateHolder =
         VersionCheckStateHolder(configRepository, settingsDataStore, serverUrlProvider, viewModelScope)
 

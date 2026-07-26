@@ -81,7 +81,7 @@ changes materially.
 | UX-006 | P1 | Agent editor draft protection | `SCOUTED` | Not started | Not started |
 | UX-007 | P1 | Memory-safe, cancellable uploads | `SCOUTED` | Not started | Not started |
 | UX-008 | P2 | Draft attachment and queue recovery | `SCOUTED` | Not started | Not started |
-| UX-009 | P2 | Banner dismissal persistence and scope | `SCOUTED` | Not started | Not started |
+| UX-009 | P2 | Banner dismissal persistence and scope | `AUTO_VERIFIED` | Passed | Not started |
 | UX-010 | P2 | Localization completeness | `SCOUTED` | Not started | Not started |
 | UX-011 | P2 | Accessibility audit | `SCOUTED` | Not started | Not started |
 | UX-012 | P2 | Cold-start token decryption | `SCOUTED` | Not started | Not started |
@@ -534,7 +534,7 @@ states.
 
 **Priority:** P2
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -564,11 +564,23 @@ Do not apply one storage policy to all banners by accident.
 
 ### Acceptance checks
 
-- [ ] Restart behavior matches the documented policy for server announcements.
-- [ ] Version suppression on server A does not suppress server B.
-- [ ] A changed backend version can resurface the warning.
-- [ ] Server removal clears or safely orphans scoped dismissal state.
-- [ ] Tests cover two servers advertising the same incompatible version.
+- [x] Restart behavior matches the documented policy for server announcements.
+- [x] Version suppression on server A does not suppress server B.
+- [x] A changed backend version can resurface the warning.
+- [x] Server removal clears or safely orphans scoped dismissal state.
+- [x] Tests cover two servers advertising the same incompatible version.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- Ordinary server-announcement dismissals now persist under the canonical server identity.
+- Upstream `persistable=true` announcements remain mandatory: the client renders no dismiss
+  action and does not hide them even if a stale matching dismissal exists.
+- Backend-version suppression is keyed by canonical server identity and exact reported version.
+- Forgetting a remembered server clears both announcement and version-warning decisions.
+- New focused tests cover restart recreation, two servers reusing the same banner/version,
+  version changes, legacy global-key isolation, mandatory-banner policy, and forget cleanup.
+- Device/emulator verification remains pending.
 
 ---
 

@@ -3,8 +3,10 @@ package com.garfiec.librechat.feature.auth.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.garfiec.librechat.core.common.identity.deriveServerId
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
+import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +43,7 @@ class ServerUrlViewModel(
     private val serverDataStore: ServerDataStore,
     private val configRepository: ConfigRepository,
     private val accountSwitcher: AccountSwitcher,
+    private val settingsDataStore: SettingsDataStore,
     private val addAccount: Boolean = false,
 ) : ViewModel() {
 
@@ -91,6 +94,7 @@ class ServerUrlViewModel(
                 }
             }
             serverDataStore.forgetServer(url)
+            settingsDataStore.clearServerBannerDismissals(deriveServerId(url).value)
         }
     }
 

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.garfiec.librechat.core.common.identity.AccountState
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.identity.currentAccountId
@@ -293,11 +294,19 @@ class SettingsDataStore(
     val enabledTools: Flow<Set<String>> = scopedStringSet(::enabledToolsKey)
 
     /**
-     * The backend version for which the user dismissed the version mismatch warning.
-     * When the backend updates to a new version, the dialog will appear again.
+     * Server announcements are deployment-owned, so dismissal persists across restarts and
+     * accounts on that deployment without leaking to a different server that reused the same id.
      */
-    val dismissedVersionWarning: Flow<String?> = dataStore.data.map { prefs ->
-        prefs[KEY_DISMISSED_VERSION_WARNING]
+    fun dismissedBannerIds(serverId: String): Flow<Set<String>> = dataStore.data.map { prefs ->
+        prefs[dismissedBannerIdsKey(serverId)].orEmpty()
+    }
+
+    /**
+     * The backend version suppressed for one deployment. A different server advertising the same
+     * version remains visible; a changed version on this server also resurfaces.
+     */
+    fun dismissedVersionWarning(serverId: String): Flow<String?> = dataStore.data.map { prefs ->
+        prefs[dismissedVersionWarningKey(serverId)]
     }
 
     suspend fun setSelectedLanguage(languageCode: String) {
@@ -434,6 +443,12 @@ class SettingsDataStore(
     private fun mcpServersKey(accountId: String) = accountScopedKey(accountId, SELECTED_MCP_SERVERS)
 
     private fun enabledToolsKey(accountId: String) = accountScopedKey(accountId, ENABLED_TOOLS)
+
+    private fun dismissedBannerIdsKey(serverId: String) =
+        stringSetPreferencesKey(serverScopedName(serverId, DISMISSED_BANNER_IDS))
+
+    private fun dismissedVersionWarningKey(serverId: String) =
+        serverScopedKey(serverId, DISMISSED_VERSION_WARNING)
 
     private fun decodeStringSet(raw: String?): Set<String> =
         raw?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
@@ -648,13 +663,30 @@ class SettingsDataStore(
         dataStore.edit { prefs -> prefs[KEY_ARTIFACT_DISPLAY_MODE] = mode.toStorageString() }
     }
 
-    /**
-     * Saves the backend version for which the user chose "Don't warn again".
-     * If the backend later updates to a different version, the warning will reappear.
-     */
-    suspend fun setDismissedVersionWarning(version: String) {
+    suspend fun dismissBanner(serverId: String, bannerId: String) {
         dataStore.edit { prefs ->
-            prefs[KEY_DISMISSED_VERSION_WARNING] = version
+            val key = dismissedBannerIdsKey(serverId)
+            prefs[key] = prefs[key].orEmpty() + bannerId
+            prefs.remove(stringSetPreferencesKey(DISMISSED_BANNER_IDS))
+        }
+    }
+
+    /**
+     * Saves the backend version for which the user chose "Don't warn again" on [serverId].
+     * If that backend later updates to a different version, the warning will reappear.
+     */
+    suspend fun setDismissedVersionWarning(serverId: String, version: String) {
+        dataStore.edit { prefs ->
+            prefs[dismissedVersionWarningKey(serverId)] = version
+            prefs.remove(stringPreferencesKey(DISMISSED_VERSION_WARNING))
+        }
+    }
+
+    /** Drops server-owned announcement and compatibility-warning decisions when a profile is forgotten. */
+    suspend fun clearServerBannerDismissals(serverId: String) {
+        dataStore.edit { prefs ->
+            prefs.remove(dismissedBannerIdsKey(serverId))
+            prefs.remove(dismissedVersionWarningKey(serverId))
         }
     }
 
@@ -739,9 +771,10 @@ class SettingsDataStore(
         private val KEY_INLINE_ARTIFACT_REACT = booleanPreferencesKey("inline_artifact_react")
         private val KEY_INLINE_ARTIFACT_MARKDOWN = booleanPreferencesKey("inline_artifact_markdown")
         private val KEY_ARTIFACT_DISPLAY_MODE = stringPreferencesKey("artifact_display_mode")
-        private val KEY_DISMISSED_VERSION_WARNING = stringPreferencesKey("dismissed_version_warning")
         private const val SELECTED_MCP_SERVERS = "selected_mcp_servers"
         private const val ENABLED_TOOLS = "enabled_tools"
+        private const val DISMISSED_BANNER_IDS = "dismissed_banner_ids"
+        private const val DISMISSED_VERSION_WARNING = "dismissed_version_warning"
     }
 }
 

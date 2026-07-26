@@ -62,7 +62,9 @@ It applies convention plugins: `librechat.mobile.application`, `librechat.mobile
 
 ### Server Banners
 - `NavHostViewModel` (shared) fetches banners from `BannerRepository` on init, filters expired via `displayFrom`/`displayTo` with `Instant.parse()`
-- Dismissed banner IDs tracked in-memory via `dismissedBannerIds: StateFlow<Set<String>>` (session-scoped, not persisted)
+- Non-persistable banner IDs are stored under the canonical server identity, so dismissal
+  survives restart without leaking across deployments; upstream `persistable=true` banners are
+  mandatory and never render a dismiss action
 - `BannerDisplay` composable shown at top of content in both `PhoneLayout` (shared) and `TabletLayout` (app)
 - Banner types: "info" (blue), "warning" (amber), "error" (red) — defaults to "info" if type is null
 - **Gotcha**: `displayFrom`/`displayTo` are ISO 8601 strings parsed with `Instant.parse()` — wrap in `runCatching` since the format from the server is not guaranteed

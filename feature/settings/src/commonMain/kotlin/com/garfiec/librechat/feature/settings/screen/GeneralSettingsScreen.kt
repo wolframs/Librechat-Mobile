@@ -68,8 +68,8 @@ private const val DISABLED_ALPHA = 0.4f
 @Composable
 fun GeneralSettingsScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToServerProfiles: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onNavigateToServerProfiles: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier,
@@ -102,8 +102,8 @@ fun GeneralSettingsScreen(
  */
 @Composable
 fun GeneralSettingsContent(
-    onNavigateToServerProfiles: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onNavigateToServerProfiles: () -> Unit = {},
     viewModel: SettingsViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
