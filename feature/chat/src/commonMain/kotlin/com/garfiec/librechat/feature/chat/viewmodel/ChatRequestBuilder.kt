@@ -44,18 +44,34 @@ class ChatRequestBuilder(
         // ephemeral tools for agent runs. Mirror web's `showEphemeralBadges` (ChatForm.tsx)
         // and never serialize leftover UI selections on the agents endpoint.
         if (!state.showEphemeralTools) return null
-        val mcpServers = state.selectedMcpServerNames.toList().ifEmpty { null }
-        val enabledTools = state.enabledTools
+        // Persisted names are defensive input: the server may have removed an MCP entry since the
+        // last session, or a stale value may predate account-scoped preferences. Never serialize a
+        // name the current server did not advertise.
+        val availableMcpNames = state.mcpServers.mapTo(mutableSetOf()) { it.name }
+        val mcpServers = state.selectedMcpServerNames
+            .filterTo(mutableSetOf()) { it in availableMcpNames }
+            .toList()
+            .ifEmpty { null }
+        val fileSearchEnabled =
+            ToolConstants.FILE_SEARCH in state.enabledTools && state.fileSearchEnabled
+        val executeCodeEnabled =
+            state.runCodeEnabled &&
+                state.isCodeInterpreterAvailable &&
+                (
+                    ToolConstants.CODE_INTERPRETER in state.enabledTools ||
+                        ToolConstants.EXECUTE_CODE in state.enabledTools
+                    )
         val webSearchEnabled = state.modelParameters.webSearch
 
-        val hasAnything = mcpServers != null || enabledTools.isNotEmpty() || webSearchEnabled
+        val hasAnything =
+            mcpServers != null || fileSearchEnabled || executeCodeEnabled || webSearchEnabled
         if (!hasAnything) return null
 
         return EphemeralAgent(
             mcp = mcpServers,
             webSearch = if (webSearchEnabled) true else null,
-            fileSearch = if (ToolConstants.FILE_SEARCH in enabledTools) true else null,
-            executeCode = if (ToolConstants.CODE_INTERPRETER in enabledTools || ToolConstants.EXECUTE_CODE in enabledTools) true else null,
+            fileSearch = if (fileSearchEnabled) true else null,
+            executeCode = if (executeCodeEnabled) true else null,
         )
     }
 

@@ -752,8 +752,17 @@ class ModelSelectionDelegate(
                         val status = statusMap[server.name]
                         server.copy(isConnected = status?.isConnected ?: false)
                     }
+                    val validNames = enriched.mapTo(mutableSetOf()) { it.name }
+                    val previousSelection = handle.state.selectedMcpServerNames
+                    val validatedSelection = previousSelection.intersect(validNames)
                     handle.update {
-                        selection = selection.copy(mcpServers = enriched.map { it.toDisplayData() })
+                        selection = selection.copy(
+                            mcpServers = enriched.map { it.toDisplayData() },
+                            selectedMcpServerNames = validatedSelection,
+                        )
+                    }
+                    if (validatedSelection != previousSelection) {
+                        settingsDataStore.setSelectedMcpServers(validatedSelection)
                     }
                 }
                 is Result.Error -> {

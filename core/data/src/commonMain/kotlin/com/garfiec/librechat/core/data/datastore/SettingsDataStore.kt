@@ -283,13 +283,14 @@ class SettingsDataStore(
         )
     }
 
-    val selectedMcpServers: Flow<Set<String>> = dataStore.data.map { prefs ->
-        prefs[KEY_SELECTED_MCP_SERVERS]?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
-    }
+    // Account-scoped: MCP names and tool availability are server-defined. A selection from one
+    // account must never be restored on another server merely because the names happen to match.
+    // Bare pre-scoping keys are deliberately ignored (and removed on the next write): their owner
+    // is unknowable, so attributing them to whichever account happens to be active would recreate
+    // the cross-server leak this namespace prevents.
+    val selectedMcpServers: Flow<Set<String>> = scopedStringSet(::mcpServersKey)
 
-    val enabledTools: Flow<Set<String>> = dataStore.data.map { prefs ->
-        prefs[KEY_ENABLED_TOOLS]?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
-    }
+    val enabledTools: Flow<Set<String>> = scopedStringSet(::enabledToolsKey)
 
     /**
      * The backend version for which the user dismissed the version mismatch warning.
@@ -417,6 +418,25 @@ class SettingsDataStore(
     private fun modelKey(accountId: String) = accountScopedKey(accountId, LAST_USED_MODEL)
 
     private fun usageKey(accountId: String) = accountScopedKey(accountId, MODEL_USAGE)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun scopedStringSet(keyFor: (String) -> Preferences.Key<String>): Flow<Set<String>> =
+        activeAccountProvider.state.flatMapLatest { state ->
+            when (state) {
+                AccountState.Warming -> emptyFlow()
+                is AccountState.Resolved ->
+                    state.id?.let { id ->
+                        dataStore.data.map { prefs -> decodeStringSet(prefs[keyFor(id.value)]) }
+                    } ?: flowOf(emptySet())
+            }
+        }
+
+    private fun mcpServersKey(accountId: String) = accountScopedKey(accountId, SELECTED_MCP_SERVERS)
+
+    private fun enabledToolsKey(accountId: String) = accountScopedKey(accountId, ENABLED_TOOLS)
+
+    private fun decodeStringSet(raw: String?): Set<String> =
+        raw?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
 
     /**
      * Records one "used" tick for [endpoint]/[model] — called once per message sent, the true
@@ -639,22 +659,28 @@ class SettingsDataStore(
     }
 
     suspend fun setSelectedMcpServers(servers: Set<String>) {
+        val accountId = activeAccountProvider.currentAccountId()?.value ?: return
         dataStore.edit { prefs ->
+            val key = mcpServersKey(accountId)
             if (servers.isEmpty()) {
-                prefs.remove(KEY_SELECTED_MCP_SERVERS)
+                prefs.remove(key)
             } else {
-                prefs[KEY_SELECTED_MCP_SERVERS] = servers.joinToString(",")
+                prefs[key] = servers.joinToString(",")
             }
+            prefs.remove(stringPreferencesKey(SELECTED_MCP_SERVERS))
         }
     }
 
     suspend fun setEnabledTools(tools: Set<String>) {
+        val accountId = activeAccountProvider.currentAccountId()?.value ?: return
         dataStore.edit { prefs ->
+            val key = enabledToolsKey(accountId)
             if (tools.isEmpty()) {
-                prefs.remove(KEY_ENABLED_TOOLS)
+                prefs.remove(key)
             } else {
-                prefs[KEY_ENABLED_TOOLS] = tools.joinToString(",")
+                prefs[key] = tools.joinToString(",")
             }
+            prefs.remove(stringPreferencesKey(ENABLED_TOOLS))
         }
     }
 
@@ -714,8 +740,8 @@ class SettingsDataStore(
         private val KEY_INLINE_ARTIFACT_MARKDOWN = booleanPreferencesKey("inline_artifact_markdown")
         private val KEY_ARTIFACT_DISPLAY_MODE = stringPreferencesKey("artifact_display_mode")
         private val KEY_DISMISSED_VERSION_WARNING = stringPreferencesKey("dismissed_version_warning")
-        private val KEY_SELECTED_MCP_SERVERS = stringPreferencesKey("selected_mcp_servers")
-        private val KEY_ENABLED_TOOLS = stringPreferencesKey("enabled_tools")
+        private const val SELECTED_MCP_SERVERS = "selected_mcp_servers"
+        private const val ENABLED_TOOLS = "enabled_tools"
     }
 }
 

@@ -74,7 +74,7 @@ changes materially.
 | ID | Priority | Area | Status | Automated | Device |
 |---|---:|---|---|---|---|
 | UX-001 | P0 | Signed-in server management | `SCOUTED` | Not started | Not started |
-| UX-002 | P0 | Server/account-scoped tools and MCP | `SCOUTED` | Not started | Not started |
+| UX-002 | P0 | Server/account-scoped tools and MCP | `AUTO_VERIFIED` | Passed | Not started |
 | UX-003 | P0 | Stream teardown after clean EOF | `SCOUTED` | Not started | Not started |
 | UX-004 | P0 | Pagination retry loop | `SCOUTED` | Not started | Not started |
 | UX-005 | P1 | Credential Manager lifecycle | `SCOUTED` | Not started | Not started |
@@ -188,7 +188,7 @@ no server-management route.
 
 **Priority:** P0
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -224,12 +224,27 @@ matching identifier.
 
 ### Acceptance checks
 
-- [ ] Select MCP/tool on server A; switching to B does not display or send it.
-- [ ] Switching back to A restores the intended selection if that is the chosen policy.
-- [ ] Removed server capabilities are pruned before request construction.
-- [ ] Request-builder tests prove stale identifiers cannot be serialized.
-- [ ] Persistence tests cover migration from legacy global keys.
+- [x] Select MCP/tool on server A; switching to B does not restore or send it.
+- [x] Switching back to A restores the account's selection.
+- [x] Removed server capabilities are pruned before request construction.
+- [x] Request-builder tests prove stale identifiers cannot be serialized.
+- [x] Persistence tests cover safe removal of legacy global keys.
 - [ ] User verifies with two server profiles or a controlled capability change.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- Decision: scope selections by account identity, because both tool permissions and MCP
+  names are server/user-defined. Legacy global selections are discarded rather than
+  guessed onto the currently active account.
+- Request safety: MCP names are intersected with the current server list; unavailable
+  code/file tools are omitted even if stale persisted state contains them.
+- Tests added:
+  - `AccountScopedToolSelectionTest`
+  - `ChatRequestBuilderToolValidationTest`
+- Automated verification: focused `core:data` and `feature:chat` unit tests pass.
+- Device verification: pending.
+- Next action: commit this item independently, then begin UX-001.
 
 ---
 
