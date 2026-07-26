@@ -1183,17 +1183,7 @@ class ChatViewModel(
             cacheTtl = spec.cacheTtl?.wireValue,
             modelParams = spec.modelParamsPayload,
         )
-        streamingManager.launchStream(stream) {
-            // Safety net: if the flow ends without Final or Error, clear streaming
-            if (_uiState.value.isStreaming) {
-                val cid = _uiState.value.conversationId
-                if (cid != null && roomObserverJob?.isActive != true) {
-                    loadConversation(cid)
-                } else if (cid == null) {
-                    _uiState.update { it.copy(content = it.content.copy(isStreaming = false)) }
-                }
-            }
-        }
+        streamingManager.launchStream(stream)
     }
 
     fun editMessage(messageId: String, newText: String) {

@@ -75,7 +75,7 @@ changes materially.
 |---|---:|---|---|---|---|
 | UX-001 | P0 | Signed-in server management | `AUTO_VERIFIED` | Passed | Not started |
 | UX-002 | P0 | Server/account-scoped tools and MCP | `AUTO_VERIFIED` | Passed | Not started |
-| UX-003 | P0 | Stream teardown after clean EOF | `SCOUTED` | Not started | Not started |
+| UX-003 | P0 | Stream teardown after clean EOF | `AUTO_VERIFIED` | Passed | Not started |
 | UX-004 | P0 | Pagination retry loop | `SCOUTED` | Not started | Not started |
 | UX-005 | P1 | Credential Manager lifecycle | `AUTO_VERIFIED` | Passed | Not started |
 | UX-006 | P1 | Agent editor draft protection | `SCOUTED` | Not started | Not started |
@@ -268,7 +268,7 @@ matching identifier.
 
 **Priority:** P0
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -298,12 +298,25 @@ terminal event must transition to a deterministic recoverable state exactly once
 
 ### Acceptance checks
 
-- [ ] Unit test covers clean EOF for normal send.
-- [ ] Unit test covers clean EOF for edit/regenerate/continue.
-- [ ] Stop/spinner/queued-message state is cleared or advanced consistently.
-- [ ] No double-finalization when a terminal event is followed by flow completion.
-- [ ] Existing abort watchdog and resume tests remain green.
+- [x] Unit test covers clean EOF for normal send.
+- [x] Unit test covers clean EOF for edit/regenerate/continue.
+- [x] Stop/spinner/queued-message state is cleared or advanced consistently.
+- [x] No double-finalization when a terminal event is followed by flow completion.
+- [x] Existing abort watchdog and resume tests remain green.
 - [ ] Fault-injected device test confirms the composer recovers.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- `launchStream` now owns unexpected clean-EOF teardown instead of accepting an optional
+  caller callback, so new-send and resubmit paths cannot diverge.
+- Clean EOF preserves partial content, clears streaming/tool state, surfaces a recoverable
+  connection error, pauses queued sends, and reconciles an existing conversation.
+- The existing per-session end latch makes the EOF action a no-op after Final or Error.
+- A new focused test file covers normal send, edit/regenerate/continue semantics, and
+  terminal-event-plus-completion double-finalization.
+- The complete `feature:chat` Android unit suite and module Detekt pass.
+- Fault-injected device/emulator verification remains pending.
 
 ---
 

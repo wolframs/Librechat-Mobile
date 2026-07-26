@@ -90,15 +90,11 @@ class StreamingManagerDelegate(
     private var abortRequested = false
 
     /**
-     * Why a stream session ended. Every *event-driven* termination — a Final or Error frame, a
-     * failed abort, the watchdog, a resume that found the job gone — funnels through [endStream]
-     * with one of these; the reason decides teardown (job cancel, state write, queue policy,
-     * reload) in ONE place instead of each exit path hand-copying its own subset.
-     *
-     * Not covered: a flow that completes with neither Final nor Error (a clean SSE EOF or a 404 on
-     * the stream GET). That falls to the `onTerminated` safety net the caller passes to
-     * [launchStream], which clears streaming state directly without a reason. Rare, and a known
-     * gap in the chokepoint — do not treat [endStream] as the *only* teardown path.
+     * Why a stream session ended. Every termination — a Final or Error frame, flow failure,
+     * unexpected clean EOF, failed abort, watchdog, or a resume that found the job gone —
+     * funnels through [endStream] with one of these; the reason decides teardown (job cancel,
+     * state write, queue policy, reload) in ONE place instead of each exit path hand-copying
+     * its own subset.
      */
     private sealed interface StreamEndReason {
         /**
@@ -107,7 +103,7 @@ class StreamingManagerDelegate(
          */
         data class Finalized(val aborted: Boolean) : StreamEndReason
 
-        /** Flow-level exception or in-band [StreamEvent.Error] — the two legacy paths, unified. */
+        /** Flow failure, in-band [StreamEvent.Error], or clean EOF without a terminal event. */
         data class StreamError(val message: String, val isNetwork: Boolean) : StreamEndReason
 
         /**
@@ -205,19 +201,26 @@ class StreamingManagerDelegate(
     }
 
     /**
-     * Cancels any in-flight stream and launches collection of [flow]. [onTerminated] runs
-     * after collection completes (success, error, or normal end) — the send paths use it as
-     * a safety net for flows that end without a Final/Error event.
+     * Cancels any in-flight stream and launches collection of [flow]. A flow that returns
+     * without a terminal event is treated as a recoverable stream error here, so every caller
+     * receives the same teardown contract.
      *
      * Ordering contract: callers must have called [beginStreaming]/[prepareForStreaming] first
      * (all current callers do) — that is what bumps [streamSession], so a stale [endStream]
      * from the previous stream can no longer touch this one.
      */
-    fun launchStream(flow: Flow<StreamEvent>, onTerminated: suspend () -> Unit = {}) {
+    fun launchStream(flow: Flow<StreamEvent>) {
         streamJob?.cancel()
+        val session = streamSession
         streamJob = scope.launch {
             collectStreamSafely(flow)
-            onTerminated()
+            endStream(
+                StreamEndReason.StreamError(
+                    message = UNEXPECTED_STREAM_END_MESSAGE,
+                    isNetwork = false,
+                ),
+                session,
+            )
         }
     }
 
@@ -641,10 +644,9 @@ class StreamingManagerDelegate(
     }
 
     /**
-     * The stream-termination chokepoint for every *event-driven* end — clean or aborted Final,
-     * error, failed abort, watchdog, resume-found-expired — so teardown steps can't drift apart
-     * per exit path again. The one exception is a flow that ends with neither Final nor Error,
-     * handled by the `onTerminated` safety net (see [StreamEndReason]); keep new teardown here.
+     * The stream-termination chokepoint for every end — clean or aborted Final, error,
+     * unexpected clean EOF, failed abort, watchdog, resume-found-expired — so teardown steps
+     * cannot drift apart per exit path again.
      *
      * Latched per session: runs at most once for [session], and never for a stale session
      * (see [streamSession]). [StreamEndReason.Finalized] deliberately writes no state — the
@@ -915,6 +917,9 @@ class StreamingManagerDelegate(
     }
 
     private companion object {
+        const val UNEXPECTED_STREAM_END_MESSAGE =
+            "Connection closed before the response completed"
+
         /** Minimum interval between streaming UI state updates to avoid recomposition spam. */
         const val STREAMING_UI_UPDATE_INTERVAL_MS = 50L
 

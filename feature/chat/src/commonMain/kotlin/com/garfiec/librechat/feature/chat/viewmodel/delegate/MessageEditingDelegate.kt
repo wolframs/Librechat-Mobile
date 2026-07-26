@@ -173,7 +173,8 @@ class MessageEditingDelegate(
      * Resubmits carry the original user turn's [files] so attachments survive an edit /
      * regenerate / continue (the server otherwise loses them). The new-message send path
      * (`doSendWithSpec`) stays in `ChatViewModel`: it additionally carries an added-conversation
-     * for comparison mode and a bespoke stream-terminated callback this helper deliberately omits.
+     * for comparison mode. Stream termination itself is owned uniformly by
+     * [StreamingManagerDelegate].
      */
     @Suppress("LongParameterList")
     private fun launchSend(
