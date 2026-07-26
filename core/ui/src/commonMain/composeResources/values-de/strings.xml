@@ -2,4 +2,5 @@
 <resources>
     <!-- Accessibility label for the bottom-sheet drag handle -->
     <string name="cd_drag_handle">Ziehpunkt</string>
+    <string name="pdf_page_failed">Diese Seite konnte nicht gerendert werden</string>
 </resources>

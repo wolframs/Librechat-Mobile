@@ -322,4 +322,73 @@
     <string name="send_block_agent_not_available">Der ausgewählte Agent ist auf diesem Server nicht verfügbar. Bitte wähle einen anderen Agenten.</string>
     <string name="send_block_model_not_available">Das ausgewählte Modell ist auf diesem Server nicht verfügbar. Bitte wähle ein anderes Modell.</string>
     <string name="send_block_model_load_failed">Das ausgewählte Modell konnte noch nicht geladen werden. Bitte versuche es erneut oder wähle ein anderes Modell.</string>
+
+    <!-- Prompt cache -->
+    <string name="cache_ttl_idle">Cache</string>
+    <string name="cache_ttl_expired">Cache abgelaufen</string>
+    <string name="cache_ttl_armed_1h">1 Std. aktiviert</string>
+    <string name="cache_ttl_armed_5m">5 Min. aktiviert</string>
+    <string name="cache_ttl_semantics">Prompt-Cache: %1$s. Tippen, um die Gültigkeit der nächsten Nachricht zwischen 1 Stunde, 5 Minuten und aus umzuschalten.</string>
+
+    <!-- Queued messages -->
+    <string name="cd_add_to_queue">Nachricht zur Warteschlange hinzufügen</string>
+    <string name="cd_cancel_pending_send">Warten auf Upload – tippen, um das Senden abzubrechen</string>
+    <string name="cd_cancel_queued_message">Nachricht aus der Warteschlange entfernen</string>
+    <string name="cd_reorder_queued_message">Ziehen, um die Nachricht neu anzuordnen</string>
+    <string name="send_queued_messages">Warteschlange senden (%1$d)</string>
+    <string name="queued_attachment_only">Anhang</string>
+    <string name="editing_queued_message">Nachricht aus der Warteschlange bearbeiten</string>
+    <string name="cd_cancel_edit">Bearbeitung abbrechen</string>
+    <string name="cd_update_queued_message">Nachricht in der Warteschlange aktualisieren</string>
+    <string name="queued_messages_dropped_account_switch">Nach Kontowechsel wurden Nachrichten aus der Warteschlange verworfen</string>
+
+    <!-- Attachments, tools, PDFs, and artifacts -->
+    <string name="cd_image">Bild</string>
+    <string name="tool_server_files">Server</string>
+    <string name="web_searched">Web durchsucht</string>
+    <string name="tool_url_context">URL-Kontext</string>
+    <string name="tool_url_context_desc">Dem Modell erlauben, erwähnte URLs und YouTube-Inhalte zu lesen</string>
+    <string name="cd_quoted_excerpt">Zitierter Ausschnitt</string>
+    <string name="attachment_fallback">Anhang</string>
+    <string name="pdf_document">PDF-Dokument</string>
+    <string name="pdf_load_failed">PDF konnte nicht geladen werden</string>
+    <string name="cd_share_pdf">PDF teilen</string>
+    <string name="cd_open_pdf">PDF öffnen</string>
+    <string name="retry">Erneut versuchen</string>
+    <string name="cd_add_artifact_to_home_screen">Artefakt zum Startbildschirm hinzufügen</string>
+    <string name="add_to_home_screen_dialog_title">Zum Startbildschirm hinzufügen</string>
+    <string name="add_to_home_screen_dialog_name_label">Name</string>
+    <string name="add_to_home_screen_dialog_emoji_label">Emoji</string>
+    <string name="add_to_home_screen_icon_label">Symbol</string>
+    <string name="add_to_home_screen_icon_auto">Automatisch</string>
+    <string name="add_to_home_screen_icon_custom">Benutzerdefiniert</string>
+    <string name="cd_icon_preview">Symbolvorschau</string>
+    <string name="artifact_shortcut_unavailable">Dieses Artefakt ist nicht mehr verfügbar.</string>
+    <string name="add_to_home_screen_confirm">Hinzufügen</string>
+    <string name="artifact_shortcut_back">Zurück</string>
+    <string name="artifact_view_source">Quelltext anzeigen</string>
+    <string name="artifact_view_preview">Vorschau anzeigen</string>
+
+    <!-- Conversation media and context usage -->
+    <string name="action_show_all_media">Alle Medien anzeigen</string>
+    <string name="media_gallery_title">Medien</string>
+    <string name="media_tab_media">Medien</string>
+    <string name="media_tab_files">Dateien</string>
+    <string name="media_tab_links">Links</string>
+    <string name="media_tab_artifacts">Artefakte</string>
+    <string name="media_scope_whole_chat">Gesamter Chat</string>
+    <string name="media_scope_this_branch">Dieser Zweig</string>
+    <string name="media_empty_media">Keine Medien in dieser Unterhaltung</string>
+    <string name="media_empty_files">Keine Dateien in dieser Unterhaltung</string>
+    <string name="media_empty_links">Keine Links in dieser Unterhaltung</string>
+    <string name="media_empty_artifacts">Keine Artefakte in dieser Unterhaltung</string>
+    <string name="context_usage_label">Kontext</string>
+    <string name="context_usage_window">Kontextfenster</string>
+    <string name="context_usage_messages">Nachrichten</string>
+    <string name="context_usage_tools">Tool-Schemata</string>
+    <string name="context_usage_summary">Zusammenfassung</string>
+    <string name="context_usage_system">System</string>
+    <string name="context_usage_free">Freier Platz</string>
+    <string name="context_usage_input">Eingabe</string>
+    <string name="context_usage_output">Ausgabe</string>
 </resources>

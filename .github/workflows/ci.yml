@@ -32,6 +32,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Check localization key coverage
+        run: python3 scripts/check-localization.py --require-complete de
+
       - name: Run lint
         run: ./gradlew detekt detektMetadataCommonMain :app:lint --continue
 

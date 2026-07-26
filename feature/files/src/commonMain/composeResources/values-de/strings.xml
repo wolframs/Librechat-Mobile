@@ -63,4 +63,9 @@
     <string name="uploading">Wird hochgeladen…</string>
     <string name="failed_to_download_pdf">PDF konnte nicht heruntergeladen werden</string>
     <string name="failed_to_render_pdf">PDF konnte nicht gerendert werden</string>
+    <string name="cd_image">Bild</string>
+    <string name="cd_save_image">Auf dem Gerät speichern</string>
+    <string name="cd_share_image">Bild teilen</string>
+    <string name="attach_count">Anhängen (%1$d)</string>
+    <string name="cd_close_picker">Auswahl schließen</string>
 </resources>

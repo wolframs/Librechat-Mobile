@@ -82,7 +82,7 @@ changes materially.
 | UX-007 | P1 | Memory-safe, cancellable uploads | `AUTO_VERIFIED` | Passed | Not started |
 | UX-008 | P2 | Draft attachment and queue recovery | `AUTO_VERIFIED` | Passed | Not started |
 | UX-009 | P2 | Banner dismissal persistence and scope | `AUTO_VERIFIED` | Passed | Not started |
-| UX-010 | P2 | Localization completeness | `SCOUTED` | Not started | Not started |
+| UX-010 | P2 | Localization completeness | `IMPLEMENTED` | German coverage passed | Not started |
 | UX-011 | P2 | Accessibility audit | `SCOUTED` | Not started | Not started |
 | UX-012 | P2 | Cold-start token decryption | `SCOUTED` | Not started | Not started |
 | UX-013 | P3 | Multi-account sign-out wording | `SCOUTED` | Not started | Not started |
@@ -671,7 +671,7 @@ Do not apply one storage policy to all banners by accident.
 
 **Priority:** P2
 
-**Status:** `SCOUTED`
+**Status:** `IMPLEMENTED`
 
 ### Observed behavior
 
@@ -695,10 +695,23 @@ recomputed before implementation.
 
 ### Acceptance checks
 
-- [ ] Add a repeatable resource-key coverage check.
-- [ ] Resolve the German gaps first, subject to user review.
+- [x] Add a repeatable resource-key coverage check.
+- [x] Resolve the German gaps first, subject to user review.
 - [ ] Verify long strings and RTL layouts rather than checking key counts alone.
 - [ ] No user-facing string remains hardcoded in Kotlin.
+
+### Implementation update — 2026-07-27
+
+- Status: `IMPLEMENTED`
+- Added `scripts/check-localization.py`; CI now fails when German loses parity with a module's
+  English base resources and reports gaps in every other shipped locale.
+- Added German coverage for all 166 keys that were missing at revalidation time across core UI,
+  Agents, Auth, Chat, Conversations, Files, and Settings.
+- These translations are a coding-pass draft subject to the user's language review; they are not
+  represented as reviewed localization-vendor output.
+- Other incomplete locales continue to use Compose's English fallback. Their exact gaps remain
+  visible in CI instead of being filled with unlabeled machine translation.
+- Remaining: semantic hardcoded-string extraction, RTL/long-string inspection, and device review.
 
 ---
 
@@ -943,3 +956,10 @@ conclusion. Correct earlier entries with a new dated note.
 - Migrated Room from v8 to v9 without invalidating existing text-only drafts.
 - Complete affected unit suites and static checks pass; device force-stop/relaunch verification
   remains pending.
+
+### 2026-07-27 — UX-010 German localization coverage
+
+- Added a repeatable Compose resource-key coverage report and made German completeness a CI gate.
+- Filled the 166 revalidated German key gaps without claiming external human review.
+- Other locale gaps remain explicit English fallbacks and are reported by the same check.
+- Hardcoded-string extraction plus RTL, long-string, and device review remain pending.

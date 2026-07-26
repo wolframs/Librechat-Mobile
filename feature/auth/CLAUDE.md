@@ -47,5 +47,8 @@
 
 ### Localization
 - `strings.xml` created for all 8 modules (app, core/ui, feature/auth, chat, conversations, settings, agents, files)
-- Contains key toolbar titles, button labels, section headers — NOT exhaustive extraction
-- Full string extraction is a future pass
+- `scripts/check-localization.py` compares every shipped locale with each module's base resources.
+  CI requires complete German key coverage and reports fallback gaps in the other locales.
+- German is complete as of the 2026-07-27 UX pass. Other locales deliberately fall back to the
+  English base for newer keys until reviewed translations are supplied; do not fill them with
+  unlabeled machine translation merely to make the report empty.

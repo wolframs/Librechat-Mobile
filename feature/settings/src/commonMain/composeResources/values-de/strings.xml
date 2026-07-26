@@ -478,4 +478,63 @@
     <string name="role_skills_share">Skills teilen</string>
     <string name="role_skills_share_public">Skills öffentlich teilen</string>
     <string name="role_skills_save">Speichern</string>
+
+    <!-- Server profiles -->
+    <string name="action_copy">Kopieren</string>
+    <string name="section_connections">Verbindungen</string>
+    <string name="title_server_profiles">Serverprofile</string>
+    <string name="server_profiles">Serverprofile</string>
+    <string name="server_profiles_subtitle">Server, Konten und HTTP-Warnungen verwalten</string>
+    <string name="server_profiles_description">Serverprofile sind lokale Verbindungsdaten. Gespeicherte Passwörter bleiben unter der Kontrolle des System-Passwortmanagers.</string>
+    <string name="add_server_or_account">Server oder Konto hinzufügen</string>
+    <string name="active_server">Aktiver Server</string>
+    <string name="active_account">Aktiv</string>
+    <string name="no_signed_in_accounts">Keine angemeldeten Konten</string>
+    <string name="switch_account">Wechseln</string>
+    <string name="restore_http_warning">HTTP-Warnung wiederherstellen</string>
+    <string name="forget_server_profile">Server entfernen</string>
+    <string name="forget_server_title">Serverprofil entfernen?</string>
+    <string name="forget_server_without_accounts">%1$s und die lokalen Warnentscheidungen sowie Anmeldedaten-Verweise entfernen? Im System-Passwortmanager gespeicherte Passwörter werden nicht gelöscht.</string>
+    <string name="forget_server_with_accounts">%1$s entfernen und %2$d angemeldete Konten, zwischengespeicherte Daten, Warnentscheidungen und Anmeldedaten-Verweise löschen? Im System-Passwortmanager gespeicherte Passwörter werden nicht gelöscht.</string>
+    <string name="server_version_label">Serverversion</string>
+    <string name="server_version_unknown">Unbekannt</string>
+
+    <!-- Chat display and artifacts -->
+    <string name="chat_group_display">Darstellung</string>
+    <string name="chat_group_behavior">Verhalten</string>
+    <string name="chat_group_header_context">Kopfzeile &amp; Kontext</string>
+    <string name="chat_header_title">Chat-Kopfzeile</string>
+    <string name="chat_header_summary_format">%1$s · %2$s</string>
+    <string name="chat_header_content_label">Inhalt</string>
+    <string name="chat_header_alignment_label">Ausrichtung</string>
+    <string name="context_bar_title">Kontextnutzung</string>
+    <string name="context_bar_desc">Wo die Auslastung des Kontextfensters angezeigt wird</string>
+    <string name="context_bar_hidden">Ausgeblendet</string>
+    <string name="context_bar_above_input">Über dem Nachrichtenfeld</string>
+    <string name="context_bar_options_sheet">Chat-Optionsmenü</string>
+    <string name="context_bar_overflow_menu">Menü der oberen Leiste (⋮)</string>
+    <string name="artifact_viewer_title">Artefaktansicht</string>
+    <string name="artifact_viewer_desc">Wie ein Artefakt beim Antippen geöffnet wird.</string>
+    <string name="artifact_mode_bottom_sheet">Unteres Bedienfeld</string>
+    <string name="artifact_mode_bottom_sheet_desc">Wird von unten eingeblendet; zum Schließen nach unten wischen.</string>
+    <string name="artifact_mode_fullscreen">Vollbild</string>
+    <string name="artifact_mode_fullscreen_desc">Wird als Vollbildseite mit mehr Platz geöffnet.</string>
+    <string name="artifact_inline_title">Inline rendern</string>
+    <string name="artifact_inline_enabled_count">%1$d von %2$d aktiviert</string>
+
+    <!-- Two-factor authentication -->
+    <string name="twofa_enroll_instructions">Füge dieses Konto deiner Authenticator-App hinzu und gib dann den angezeigten sechsstelligen Code ein.</string>
+    <string name="action_open_authenticator">In Authenticator-App öffnen</string>
+    <string name="twofa_no_authenticator">Keine Authenticator-App gefunden. Füge den Einrichtungsschlüssel unten manuell hinzu oder scanne den QR-Code mit einem anderen Gerät.</string>
+    <string name="twofa_setup_key">Einrichtungsschlüssel</string>
+    <string name="cd_copy_setup_key">Einrichtungsschlüssel kopieren</string>
+    <string name="action_show_qr">QR-Code anzeigen</string>
+    <string name="action_hide_qr">QR-Code ausblenden</string>
+    <string name="cd_twofa_qr">QR-Code zur Einrichtung auf einem anderen Gerät</string>
+
+    <!-- Home-screen artifact shortcuts -->
+    <string name="artifact_shortcuts_title">Startbildschirm-Verknüpfungen</string>
+    <string name="artifact_shortcuts_empty">Noch keine Artefakte an den Startbildschirm angeheftet.</string>
+    <string name="artifact_shortcuts_disabled_message">Diese Artefakt-Verknüpfung wurde entfernt.</string>
+    <string name="cd_artifact_shortcut_delete">Verknüpfung löschen</string>
 </resources>

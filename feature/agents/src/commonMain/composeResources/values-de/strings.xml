@@ -281,4 +281,10 @@
     <string name="subagents_allow_self">Selbst-Erzeugung erlauben</string>
     <string name="add_subagent">Subagent hinzufügen</string>
     <string name="subagents_full">Maximale Anzahl an Subagenten erreicht.</string>
+
+    <!-- Draft protection -->
+    <string name="discard_agent_changes_title">Ungespeicherte Änderungen verwerfen?</string>
+    <string name="discard_agent_changes_message">Deine Änderungen an diesem Agenten wurden noch nicht gespeichert.</string>
+    <string name="discard">Verwerfen</string>
+    <string name="stay">Bleiben</string>
 </resources>

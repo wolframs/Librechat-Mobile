@@ -73,4 +73,12 @@
 
     <!-- Common -->
     <string name="back">Zurück</string>
+
+    <!-- Remembered servers and system password manager -->
+    <string name="dont_warn_for_server">Für diesen Server nicht erneut warnen</string>
+    <string name="remembered_servers">Gespeicherte Server</string>
+    <string name="forget_server">Entfernen</string>
+    <string name="restore_http_warning">Erneut warnen</string>
+    <string name="use_saved_login">Gespeicherte Anmeldung verwenden</string>
+    <string name="password_manager_note">Passwörter werden vom Passwortmanager deines Geräts gespeichert, nicht von LibreChat.</string>
 </resources>
