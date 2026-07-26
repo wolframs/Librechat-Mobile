@@ -14,7 +14,13 @@ import kotlinx.coroutines.flow.SharedFlow
 enum class RefreshResult { Refreshed, HardExpired, Transient }
 
 interface TokenManager {
-    /** Non-suspend check — returns true when an access token is cached in memory. */
+    /**
+     * Warm platform secure storage and the active-token cache. The account-readiness gate calls this
+     * on its IO dispatcher before routing or requests are admitted.
+     */
+    suspend fun warmUp() = Unit
+
+    /** Non-suspend check of the already-warmed in-memory cache; never performs secure-storage IO. */
     val isAuthenticated: Boolean
     suspend fun getAccessToken(): String?
     suspend fun setTokens(accessToken: String, refreshToken: String)

@@ -24,6 +24,8 @@ import com.garfiec.librechat.core.network.client.ServerUrlProvider
 import com.garfiec.librechat.core.network.client.TokenManager
 import com.garfiec.librechat.feature.conversations.drawer.AccountUiModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -31,10 +33,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Navigation-shell ViewModel: auth/session routing, account identity + hygiene, banners, version
@@ -63,16 +68,11 @@ class NavHostViewModel(
     private val versionCheckStateHolder =
         VersionCheckStateHolder(configRepository, settingsDataStore, serverUrlProvider, viewModelScope)
 
-    // Seeded synchronously so first-frame routing (LibreChatNavHost reads isLoggedIn.value
-    // once in a LaunchedEffect to redirect to auth) gets the correct value with no flash.
-    // This is a non-blocking in-memory cache read: TokenManager decrypts the access token at
-    // its own construction (TokenDataStore.init -> initializeTokenCache), so by the time the
-    // VM is built the token is already cached and isAuthenticated is just a null check. The
-    // init{} block below re-resolves the same value asynchronously. (The Keychain/
-    // EncryptedSharedPreferences decrypt itself still runs on Main at TokenDataStore
-    // construction — see report follow-up; it is out of this stream's three files.)
-    private val _isLoggedIn = MutableStateFlow(tokenManager.isAuthenticated)
-    val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
+    // Null means startup auth is unresolved. The root host renders a neutral loading surface until
+    // the account gate has warmed secure storage off Main and the repository has checked the cached
+    // bearer. This preserves deterministic first-frame routing without paying keystore cost on Main.
+    private val _isLoggedIn = MutableStateFlow<Boolean?>(null)
+    val isLoggedIn: StateFlow<Boolean?> = _isLoggedIn.asStateFlow()
 
     val versionMismatch: StateFlow<VersionMismatchState?> = versionCheckStateHolder.versionMismatch
 
@@ -147,12 +147,11 @@ class NavHostViewModel(
                 // logged-in cold start can't fire requests (auth check, version/config fetch,
                 // session tasks) at an empty base URL while ServerDataStore is still resolving.
                 serverUrlProvider.awaitBaseUrl()
-                // Wait for the roster seed to reconcile the token mirror to the durable active pointer
-                // before deciding the route. The synchronous _isLoggedIn seed above reads the raw
-                // (possibly crash-diverged) mirror; without this gate a divergence would flash the
-                // wrong screen. The gate's seed also drives the server URL, so this is ordered first.
+                // Wait for the roster seed to warm secure storage and reconcile the token mirror to
+                // the durable active pointer before deciding the route. The gate also drives the
+                // server URL, so this is ordered first.
                 accountReadyGate.awaitReady()
-                val loggedIn = authRepository.isLoggedIn()
+                val loggedIn = withContext(Dispatchers.IO) { authRepository.isLoggedIn() }
                 _isLoggedIn.value = loggedIn
                 if (loggedIn) {
                     // Upgrade safety net: establish the active account before any tenant reads/writes
@@ -173,6 +172,7 @@ class NavHostViewModel(
                 }
             } catch (e: Exception) {
                 Logger.w(e) { "Failed to check auth state on init" }
+                _isLoggedIn.value = false
             }
         }
         bannerStateHolder.fetchBanners()
@@ -233,6 +233,9 @@ class NavHostViewModel(
 
     /** Waits for the persisted URL warm-up before deciding whether auth can skip the picker. */
     suspend fun hasSavedServerUrl(): Boolean = serverUrlProvider.awaitBaseUrl().isNotBlank()
+
+    /** Resolves once cold-start token/account reconciliation has produced an authoritative route. */
+    suspend fun awaitAuthResolution(): Boolean = isLoggedIn.filterNotNull().first()
 
     /**
      * Attempts the upgrade-path account restore, swallowing transient failures. Returns `true` when the

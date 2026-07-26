@@ -33,12 +33,12 @@ import kotlin.random.Random
  * token slot; account removal ([removeAccount]) drops exactly one account's slot; and logout
  * ([onAccountCleared]) drops only the active account's slot.
  *
- * The active account is mirrored into the same synchronously-readable secure storage (key
+ * The active account is mirrored into the same secure storage (key
  * [KEY_ACTIVE_ACCOUNT]) rather than the async account registry, so the bearer for the right account
- * is seeded in the constructor — the first-frame `isAuthenticated` check and the first authed request
- * never read a blind bearer at cold start. When no account is resolved (fresh install, logged out, or
- * a legacy pre-keying upgrade) the keys fall back to their bare form, which is also how tokens from an
- * older build are read until [onAccountResolved] re-homes them.
+ * is seeded by [warmUp] behind the account-readiness gate — first routing and the first authenticated
+ * request never read a blind bearer, while Android keystore setup stays off Main. When no account is
+ * resolved (fresh install, logged out, or a legacy pre-keying upgrade) the keys fall back to their bare
+ * form, which is also how tokens from an older build are read until [onAccountResolved] re-homes them.
  *
  * **Authentication staging.** An interactive sign-in ([setTokens] from login/OAuth/2FA) always writes
  * the freshly-issued pair to the **bare** keys and drops the active binding, even when another account
@@ -67,13 +67,14 @@ abstract class CommonTokenDataStore(
 
     /**
      * The account whose tokens are currently active, or `null` when logged out or on a legacy install
-     * whose tokens still live under the bare keys. Seeded synchronously from [KEY_ACTIVE_ACCOUNT] at
-     * construction. All key selection reads this, so the hot-path bearer read stays keyed without an
-     * async account lookup.
+     * whose tokens still live under the bare keys. Seeded from [KEY_ACTIVE_ACCOUNT] during [warmUp].
+     * All key selection reads this, so the hot-path bearer read stays keyed without an async account
+     * lookup after the readiness gate opens.
      */
     @Volatile
     private var activeAccountKey: String? = null
 
+    @Volatile
     private var tokenInitialized = false
 
     private fun loadCacheFromStorage() {
@@ -83,9 +84,8 @@ abstract class CommonTokenDataStore(
     }
 
     /**
-     * Eagerly load the active account + its cached access token from platform storage.
-     * Must be called from each platform subclass's `init {}` block (not from the super constructor,
-     * which runs before subclass properties are initialised).
+     * Load the active account + its cached access token from platform storage. Android invokes this
+     * lazily through [warmUp]; iOS may still call it eagerly after subclass properties initialize.
      */
     protected fun initializeTokenCache() = loadCacheFromStorage()
 
@@ -148,10 +148,18 @@ abstract class CommonTokenDataStore(
 
     // --- TokenManager ---
 
-    override val isAuthenticated: Boolean
-        get() = ensureTokenLoaded() != null
+    override suspend fun warmUp() {
+        if (tokenInitialized) return
+        stateMutex.withLock { ensureTokenLoaded() }
+    }
 
-    override suspend fun getAccessToken(): String? = ensureTokenLoaded()
+    override val isAuthenticated: Boolean
+        get() = tokenInitialized && cachedAccessToken.nonBlankOrNull() != null
+
+    override suspend fun getAccessToken(): String? {
+        if (!tokenInitialized) warmUp()
+        return cachedAccessToken.nonBlankOrNull()
+    }
 
     override suspend fun setTokens(accessToken: String, refreshToken: String) = stateMutex.withLock {
         // Authentication path only (login / OAuth / 2FA). Stage the freshly-issued pair under the bare

@@ -15,6 +15,7 @@ import kotlin.concurrent.Volatile
 class TokenDataStore(
     context: Context,
     refreshClient: Lazy<HttpClient>,
+    private val encryptedPrefsFactory: ((Context) -> SharedPreferences)? = null,
 ) : CommonTokenDataStore(refreshClient) {
 
     private val appContext: Context = context.applicationContext
@@ -26,12 +27,17 @@ class TokenDataStore(
      * `startKoin`. Keystore/keyset corruption (backup-restore, OS update, broken OEM keystore) would
      * otherwise throw here and, via the eager `AccountRegistry` single, take down every launch.
      *
-     * Reassigned at runtime (never back to a store known-broken) when a write rebuilds the keyset or
-     * drops to memory mode; `@Volatile` so the unlocked hot-path reads (`isAuthenticated`,
-     * `getAccessToken`) observe the swap.
+     * Initialized lazily by [TokenManager.warmUp] on the account registry's IO dispatcher instead of
+     * during Koin construction on Main. Reassigned at runtime (never back to a store known-broken)
+     * when a write rebuilds the keyset or drops to memory mode; `@Volatile` so hot-path reads observe
+     * the swap.
      */
     @Volatile
-    private var prefs: SharedPreferences? = createEncryptedPrefsWithRecovery()
+    private var prefs: SharedPreferences? = null
+
+    @Volatile
+    private var storeInitialized = false
+    private val storeInitLock = Any()
 
     /**
      * Session-only backing used when [prefs] is `null` (the keystore never recovered). Reads/writes go
@@ -40,11 +46,8 @@ class TokenDataStore(
      */
     private val memoryFallback = ConcurrentHashMap<String, String>()
 
-    init {
-        initializeTokenCache()
-    }
-
     override fun readValue(key: String): String? {
+        ensureStoreInitialized()
         val store = prefs ?: return memoryFallback[key]
         return try {
             store.getString(key, null)
@@ -105,6 +108,7 @@ class TokenDataStore(
      * real bugs and re-thrown.
      */
     private inline fun write(toMemory: () -> Unit, mutate: (SharedPreferences.Editor) -> Unit) {
+        ensureStoreInitialized()
         val store = prefs
         if (store == null) {
             toMemory()
@@ -136,10 +140,22 @@ class TokenDataStore(
     private fun isCorruption(e: Exception): Boolean = e is SecurityException || e is GeneralSecurityException
 
     /** Wipe the corrupt keystore state and recreate the store, publishing the result to [prefs]. */
-    private fun rebuildStore(): SharedPreferences? = createEncryptedPrefsWithRecovery().also { prefs = it }
+    private fun rebuildStore(): SharedPreferences? = createEncryptedPrefsWithRecovery().also {
+        prefs = it
+        storeInitialized = true
+    }
+
+    private fun ensureStoreInitialized() {
+        if (storeInitialized) return
+        synchronized(storeInitLock) {
+            if (storeInitialized) return
+            prefs = createEncryptedPrefsWithRecovery()
+            storeInitialized = true
+        }
+    }
 
     private fun createEncryptedPrefsWithRecovery(): SharedPreferences? = createWithRecovery(
-        create = { createEncryptedPrefs(appContext) },
+        create = { encryptedPrefsFactory?.invoke(appContext) ?: createEncryptedPrefs(appContext) },
         wipe = { wipeEncryptedPrefs(appContext) },
     )
 

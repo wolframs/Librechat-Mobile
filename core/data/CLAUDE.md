@@ -45,6 +45,11 @@ Tokens are namespaced by account (`acct:<accountId>:access_token`) and several a
 retained at rest at once (multi-account, issue #179). Concurrency uses three cooperating pieces, not a
 single refresh mutex:
 
+- **Cold-start warm-up** — `AccountRegistry` calls `TokenManager.warmUp()` on its IO dispatcher before
+  completing `AccountReadyGate`. Android creates `EncryptedSharedPreferences` lazily there, not during
+  Koin construction on Main. First routing and all gated requests wait for the authoritative result;
+  `isAuthenticated` is a cache-only check and must never initiate secure-storage IO.
+
 - **`stateMutex`** — guards the in-memory identity + cached bearer and short storage reads/writes of
   it. Held only for brief critical sections, **never across the refresh network POST**, so a switch or
   logout never stalls behind a slow refresh.

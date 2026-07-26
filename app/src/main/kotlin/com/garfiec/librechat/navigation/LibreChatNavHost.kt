@@ -50,7 +50,7 @@ fun LibreChatNavHost(
             when (resolution) {
                 is DeepLinkResolution.Route -> {
                     val target = resolution.target
-                    val loggedIn = navHostViewModel.isLoggedIn.value
+                    val loggedIn = navHostViewModel.awaitAuthResolution()
                     when {
                         // Auth-required target while logged out → login. (Resuming to the target
                         // after login is a follow-up; this at least never lands on a broken screen.)

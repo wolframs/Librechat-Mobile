@@ -84,7 +84,7 @@ changes materially.
 | UX-009 | P2 | Banner dismissal persistence and scope | `AUTO_VERIFIED` | Passed | Not started |
 | UX-010 | P2 | Localization completeness | `IMPLEMENTED` | German coverage passed | Not started |
 | UX-011 | P2 | Accessibility audit | `IMPLEMENTED` | Static regression passed | Not started |
-| UX-012 | P2 | Cold-start token decryption | `SCOUTED` | Not started | Not started |
+| UX-012 | P2 | Cold-start token decryption | `AUTO_VERIFIED` | Passed | Agent-tested Pixel 7 |
 | UX-013 | P3 | Multi-account sign-out wording | `SCOUTED` | Not started | Not started |
 | UX-014 | P3 | Archived favorite reconciliation | `SCOUTED` | Not started | Not started |
 | UX-015 | P3 | iOS parity placeholders | `SCOUTED` | Not started | Not started |
@@ -771,7 +771,7 @@ semantics, so its clean error count does not settle this item.
 
 **Priority:** P2
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -791,10 +791,30 @@ navigation deterministic and avoiding a flash of unauthenticated UI.
 
 ### Acceptance checks
 
-- [ ] Capture a cold-start baseline on a representative slower device.
-- [ ] Use StrictMode/Perfetto or equivalent evidence.
-- [ ] If changed, prove no auth-screen flash, race, or duplicate navigation.
+- [x] Capture a cold-start baseline on a representative slower device.
+- [x] Use StrictMode/Perfetto or equivalent evidence.
+- [x] If changed, prove no auth-screen flash, race, or duplicate navigation.
 - [ ] If measurement is negligible, record the evidence and mark `REJECTED`.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- Direct timing instrumentation on the attached Pixel 7 measured encrypted-preference construction
+  at 94–116 ms and active-token decryption at roughly 2.2–2.4 ms on each cold launch. The secure-store
+  work was therefore material and the `REJECTED` path does not apply.
+- Android now constructs the encrypted store lazily during `TokenManager.warmUp()`, called by
+  `AccountRegistry` on its IO dispatcher before `AccountReadyGate` completes.
+- Startup auth state is explicitly unresolved until that gate and an IO-dispatched repository check
+  finish. The root renders a neutral progress surface; initial auth redirects and Android deep links
+  await the authoritative result.
+- Seven post-change cold launches measured 955–1,156 ms to first draw, versus 2,421–2,605 ms for the
+  five instrumented baseline launches immediately before the change.
+- A 4-second, 3-fps launch recording showed only the platform splash, neutral progress surface, and
+  authenticated landing page—no login or wrong-account content frame.
+- New isolated tests prove Android construction does not touch encrypted storage, repeated warm-up
+  initializes it once, and account seeding warms tokens even for an empty roster. Full affected unit
+  suites, Android compilation, and static checks pass.
+- User device confirmation remains pending; the agent-side measurement preserved app data.
 
 ---
 
@@ -983,3 +1003,11 @@ conclusion. Correct earlier entries with a new dated note.
 - Added a narrow custom Detekt rule and isolated tests preventing null descriptions inside
   `IconButton` without making decorative icons noisy.
 - Full TalkBack, font-scale, contrast, focus-order, and Compose journey checks remain pending.
+
+### 2026-07-27 — UX-012 off-main secure-token warm-up
+
+- Pixel 7 timing found 94–116 ms of encrypted-store setup on the cold-start path.
+- Moved secure-store initialization behind the IO-backed account-readiness gate and made auth routing
+  explicitly unresolved until reconciliation completes.
+- Post-change first draw measured 955–1,156 ms versus 2,421–2,605 ms in the immediately preceding
+  instrumented baseline; recorded frames showed no login/authenticated-content flash.

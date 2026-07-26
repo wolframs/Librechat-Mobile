@@ -48,6 +48,9 @@ class AccountRegistry(
     init {
         appScope.launch(ioDispatcher) {
             try {
+                // Android secure-store construction/decryption can take ~100 ms. Warm it here on the
+                // registry's IO dispatcher, before the readiness gate admits routing or requests.
+                tokenManager.warmUp()
                 // The persisted URL warm-up feeds migration and is the pre-roster fallback for the
                 // login screen. awaitBaseUrl() resolves ServerDataStore's own async warm-up.
                 val legacyUrl = serverDataStore.awaitBaseUrl()

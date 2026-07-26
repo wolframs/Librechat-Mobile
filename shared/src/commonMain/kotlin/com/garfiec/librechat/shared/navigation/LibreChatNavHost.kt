@@ -11,10 +11,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -31,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -120,7 +123,8 @@ fun LibreChatNavHost(
     LaunchedEffect(Unit) {
         if (!initialAuthRedirectDone) {
             initialAuthRedirectDone = true
-            if (!navHostViewModel.isLoggedIn.value && !hasPendingDeepLink) {
+            val loggedIn = navHostViewModel.awaitAuthResolution()
+            if (!loggedIn && !hasPendingDeepLink) {
                 navigator.navigateToAuth(navHostViewModel.hasSavedServerUrl())
             }
         }
@@ -133,7 +137,7 @@ fun LibreChatNavHost(
     val pendingModelShortcut by modelShortcutBus.pending.collectAsStateWithLifecycle()
     LaunchedEffect(pendingModelShortcut, isLoggedIn) {
         val ref = pendingModelShortcut ?: return@LaunchedEffect
-        if (!isLoggedIn) return@LaunchedEffect
+        if (isLoggedIn != true) return@LaunchedEffect
         navigator.navigateToTopLevel(NewChat(endpoint = ref.endpoint, model = ref.model))
         modelShortcutBus.consume()
     }
@@ -217,7 +221,16 @@ fun LibreChatNavHost(
     // UI so every stringResource re-resolves, while the back stack created above survives the swap
     // and the user stays on their current screen.
     AppLocale(tag = appLocaleTag) {
-        if (content != null) {
+        if (isLoggedIn == null) {
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (content != null) {
             content(navigator, navHostViewModel, modifier)
         } else {
             PhoneLayout(
@@ -299,7 +312,7 @@ fun PhoneLayout(
         // not just "not in the auth flow" — a logged-out deep link (e.g. an artifact viewer atop the
         // auth base) leaves a non-auth route on top, and without this its edge-swipe would open the
         // drawer over a session-less state.
-        gesturesEnabled = isLoggedIn && !navigator.isInAuthFlow,
+        gesturesEnabled = isLoggedIn == true && !navigator.isInAuthFlow,
         drawerContent = {
             ModalDrawerSheet(drawerState = drawerState) {
                 SidebarScaffold(

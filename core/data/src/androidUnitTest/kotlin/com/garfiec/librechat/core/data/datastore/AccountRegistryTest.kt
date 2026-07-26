@@ -75,6 +75,7 @@ class AccountRegistryTest {
         assertThat(provider.state.value).isEqualTo(Resolved(null))
         // An empty roster must NOT clear the token store: a pre-tenancy upgrade has an empty roster
         // while the live session sits under the bare keys, waiting for restoreAccountIfNeeded.
+        assertThat(token.warmed).isTrue()
         assertThat(token.cleared).isFalse()
         assertThat(token.selected).isNull()
     }
@@ -139,7 +140,9 @@ class AccountRegistryTest {
     private class FakeTokenManager : TokenManager {
         var selected: String? = null
         var cleared = false
+        var warmed = false
 
+        override suspend fun warmUp() { warmed = true }
         override val isAuthenticated: Boolean = false
         override suspend fun getAccessToken(): String? = null
         override suspend fun setTokens(accessToken: String, refreshToken: String) {}

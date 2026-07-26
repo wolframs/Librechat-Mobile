@@ -27,6 +27,13 @@ The framework is static (`isStatic = true`) and named `Shared`.
 - `navigation/` — Nav 3 route definitions and entry providers shared across platforms
 - `app/` — Shared app-level composables (root navigation host)
 
+### Cold-start auth routing
+
+`NavHostViewModel.isLoggedIn` is nullable during startup. `AccountRegistry` warms secure token storage
+off Main and completes `AccountReadyGate`; the VM then resolves the authoritative auth state on IO.
+`LibreChatNavHost` renders a neutral loading surface and `awaitAuthResolution()` gates initial auth and
+deep-link routing, preventing either authenticated-content or login-screen flashes.
+
 ## SKIE
 
 The SKIE Gradle plugin is applied here. All features are enabled by default:
