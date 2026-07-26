@@ -64,6 +64,7 @@
     <string name="section_appearance">Appearance</string>
     <string name="section_balance">Balance</string>
     <string name="section_chat_preferences">Chat Preferences</string>
+    <string name="section_connections">Connections</string>
     <string name="section_conversations">Conversations</string>
     <string name="section_danger_zone">Danger Zone</string>
     <string name="section_language">Language</string>
@@ -86,6 +87,7 @@
     <string name="title_mcp_servers">MCP Servers</string>
     <string name="title_presets">Presets</string>
     <string name="title_settings">Settings</string>
+    <string name="title_server_profiles">Server Profiles</string>
     <string name="title_shared_links">Shared Links</string>
 
     <!-- Tabbed settings tabs -->
@@ -110,6 +112,19 @@
     <string name="language">Language</string>
     <string name="language_system_default">System default</string>
     <string name="personalization">Personalization</string>
+    <string name="server_profiles">Server profiles</string>
+    <string name="server_profiles_subtitle">Manage servers, accounts, and HTTP warnings</string>
+    <string name="server_profiles_description">Server profiles are local connection records. Saved passwords remain under your system password manager's control.</string>
+    <string name="add_server_or_account">Add server or account</string>
+    <string name="active_server">Active server</string>
+    <string name="active_account">Active</string>
+    <string name="no_signed_in_accounts">No signed-in accounts</string>
+    <string name="switch_account">Switch</string>
+    <string name="restore_http_warning">Restore HTTP warning</string>
+    <string name="forget_server_profile">Forget server</string>
+    <string name="forget_server_title">Forget server profile?</string>
+    <string name="forget_server_without_accounts">Forget %1$s and its local warning decisions and credential references? Passwords stored by the system password manager are not deleted.</string>
+    <string name="forget_server_with_accounts">Forget %1$s and remove its %2$d signed-in account(s), cached data, warning decisions, and credential references? Passwords stored by the system password manager are not deleted.</string>
     <string name="status_enabled">Enabled</string>
     <string name="status_disabled">Disabled</string>
     <string name="fork_behavior">Fork Behavior</string>

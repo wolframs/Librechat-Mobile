@@ -11,6 +11,7 @@ import com.garfiec.librechat.feature.settings.screen.DataSettingsScreen
 import com.garfiec.librechat.feature.settings.screen.GeneralSettingsScreen
 import com.garfiec.librechat.feature.settings.screen.PresetManagerScreen
 import com.garfiec.librechat.feature.settings.screen.SharedLinksScreen
+import com.garfiec.librechat.feature.settings.screen.ServerProfilesScreen
 import com.garfiec.librechat.feature.settings.screen.TabbedSettingsScreen
 import com.garfiec.librechat.feature.settings.screen.providerkeys.ProviderKeysScreen
 import com.garfiec.librechat.feature.settings.viewmodel.SettingsViewModel
@@ -38,6 +39,8 @@ import org.koin.compose.viewmodel.koinViewModel
 
 @Serializable data object ApiKeys : SettingsRoute
 
+@Serializable data object ServerProfiles : SettingsRoute
+
 /**
  * Provider API Keys list screen route.
  *
@@ -55,6 +58,7 @@ fun EntryProviderScope<NavKey>.settingsEntries(
     onBack: () -> Unit,
     onLogout: () -> Unit,
     onNavigateToArchive: () -> Unit = {},
+    onAddAccount: () -> Unit = {},
 ) {
     // Hoisted: navigation to ProviderKeys() (no pending endpoint) is identical in Tabbed
     // and Account — share the resolver so callers don't construct it twice.
@@ -71,11 +75,13 @@ fun EntryProviderScope<NavKey>.settingsEntries(
             onNavigateToFavorites = { onNavigate(Favorites) },
             onNavigateToProviderKeys = navigateToProviderKeys,
             onNavigateToRoleSkillsAdmin = { onNavigate(RoleSkillsAdmin) },
+            onNavigateToServerProfiles = { onNavigate(ServerProfiles) },
         )
     }
     entry<SettingsGeneral> {
         GeneralSettingsScreen(
             onNavigateBack = onBack,
+            onNavigateToServerProfiles = { onNavigate(ServerProfiles) },
         )
     }
     entry<SettingsChat> {
@@ -131,6 +137,12 @@ fun EntryProviderScope<NavKey>.settingsEntries(
             onNavigateBack = onBack,
         )
     }
+    entry<ServerProfiles> {
+        ServerProfilesScreen(
+            onNavigateBack = onBack,
+            onAddAccount = onAddAccount,
+        )
+    }
     entry<ProviderKeys> { route ->
         ProviderKeysScreen(
             onNavigateBack = onBack,
@@ -152,6 +164,7 @@ val settingsSerializersModule = SerializersModule {
         subclass(SharedLinks::class, SharedLinks.serializer())
         subclass(PresetManager::class, PresetManager.serializer())
         subclass(ApiKeys::class, ApiKeys.serializer())
+        subclass(ServerProfiles::class, ServerProfiles.serializer())
         subclass(ProviderKeys::class, ProviderKeys.serializer())
         subclass(Memories::class, Memories.serializer())
         subclass(McpServers::class, McpServers.serializer())

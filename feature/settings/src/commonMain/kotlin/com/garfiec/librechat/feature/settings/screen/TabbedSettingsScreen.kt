@@ -47,6 +47,7 @@ fun TabbedSettingsScreen(
     onNavigateToFavorites: () -> Unit,
     onNavigateToProviderKeys: () -> Unit,
     onNavigateToRoleSkillsAdmin: () -> Unit,
+    onNavigateToServerProfiles: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val pagerState = rememberPagerState(pageCount = { SETTINGS_TAB_COUNT })
@@ -103,6 +104,7 @@ fun TabbedSettingsScreen(
         ) { page ->
             when (page) {
                 0 -> GeneralSettingsContent(
+                    onNavigateToServerProfiles = onNavigateToServerProfiles,
                     modifier = Modifier.fillMaxSize(),
                 )
                 1 -> ChatSettingsContent(

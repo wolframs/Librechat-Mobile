@@ -486,6 +486,7 @@ fun MainNavDisplay(
                 // successor was promoted.
                 onLogout = { navHostViewModel.logout() },
                 onNavigateToArchive = { navigator.navigate(ArchivedConversations) },
+                onAddAccount = { navigator.navigate(AddAccountServerUrl) },
             )
             memoriesEntry(
                 onBack = { navigator.goBack() },

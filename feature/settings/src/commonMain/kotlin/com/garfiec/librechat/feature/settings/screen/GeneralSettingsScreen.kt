@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tablet
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,6 +68,7 @@ private const val DISABLED_ALPHA = 0.4f
 @Composable
 fun GeneralSettingsScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToServerProfiles: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -86,6 +88,7 @@ fun GeneralSettingsScreen(
         },
     ) { innerPadding ->
         GeneralSettingsContent(
+            onNavigateToServerProfiles = onNavigateToServerProfiles,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
@@ -99,6 +102,7 @@ fun GeneralSettingsScreen(
  */
 @Composable
 fun GeneralSettingsContent(
+    onNavigateToServerProfiles: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = koinViewModel(),
 ) {
@@ -175,6 +179,18 @@ fun GeneralSettingsContent(
                         stringResource(Res.string.status_disabled)
                     },
                     onClick = viewModel::showPersonalizationDialog,
+                )
+            }
+
+            item(key = "connections_header") {
+                SectionHeader(stringResource(Res.string.section_connections))
+            }
+            item(key = "server_profiles_row") {
+                GeneralSettingsRow(
+                    icon = Icons.Default.Storage,
+                    title = stringResource(Res.string.server_profiles),
+                    subtitle = stringResource(Res.string.server_profiles_subtitle),
+                    onClick = onNavigateToServerProfiles,
                 )
             }
 

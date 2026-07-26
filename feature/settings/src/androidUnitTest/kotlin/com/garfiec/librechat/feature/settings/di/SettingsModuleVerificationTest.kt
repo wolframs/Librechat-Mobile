@@ -3,10 +3,13 @@ package com.garfiec.librechat.feature.settings.di
 import android.app.Application
 import android.content.Context
 import com.garfiec.librechat.core.common.AppInfo
+import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
+import com.garfiec.librechat.core.data.datastore.AccountRoster
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.datastore.ThemeDataStore
 import com.garfiec.librechat.core.data.repository.ApiKeyRepository
+import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.data.repository.BalanceRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
@@ -37,6 +40,9 @@ class SettingsModuleVerificationTest {
                 Context::class,
                 Application::class,
                 AppInfo::class,
+                ActiveAccountProvider::class,
+                AccountRoster::class,
+                AccountSwitcher::class,
                 UserRepository::class,
                 AuthRepository::class,
                 ConfigRepository::class,

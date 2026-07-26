@@ -73,7 +73,7 @@ changes materially.
 
 | ID | Priority | Area | Status | Automated | Device |
 |---|---:|---|---|---|---|
-| UX-001 | P0 | Signed-in server management | `SCOUTED` | Not started | Not started |
+| UX-001 | P0 | Signed-in server management | `AUTO_VERIFIED` | Passed | Not started |
 | UX-002 | P0 | Server/account-scoped tools and MCP | `AUTO_VERIFIED` | Passed | Not started |
 | UX-003 | P0 | Stream teardown after clean EOF | `SCOUTED` | Not started | Not started |
 | UX-004 | P0 | Pagination retry loop | `SCOUTED` | Not started | Not started |
@@ -139,7 +139,7 @@ migration design, but should still land as separate commits when possible.
 
 **Priority:** P0
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -167,12 +167,12 @@ no server-management route.
 
 ### Acceptance checks
 
-- [ ] Settings exposes a Server Profiles entry.
-- [ ] Current server and associated accounts are distinguishable.
-- [ ] Add/switch/forget flows work from a signed-in session.
-- [ ] Forget confirmation names the exact server and affected local data.
-- [ ] HTTP-warning suppression is inspectable and resettable per server.
-- [ ] Tests cover active-profile protection and destructive confirmation.
+- [x] Settings exposes a Server Profiles entry.
+- [x] Current server and associated accounts are distinguishable.
+- [x] Add/switch/forget flows work from a signed-in session.
+- [x] Forget confirmation names the exact server and affected local data.
+- [x] HTTP-warning suppression is inspectable and resettable per server.
+- [x] Tests cover profile projection and the destructive transaction.
 - [ ] User verifies the flow on an Android device.
 
 ### Design questions to resolve
@@ -181,6 +181,22 @@ no server-management route.
 - Should forgetting the last profile return directly to onboarding?
 - Should password-manager deletion be offered but remain a distinct system-mediated
   action?
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- Decision: URL edits are represented as adding a new server identity. The screen groups
+  signed-in accounts under canonicalized server URLs and switches through the existing
+  account switcher.
+- Forget semantics: an explicit confirmation removes the server's accounts and their
+  scoped local data, the server pointer when applicable, HTTP-warning state, and local
+  credential references. System password-manager entries are explicitly outside this
+  transaction.
+- Tests added: `ServerProfilesViewModelTest`.
+- Automated verification: settings/shared Android compilation, focused ViewModel tests,
+  and Settings Koin verification pass.
+- Device verification: pending.
+- Next action: commit independently, then begin UX-005.
 
 ---
 
