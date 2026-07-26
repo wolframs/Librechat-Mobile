@@ -1,6 +1,7 @@
 package com.garfiec.librechat.feature.auth.viewmodel
 
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.data.datastore.SavedLoginCredentialRef
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.AuthRepository
@@ -8,6 +9,7 @@ import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.model.LoginOutcome
 import com.garfiec.librechat.core.model.User
 import com.garfiec.librechat.core.model.config.StartupConfig
+import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
 import com.garfiec.librechat.feature.auth.oauth.OAuthLauncher
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
@@ -36,6 +38,7 @@ class LoginViewModelTest {
     private val oAuthLauncher = mockk<OAuthLauncher>(relaxed = true)
     private val serverDataStore = mockk<ServerDataStore>(relaxed = true)
     private val accountSwitcher = mockk<AccountSwitcher>(relaxed = true)
+    private lateinit var credentialSaveHandoff: PendingCredentialSaveHandoff
 
     private val configFlow = MutableStateFlow<StartupConfig?>(null)
 
@@ -44,6 +47,7 @@ class LoginViewModelTest {
     @Before
     fun setup() {
         Dispatchers.setMain(testDispatcher)
+        credentialSaveHandoff = PendingCredentialSaveHandoff()
         every { configRepository.startupConfig } returns configFlow
         // No add-account flow pending: the VM reads the global config + live server URL.
         every { accountSwitcher.pendingAdd } returns null
@@ -63,6 +67,7 @@ class LoginViewModelTest {
         oAuthLauncher = oAuthLauncher,
         serverDataStore = serverDataStore,
         accountSwitcher = accountSwitcher,
+        credentialSaveHandoff = credentialSaveHandoff,
     )
 
     @Test
@@ -171,6 +176,40 @@ class LoginViewModelTest {
         assertThat(state.twoFactorTempToken).isEqualTo("temp-token-123")
         assertThat(state.isLoggedIn).isFalse()
         assertThat(state.isLoading).isFalse()
+        assertThat(state.password).isEmpty()
+        assertThat(credentialSaveHandoff.consume()?.password).isEqualTo("password123")
+    }
+
+    @Test
+    fun `saved credential login completes without requesting another save`() = runTest {
+        val ref = SavedLoginCredentialRef(
+            serverUrl = "https://chat.example.com",
+            credentialId = "stored-id",
+            username = "user@example.com",
+        )
+        every { serverDataStore.savedLoginCredentials(any()) } returns flowOf(listOf(ref))
+        coEvery { authRepository.login("user@example.com", "password123") } returns
+            Result.Success(LoginOutcome.Success(User(email = "user@example.com")))
+
+        viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.loginWithSavedCredential(ref, "password123")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertThat(state.isLoggedIn).isTrue()
+        assertThat(state.pendingCredentialSave).isNull()
+        assertThat(state.password).isEmpty()
+    }
+
+    @Test
+    fun `credential identity distinguishes deployments on different paths`() {
+        val first = buildCredentialId("user@example.com", "https://chat.example.com/alpha")
+        val second = buildCredentialId("user@example.com", "https://chat.example.com/beta")
+
+        assertThat(first).isNotEqualTo(second)
+        assertThat(first).contains("chat.example.com")
+        assertThat(second).contains("chat.example.com")
     }
 
     @Test

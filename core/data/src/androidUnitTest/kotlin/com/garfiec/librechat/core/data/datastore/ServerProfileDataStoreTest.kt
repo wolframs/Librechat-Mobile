@@ -65,6 +65,26 @@ class ServerProfileDataStoreTest {
         }
 
     @Test
+    fun `new credential identity replaces the legacy pointer for the same server username`() =
+        runTest(dispatcher) {
+            val store = createStore("credential-id-migration")
+            val legacy = SavedLoginCredentialRef(
+                serverUrl = "https://chat.example.com",
+                credentialId = "user@example.com · chat.example.com",
+                username = "user@example.com",
+            )
+            val canonical = legacy.copy(
+                credentialId = "user@example.com · chat.example.com · 0123456789abcdef",
+            )
+
+            store.rememberLoginCredential(legacy)
+            store.rememberLoginCredential(canonical)
+
+            assertThat(store.savedLoginCredentials(legacy.serverUrl).first())
+                .containsExactly(canonical)
+        }
+
+    @Test
     fun `forgetting a server removes its warning decision and credential pointers`() =
         runTest(dispatcher) {
             val store = createStore("forget")

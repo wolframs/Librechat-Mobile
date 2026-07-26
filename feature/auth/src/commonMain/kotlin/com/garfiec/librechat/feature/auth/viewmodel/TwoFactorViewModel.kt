@@ -3,8 +3,12 @@ package com.garfiec.librechat.feature.auth.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.model.VerifyTwoFactorOutcome
+import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSave
+import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +22,7 @@ data class TwoFactorUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val isVerified: Boolean = false,
+    val pendingCredentialSave: PendingCredentialSave? = null,
     // Bumped whenever the entered code is cleared as spent (evaluated-and-rejected, or accepted
     // with an unusable session); the digit row keys its focus-reset effect on this.
     val codeAttempt: Int = 0,
@@ -25,6 +30,8 @@ data class TwoFactorUiState(
 
 class TwoFactorViewModel(
     private val authRepository: AuthRepository,
+    private val serverDataStore: ServerDataStore,
+    private val credentialSaveHandoff: PendingCredentialSaveHandoff,
     initialTempToken: String? = null,
 ) : ViewModel() {
 
@@ -90,9 +97,11 @@ class TwoFactorViewModel(
                 // committed in the token store, so anything but completing sign-in would strand
                 // an authenticated user here.
                 is VerifyTwoFactorOutcome.Success -> {
+                    val pendingSave = credentialSaveHandoff.consume()
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        isVerified = true,
+                        pendingCredentialSave = pendingSave,
+                        isVerified = pendingSave == null,
                     )
                 }
                 // Failure outcomes are dropped when superseded — the toggle already reset the
@@ -129,5 +138,35 @@ class TwoFactorViewModel(
             backupCode = if (clearEntry) "" else state.backupCode,
             codeAttempt = if (clearEntry) state.codeAttempt + 1 else state.codeAttempt,
         )
+    }
+
+    fun onCredentialSaveHandled(saved: Boolean) {
+        val pending = _uiState.value.pendingCredentialSave ?: return
+        viewModelScope.launch {
+            if (saved) {
+                try {
+                    serverDataStore.rememberLoginCredential(pending.ref)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The session and password-provider save already succeeded. A non-secret
+                    // pointer failure must not strand an authenticated user on the 2FA screen.
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                pendingCredentialSave = null,
+                isVerified = true,
+            )
+        }
+    }
+
+    fun abandon() {
+        credentialSaveHandoff.clear()
+        _uiState.value = _uiState.value.copy(pendingCredentialSave = null)
+    }
+
+    override fun onCleared() {
+        credentialSaveHandoff.clear()
+        super.onCleared()
     }
 }

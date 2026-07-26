@@ -1,5 +1,6 @@
 package com.garfiec.librechat.feature.auth.di
 
+import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
 import com.garfiec.librechat.feature.auth.viewmodel.ForgotPasswordViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.LoginViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.RegisterViewModel
@@ -9,6 +10,7 @@ import com.garfiec.librechat.feature.auth.viewmodel.TermsViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.TwoFactorViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.VerifyEmailViewModel
 import org.koin.core.module.Module
+import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
@@ -17,6 +19,7 @@ expect val authPlatformModule: Module
 
 val authModule = module {
     includes(authPlatformModule)
+    singleOf(::PendingCredentialSaveHandoff)
     // Lambda form (not viewModelOf) for the addAccount mode flag the add-account nav entry passes
     // via parametersOf — see the DeprecatedKoinApi note below.
     @Suppress("DeprecatedKoinApi")
@@ -56,6 +59,8 @@ val authModule = module {
     viewModel { params ->
         TwoFactorViewModel(
             authRepository = get(),
+            serverDataStore = get(),
+            credentialSaveHandoff = get(),
             initialTempToken = params.getOrNull(),
         )
     }

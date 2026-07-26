@@ -42,6 +42,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.garfiec.librechat.feature.auth.credentials.PasswordSaveRequest
+import com.garfiec.librechat.feature.auth.credentials.rememberPasswordCredentialManager
 import com.garfiec.librechat.feature.auth.resources.*
 import com.garfiec.librechat.feature.auth.resources.Res
 import com.garfiec.librechat.feature.auth.viewmodel.TwoFactorViewModel
@@ -60,9 +62,26 @@ fun TwoFactorScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val currentOnVerify by rememberUpdatedState(onVerify)
+    val credentialManager = rememberPasswordCredentialManager()
 
     LaunchedEffect(uiState.isVerified) {
         if (uiState.isVerified) currentOnVerify()
+    }
+
+    LaunchedEffect(uiState.pendingCredentialSave) {
+        val pending = uiState.pendingCredentialSave ?: return@LaunchedEffect
+        val saved = credentialManager?.saveCredential(
+            PasswordSaveRequest(
+                id = pending.ref.credentialId,
+                password = pending.password,
+            ),
+        ) ?: false
+        viewModel.onCredentialSaveHandled(saved)
+    }
+
+    val abandonAndGoBack = {
+        viewModel.abandon()
+        onBack()
     }
 
     Scaffold(
@@ -71,7 +90,7 @@ fun TwoFactorScreen(
             TopAppBar(
                 title = { Text(stringResource(Res.string.two_factor_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = abandonAndGoBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.back),

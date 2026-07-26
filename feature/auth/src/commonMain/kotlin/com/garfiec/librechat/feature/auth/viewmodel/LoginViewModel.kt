@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.garfiec.librechat.core.common.extensions.serverHostLabel
+import com.garfiec.librechat.core.common.identity.deriveServerId
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.SavedLoginCredentialRef
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
@@ -11,6 +12,8 @@ import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.model.LoginOutcome
+import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSave
+import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
 import com.garfiec.librechat.feature.auth.oauth.OAuthLauncher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,18 +36,13 @@ data class LoginUiState(
     val pendingCredentialSave: PendingCredentialSave? = null,
 )
 
-@Immutable
-data class PendingCredentialSave(
-    val ref: SavedLoginCredentialRef,
-    val password: String,
-)
-
 class LoginViewModel(
     private val authRepository: AuthRepository,
     private val configRepository: ConfigRepository,
     private val oAuthLauncher: OAuthLauncher,
     private val serverDataStore: ServerDataStore,
     private val accountSwitcher: AccountSwitcher,
+    private val credentialSaveHandoff: PendingCredentialSaveHandoff,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LoginUiState())
@@ -90,12 +88,18 @@ class LoginViewModel(
     }
 
     fun login() {
+        login(offerCredentialSave = true)
+    }
+
+    private fun login(offerCredentialSave: Boolean) {
         val state = _uiState.value
         if (state.email.isBlank() || state.password.isBlank()) {
             _uiState.value = state.copy(error = "Please enter email and password")
             return
         }
 
+        // A new attempt supersedes any abandoned 2FA handoff from this process.
+        credentialSaveHandoff.clear()
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             val serverUrl = signInServerUrl()
@@ -104,27 +108,50 @@ class LoginViewModel(
                 is Result.Success -> {
                     when (val outcome = result.data) {
                         is LoginOutcome.Success -> {
-                            _uiState.value = _uiState.value.copy(
-                                isLoading = false,
-                                pendingCredentialSave = PendingCredentialSave(
+                            val pendingSave = if (offerCredentialSave) {
+                                PendingCredentialSave(
                                     ref = SavedLoginCredentialRef(
                                         serverUrl = serverUrl,
-                                        credentialId = credentialId(state.email, serverUrl),
+                                        credentialId = buildCredentialId(state.email, serverUrl),
                                         username = state.email.trim(),
                                     ),
                                     password = state.password,
-                                ),
+                                )
+                            } else {
+                                null
+                            }
+                            _uiState.value = _uiState.value.copy(
+                                isLoading = false,
+                                password = if (pendingSave == null) "" else state.password,
+                                pendingCredentialSave = pendingSave,
+                                isLoggedIn = pendingSave == null,
                             )
                         }
                         is LoginOutcome.TwoFactorRequired -> {
+                            if (offerCredentialSave) {
+                                credentialSaveHandoff.stage(
+                                    PendingCredentialSave(
+                                        ref = SavedLoginCredentialRef(
+                                            serverUrl = serverUrl,
+                                            credentialId = buildCredentialId(state.email, serverUrl),
+                                            username = state.email.trim(),
+                                        ),
+                                        password = state.password,
+                                    ),
+                                )
+                            }
                             _uiState.value = _uiState.value.copy(
                                 isLoading = false,
+                                // The only remaining plaintext copy now lives in the short-lived,
+                                // process-memory handoff and is cleared on success or abandonment.
+                                password = "",
                                 twoFactorTempToken = outcome.tempToken,
                             )
                         }
                     }
                 }
                 is Result.Error -> {
+                    credentialSaveHandoff.clear()
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         error = result.message ?: "Login failed",
@@ -142,7 +169,7 @@ class LoginViewModel(
             password = password,
             error = null,
         )
-        login()
+        login(offerCredentialSave = false)
     }
 
     fun onCredentialSaveHandled(saved: Boolean) {
@@ -223,7 +250,11 @@ class LoginViewModel(
             }
         }
     }
-
-    private fun credentialId(email: String, serverUrl: String): String =
-        "${email.trim()} · ${serverUrl.serverHostLabel()}"
 }
+
+/**
+ * Human-recognizable credential label with the canonical deployment identity appended. The host
+ * remains useful in the system picker while the server id keeps different paths and ports distinct.
+ */
+internal fun buildCredentialId(email: String, serverUrl: String): String =
+    "${email.trim()} · ${serverUrl.serverHostLabel()} · ${deriveServerId(serverUrl).value}"

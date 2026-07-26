@@ -1,8 +1,12 @@
 package com.garfiec.librechat.feature.auth.viewmodel
 
+import com.garfiec.librechat.core.data.datastore.SavedLoginCredentialRef
+import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.model.User
 import com.garfiec.librechat.core.model.VerifyTwoFactorOutcome
+import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSave
+import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -25,14 +29,24 @@ class TwoFactorViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val authRepository = mockk<AuthRepository>(relaxed = true)
+    private val serverDataStore = mockk<ServerDataStore>(relaxed = true)
+    private lateinit var credentialSaveHandoff: PendingCredentialSaveHandoff
 
     @Before
-    fun setup() = Dispatchers.setMain(testDispatcher)
+    fun setup() {
+        Dispatchers.setMain(testDispatcher)
+        credentialSaveHandoff = PendingCredentialSaveHandoff()
+    }
 
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun createViewModel() = TwoFactorViewModel(authRepository, initialTempToken = TEMP_TOKEN)
+    private fun createViewModel() = TwoFactorViewModel(
+        authRepository = authRepository,
+        serverDataStore = serverDataStore,
+        credentialSaveHandoff = credentialSaveHandoff,
+        initialTempToken = TEMP_TOKEN,
+    )
 
     private fun TwoFactorViewModel.enterDigits(code: String) =
         code.forEachIndexed { index, digit -> onDigitChanged(index, digit.toString()) }
@@ -64,6 +78,53 @@ class TwoFactorViewModelTest {
 
         coVerify { authRepository.verifyTwoFactor(TEMP_TOKEN, "abcd1234", true) }
         assertThat(viewModel.uiState.value.isVerified).isTrue()
+    }
+
+    @Test
+    fun `successful verification offers staged password save before navigation`() = runTest {
+        val pending = PendingCredentialSave(
+            ref = SavedLoginCredentialRef(
+                serverUrl = "https://chat.example.com",
+                credentialId = "user · server-id",
+                username = "user@example.com",
+            ),
+            password = "password123",
+        )
+        credentialSaveHandoff.stage(pending)
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.Success(USER)
+
+        val viewModel = createViewModel()
+        viewModel.enterDigits("123456")
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.pendingCredentialSave).isEqualTo(pending)
+        assertThat(viewModel.uiState.value.isVerified).isFalse()
+
+        viewModel.onCredentialSaveHandled(saved = true)
+        advanceUntilIdle()
+
+        coVerify { serverDataStore.rememberLoginCredential(pending.ref) }
+        assertThat(viewModel.uiState.value.pendingCredentialSave).isNull()
+        assertThat(viewModel.uiState.value.isVerified).isTrue()
+    }
+
+    @Test
+    fun `abandoning verification clears staged password`() = runTest {
+        credentialSaveHandoff.stage(
+            PendingCredentialSave(
+                ref = SavedLoginCredentialRef(
+                    serverUrl = "https://chat.example.com",
+                    credentialId = "user · server-id",
+                    username = "user@example.com",
+                ),
+                password = "password123",
+            ),
+        )
+
+        createViewModel().abandon()
+
+        assertThat(credentialSaveHandoff.consume()).isNull()
     }
 
     @Test

@@ -217,7 +217,8 @@ class ServerDataStore(
             val withoutSameCredential = decodeLoginRefs(prefs[KEY_SAVED_LOGIN_REFS])
                 .filterNot {
                     it.serverUrl == normalizedRef.serverUrl &&
-                        it.credentialId == normalizedRef.credentialId
+                        (it.credentialId == normalizedRef.credentialId ||
+                            it.username == normalizedRef.username)
                 }
             prefs[KEY_SAVED_LOGIN_REFS] = encodeLoginRefs(withoutSameCredential + normalizedRef)
         }

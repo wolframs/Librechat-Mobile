@@ -77,7 +77,7 @@ changes materially.
 | UX-002 | P0 | Server/account-scoped tools and MCP | `AUTO_VERIFIED` | Passed | Not started |
 | UX-003 | P0 | Stream teardown after clean EOF | `SCOUTED` | Not started | Not started |
 | UX-004 | P0 | Pagination retry loop | `SCOUTED` | Not started | Not started |
-| UX-005 | P1 | Credential Manager lifecycle | `SCOUTED` | Not started | Not started |
+| UX-005 | P1 | Credential Manager lifecycle | `AUTO_VERIFIED` | Passed | Not started |
 | UX-006 | P1 | Agent editor draft protection | `SCOUTED` | Not started | Not started |
 | UX-007 | P1 | Memory-safe, cancellable uploads | `SCOUTED` | Not started | Not started |
 | UX-008 | P2 | Draft attachment and queue recovery | `SCOUTED` | Not started | Not started |
@@ -353,7 +353,7 @@ a visible retry state and requires explicit retry or a meaningful new trigger.
 
 **Priority:** P1
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -389,14 +389,29 @@ a visible retry state and requires explicit retry or a meaningful new trigger.
 
 ### Acceptance checks
 
-- [ ] Fresh password login offers system save.
-- [ ] Password login plus 2FA offers system save only after success.
-- [ ] Selecting a saved credential does not create a redundant save prompt.
-- [ ] Same host with different LibreChat paths produces distinct credential identities.
-- [ ] Failed login and abandoned 2FA clear transient password state.
-- [ ] Android Credential Manager tests cover create, retrieve, update, cancellation, and
+- [x] Fresh password login offers system save.
+- [x] Password login plus 2FA offers system save only after success.
+- [x] Selecting a saved credential does not create a redundant save prompt.
+- [x] Same host with different LibreChat paths produces distinct credential identities.
+- [x] Failed login and abandoned 2FA clear transient password handoff state.
+- [x] Android Credential Manager tests cover create, retrieve, update, cancellation, and
   provider failure.
 - [ ] User verifies with both ordinary and 2FA test accounts.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- Password-save intent crosses the 2FA route in a process-memory-only singleton. It is
+  consumed after successful verification and cleared on abandonment; it is never placed
+  in navigation state, DataStore, Room, logs, or durable docs.
+- Saved-credential login bypasses the create/update prompt. New credential labels retain a
+  readable host and append the canonical server identity hash so path and port variants do
+  not collide.
+- Android provider behavior is isolated behind a small gateway and tested for scoped
+  retrieval, create/update, dismissal/provider failure, and coroutine cancellation.
+- Automated verification: auth and data unit suites, auth/data Detekt, Koin graph
+  verification, and shared Android compilation pass.
+- Device verification: pending for ordinary and 2FA accounts.
 
 ---
 
