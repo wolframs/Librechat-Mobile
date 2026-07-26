@@ -10,6 +10,7 @@ import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.FileRepository
 import com.garfiec.librechat.core.model.FileObject
 import com.garfiec.librechat.core.model.request.DeleteFileEntry
+import com.garfiec.librechat.core.model.response.effectiveFileSizeLimit
 import com.garfiec.librechat.core.ui.media.MediaItem
 import com.garfiec.librechat.core.ui.media.MediaPreviewState
 import com.garfiec.librechat.feature.files.FileDisplayData
@@ -271,9 +272,9 @@ class FilesViewModel(
                 )
             }
             val mimeType = fileReader.getMimeType(fileRef) ?: "application/octet-stream"
-            val bytes = fileReader.readBytes(fileRef)
-            if (bytes == null) {
-                Logger.e { "uploadFile: could not read bytes from file reference" }
+            val source = fileReader.openUploadSource(fileRef)
+            if (source == null) {
+                Logger.e { "uploadFile: could not create a source from the file reference" }
                 updateTransient {
                     copy(
                         isUploading = false,
@@ -285,11 +286,36 @@ class FilesViewModel(
                 return@launch
             }
 
+            val sizeLimit = when (val config = fileRepository.getFileConfig()) {
+                is Result.Success -> config.data.effectiveFileSizeLimit("agents")
+                else -> null
+            }
+            val contentLength = source.contentLength
+            if (
+                contentLength != null &&
+                sizeLimit != null &&
+                sizeLimit > 0L &&
+                contentLength > sizeLimit
+            ) {
+                updateTransient {
+                    copy(
+                        isUploading = false,
+                        uploadFilename = "",
+                        uploadProgress = null,
+                        error = "File is too large. Maximum size is ${formatFileSize(sizeLimit)}",
+                    )
+                }
+                return@launch
+            }
+
             val fileId = Uuid.random().toString()
-            Logger.d { "uploadFile: filename=$filename, mimeType=$mimeType, size=${bytes.size}, fileId=$fileId" }
+            Logger.d {
+                "uploadFile: filename=$filename, mimeType=$mimeType, " +
+                    "size=${contentLength ?: "unknown"}, fileId=$fileId"
+            }
 
             when (val result = fileRepository.uploadFile(
-                bytes = bytes,
+                source = source,
                 filename = filename,
                 type = mimeType,
                 fileId = fileId,

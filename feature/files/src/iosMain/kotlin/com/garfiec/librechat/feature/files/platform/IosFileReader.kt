@@ -1,21 +1,25 @@
 package com.garfiec.librechat.feature.files.platform
 
-import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.usePinned
-import platform.Foundation.NSData
+import com.garfiec.librechat.core.network.upload.StreamingUploadSource
+import io.ktor.utils.io.ByteReadChannel
+import kotlinx.io.buffered
+import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
 import platform.Foundation.NSURL
-import platform.Foundation.dataWithContentsOfURL
 import platform.Foundation.lastPathComponent
 import platform.Foundation.pathExtension
-import platform.posix.memcpy
 
 class IosFileReader : FileReader {
 
-    override fun readBytes(fileRef: Any): ByteArray? {
+    override fun openUploadSource(fileRef: Any): StreamingUploadSource? {
         val url = fileRef as? NSURL ?: return null
-        val data = NSData.dataWithContentsOfURL(url) ?: return null
-        return data.toByteArray()
+        val path = url.path?.let(::Path) ?: return null
+        val size = runCatching {
+            SystemFileSystem.metadataOrNull(path)?.size?.takeIf { it >= 0L }
+        }.getOrNull()
+        return StreamingUploadSource(size) {
+            ByteReadChannel(SystemFileSystem.source(path).buffered())
+        }
     }
 
     override fun getFileName(fileRef: Any): String? {
@@ -28,15 +32,4 @@ class IosFileReader : FileReader {
         val ext = url.pathExtension ?: return null
         return CommonMimeTypes.fromExtension(ext)
     }
-}
-
-@OptIn(ExperimentalForeignApi::class)
-private fun NSData.toByteArray(): ByteArray {
-    val size = length.toInt()
-    if (size == 0) return ByteArray(0)
-    val result = ByteArray(size)
-    result.usePinned { pinned ->
-        memcpy(pinned.addressOf(0), bytes, length)
-    }
-    return result
 }

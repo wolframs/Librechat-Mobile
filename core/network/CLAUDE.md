@@ -78,4 +78,6 @@ The Ktor SSE plugin uses the same `NSURLSessionDataTask` code path as the regula
 - Dependencies: `:core:model`, `:core:common`, Ktor bundles, kotlinx-serialization, Timber, Koin.
 - Convention plugins: `librechat.mobile.library` + `librechat.mobile.koin` + `librechat.kotlin.serialization`.
 - API services must not contain business logic -- they are thin HTTP wrappers.
+- Large multipart file uploads use `StreamingUploadSource` + `ChannelProvider`; the source must
+  reopen a fresh channel for request replay and must not eagerly materialize the full file.
 - All `arg`-wrapped endpoints must match the backend pattern: `setBody(mapOf("arg" to mapOf(...)))`.

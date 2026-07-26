@@ -6,11 +6,13 @@ import com.garfiec.librechat.core.model.request.DeleteFilesRequest
 import com.garfiec.librechat.core.model.response.FileDownloadURLResponse
 import com.garfiec.librechat.core.model.response.FilePreviewResponse
 import com.garfiec.librechat.core.model.response.FileUploadConfig
+import com.garfiec.librechat.core.network.upload.StreamingUploadSource
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.onUpload
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.delete
+import io.ktor.client.request.forms.ChannelProvider
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.get
@@ -19,6 +21,7 @@ import io.ktor.client.request.setBody
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.path
+import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.CancellationException
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -50,18 +53,51 @@ class FilesApi constructor(
         width: Int? = null,
         height: Int? = null,
         onProgress: ((Float) -> Unit)? = null,
+    ): FileObject = uploadFile(
+        source = StreamingUploadSource(bytes.size.toLong()) { ByteReadChannel(bytes) },
+        filename = filename,
+        type = type,
+        fileId = fileId,
+        endpoint = endpoint,
+        model = model,
+        agentId = agentId,
+        toolResource = toolResource,
+        messageFile = messageFile,
+        width = width,
+        height = height,
+        onProgress = onProgress,
+    )
+
+    @OptIn(ExperimentalUuidApi::class)
+    suspend fun uploadFile(
+        source: StreamingUploadSource,
+        filename: String,
+        type: String,
+        fileId: String = Uuid.random().toString(),
+        endpoint: String? = null,
+        model: String? = null,
+        agentId: String? = null,
+        toolResource: String? = null,
+        messageFile: Boolean? = null,
+        width: Int? = null,
+        height: Int? = null,
+        onProgress: ((Float) -> Unit)? = null,
     ): FileObject {
         Logger.d("FilesApi") {
-            "uploadFile: filename=$filename, type=$type, size=${bytes.size} bytes, fileId=$fileId, " +
+            "uploadFile: filename=$filename, type=$type, size=${source.contentLength ?: "unknown"} bytes, fileId=$fileId, " +
                 "endpoint=$endpoint, model=$model, agentId=$agentId, messageFile=$messageFile, width=$width, height=$height"
         }
 
         val multipart = MultiPartFormDataContent(
             formData {
-                append("file", bytes, Headers.build {
-                    append(HttpHeaders.ContentDisposition, "filename=\"${encodeFilename(filename)}\"")
-                    append(HttpHeaders.ContentType, type)
-                })
+                append(
+                    "file",
+                    ChannelProvider(source.contentLength, source.openChannel),
+                    Headers.build {
+                        append(HttpHeaders.ContentDisposition, "filename=\"${encodeFilename(filename)}\"")
+                        append(HttpHeaders.ContentType, type)
+                    },
+                )
                 append("file_id", fileId)
                 if (endpoint != null) append("endpoint", endpoint)
                 if (model != null) append("model", model)

@@ -9,6 +9,7 @@ import com.garfiec.librechat.core.model.response.FilePreviewResponse
 import com.garfiec.librechat.core.model.response.FileUploadConfig
 import com.garfiec.librechat.core.network.api.FilesApi
 import com.garfiec.librechat.core.network.api.FilesExtApi
+import com.garfiec.librechat.core.network.upload.StreamingUploadSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlin.uuid.ExperimentalUuidApi
@@ -40,6 +41,37 @@ class FileRepositoryImpl(
                 // file_id and endpoint are required by the backend; provide defaults
                 fileId = Uuid.random().toString(),
                 endpoint = "agents",
+                onProgress = onProgress,
+            )
+        }
+
+    override suspend fun uploadFile(
+        source: StreamingUploadSource,
+        filename: String,
+        type: String,
+        fileId: String?,
+        endpoint: String?,
+        model: String?,
+        agentId: String?,
+        toolResource: String?,
+        messageFile: Boolean?,
+        width: Int?,
+        height: Int?,
+        onProgress: ((Float) -> Unit)?,
+    ): Result<FileObject> =
+        safeApiCall {
+            filesApi.uploadFile(
+                source = source,
+                filename = filename,
+                type = type,
+                fileId = fileId ?: Uuid.random().toString(),
+                endpoint = endpoint,
+                model = model,
+                agentId = agentId,
+                toolResource = toolResource,
+                messageFile = messageFile,
+                width = width,
+                height = height,
                 onProgress = onProgress,
             )
         }

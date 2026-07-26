@@ -5,6 +5,7 @@ import com.garfiec.librechat.core.model.FileObject
 import com.garfiec.librechat.core.model.request.DeleteFileEntry
 import com.garfiec.librechat.core.model.response.FilePreviewResponse
 import com.garfiec.librechat.core.model.response.FileUploadConfig
+import com.garfiec.librechat.core.network.upload.StreamingUploadSource
 
 interface FileRepository {
     suspend fun getFiles(): Result<List<FileObject>>
@@ -16,6 +17,20 @@ interface FileRepository {
         bytes: ByteArray,
         filename: String,
         type: String,
+        onProgress: ((Float) -> Unit)? = null,
+    ): Result<FileObject>
+    suspend fun uploadFile(
+        source: StreamingUploadSource,
+        filename: String,
+        type: String,
+        fileId: String? = null,
+        endpoint: String? = null,
+        model: String? = null,
+        agentId: String? = null,
+        toolResource: String? = null,
+        messageFile: Boolean? = null,
+        width: Int? = null,
+        height: Int? = null,
         onProgress: ((Float) -> Unit)? = null,
     ): Result<FileObject>
     suspend fun uploadFile(

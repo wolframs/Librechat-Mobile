@@ -79,7 +79,7 @@ changes materially.
 | UX-004 | P0 | Pagination retry loop | `AUTO_VERIFIED` | Passed | Not started |
 | UX-005 | P1 | Credential Manager lifecycle | `AUTO_VERIFIED` | Passed | Not started |
 | UX-006 | P1 | Agent editor draft protection | `SCOUTED` | Not started | Not started |
-| UX-007 | P1 | Memory-safe, cancellable uploads | `SCOUTED` | Not started | Not started |
+| UX-007 | P1 | Memory-safe, cancellable uploads | `AUTO_VERIFIED` | Passed | Not started |
 | UX-008 | P2 | Draft attachment and queue recovery | `SCOUTED` | Not started | Not started |
 | UX-009 | P2 | Banner dismissal persistence and scope | `AUTO_VERIFIED` | Passed | Not started |
 | UX-010 | P2 | Localization completeness | `SCOUTED` | Not started | Not started |
@@ -481,7 +481,7 @@ discard confirmation, local draft, or process-restoration mechanism.
 
 **Priority:** P1
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -511,12 +511,34 @@ cancel UX.
 
 ### Acceptance checks
 
-- [ ] Upload does not require a full-file `ByteArray`.
-- [ ] Cancel during local read stops promptly.
-- [ ] Cancel during network transfer stops promptly.
-- [ ] Oversized files fail before expensive work when the limit is known.
-- [ ] Existing image/document uploads still work.
+- [x] Upload does not require a full-file `ByteArray`.
+- [x] Cancel during local read stops promptly.
+- [x] Cancel during network transfer stops promptly.
+- [x] Oversized files fail before expensive work when the limit is known.
+- [x] Existing image/document uploads still work.
 - [ ] Stress test on a memory-constrained emulator with a large synthetic file passes.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- The Files screen now passes a reopenable `StreamingUploadSource` through the repository
+  and into Ktor's multipart `ChannelProvider`; the existing byte-array overload remains
+  available for callers that already hold generated content in memory.
+- Android reopens the selected content URI only when Ktor starts the request and streams
+  it through a cancellable channel. iOS now exposes a filesystem-backed channel rather
+  than copying `NSData` into a second allocation.
+- Known file sizes are checked against the server's effective Agent-file limit before the
+  upload channel is opened. Unknown sizes continue safely and are enforced server-side.
+- Ktor's multipart copy path cancels the source channel when either local reading or
+  network writing fails or is cancelled; the Android adapter closes its `InputStream`
+  on EOF or channel cancellation.
+- Tests added:
+  - `FilesApiStreamingUploadTest`
+  - `FilesUploadStreamingTest`
+- Automated verification: focused network and Files tests, affected data tests, Android
+  compilation, metadata Detekt, and whitespace checks pass.
+- iOS compilation is unavailable on this Linux host because the network module's Apple
+  cinterop targets are disabled; device/emulator stress verification remains pending.
 
 ---
 
@@ -859,3 +881,12 @@ conclusion. Correct earlier entries with a new dated note.
 - Ran `:app:lintDebug`: 0 errors, 26 warnings, 3 hints.
 - No product source files changed.
 - Next recommended action: revalidate and implement UX-002 as the first isolated change.
+
+### 2026-07-27 — UX-007 upload streaming
+
+- Replaced whole-file buffering in the Files screen with reopenable multipart streams.
+- Added known-size preflight enforcement and cancellation-focused tests.
+- Confirmed Ktor closes the streaming source after EOF, read failure, network failure, or
+  request cancellation.
+- Android automated verification passes; memory-constrained device stress and Apple-host
+  verification remain pending.
