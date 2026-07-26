@@ -99,6 +99,18 @@
 - **The final-frame merge is monotonic** (`Message.mergedOver` in `util/TemporaryChatMerge.kt`): applying a frame message over an in-memory copy gap-fills — incoming wins where it carries information, absent/blank keeps local, terminal-state booleans (`error`/`unfinished`) always incoming. This is why a skeletal aborted `requestMessage` no longer needs per-field guards to keep the optimistic message's attachments. ONLY valid at the final-frame chokepoint — full-record sync paths (`getMessages`, `refreshMessages`) keep meaningful nulls and must never use it. `finalizeChatDisplay` returns the POST-merge instances so `cacheTurn` writes exactly what the screen shows
 - `onPause()`/`onResume()` handle app backgrounding: checks stream status, resumes if still active. Two abort-window rules: `onPause` does NOT cancel the collector while a Stop is pending (it is carrying the aborted final that holds the partial; the watchdog covers a frame that never arrives), and `onResume` touches nothing when the session already ended while backgrounded (the old wipe of `streamingContent` here was the stop-then-background partial loss)
 
+## Draft and queue recovery
+
+- Draft text and the versioned `ChatDraftRecovery` payload are written atomically through
+  `DraftRepository.saveDraftState`. Legacy text-only Room rows have a null payload and remain valid.
+- Only attachments with a server `fileId` are recoverable. Local content URIs and upload handles are
+  never serialized; if such a handle existed at the last write, relaunch reports that it was lost
+  instead of displaying a chip that can no longer be sent.
+- Queued messages persist their complete send configuration, but every recovered queue starts
+  **paused**. Relaunch must never silently send user content. While a queued item is edited, recovery
+  stores the stashed new-message composer plus the borrowed original queue item; process death
+  abandons only the in-progress edit.
+
 ## Key Components
 | Component | Purpose |
 |-----------|---------|

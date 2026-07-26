@@ -4,9 +4,8 @@ Room database, DataStore preferences, EncryptedSharedPreferences for tokens, and
 
 ## What This Module Provides
 
-- **Room database** (`db/LibreChatDatabase.kt`): 6 entities, 6 DAOs, version 1, `exportSchema = true`.
-- **Entities**: `ConversationEntity`, `MessageEntity`, `FileEntity`, `AgentEntity`, `PresetEntity`, `ConversationTagEntity`. Complex fields (lists, nested objects) stored as JSON strings via `Converters`.
-- **DAOs**: `ConversationDao`, `MessageDao`, `FileDao`, `AgentDao`, `PresetDao`, `ConversationTagDao`. Read methods return `Flow<T>` for reactive observation.
+- **Room database** (`db/LibreChatDatabase.kt`): version 9 with exported schemas and automatic migrations.
+- **Entities/DAOs**: server cache entities plus account-scoped drafts. Complex fields are stored as JSON through `Converters`; `DraftEntity.stateJson` is a nullable, feature-owned versioned payload stored atomically beside draft text.
 - **DataStore**: `ServerDataStore` (server URL prefs), `SettingsDataStore` (user preferences).
 - **Token storage** (`datastore/TokenDataStore.kt`): Implements `TokenManager` from `:core:network` using `EncryptedSharedPreferences` with AES-256. Uses `Mutex` to ensure only one refresh runs at a time when multiple 401s arrive concurrently.
 - **Repositories** (`repository/`): Interface + Impl for each domain: `AuthRepository`, `ConversationRepository`, `MessageRepository`, `ChatRepository`, `FileRepository`, `AgentRepository`, `PresetRepository`, `PromptRepository`, `TagRepository`, `ShareRepository`, `ConfigRepository`, `UserRepository`, `SettingsRepository`.
@@ -32,6 +31,13 @@ All impls take constructor parameters (api, dao, mapper, dispatcher) wired via K
 2. Fetch fresh data from network via API service.
 3. Upsert into Room. The Room `Flow` auto-emits the updated list.
 4. On network error, the cached data remains visible; error is surfaced separately.
+
+### Recoverable draft state
+
+`DraftRepository.saveDraftState` atomically stores text and an optional versioned feature payload in
+one account-scoped Room row. `feature:chat` uses the payload for server-uploaded attachment references
+and paused queued messages. Existing text-only rows migrate with `state_json = null`; repository
+callers must treat an absent or unknown payload as an ordinary text-only draft.
 
 ### Account-keyed token store (`CommonTokenDataStore`)
 

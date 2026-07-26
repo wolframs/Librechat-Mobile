@@ -64,9 +64,13 @@ class SendCompletionDelegate(
         if (isNewConversation) {
             if (!isTemporary) {
                 handle.scope.launch {
-                    val existingDraft = draftRepository.getDraft(NEW_CHAT_DRAFT_KEY)
+                    val existingDraft = draftRepository.getDraftState(NEW_CHAT_DRAFT_KEY)
                     if (existingDraft != null) {
-                        draftRepository.saveDraft(conversationId, existingDraft)
+                        draftRepository.saveDraftState(
+                            conversationId = conversationId,
+                            text = existingDraft.text,
+                            stateJson = existingDraft.stateJson,
+                        )
                         draftRepository.deleteDraft(NEW_CHAT_DRAFT_KEY)
                     }
                 }

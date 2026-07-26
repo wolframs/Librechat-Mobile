@@ -85,6 +85,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -215,6 +216,7 @@ class ChatViewModel(
     // composed under an account the user has since switched away from. Surfaced as a snackbar.
     private val _queuedMessagesDropped = Channel<Int>(Channel.BUFFERED)
     val queuedMessagesDropped: Flow<Int> = _queuedMessagesDropped.receiveAsFlow()
+    private var draftRecoveryReady = false
 
     private val queueDelegate = MessageQueueDelegate(
         handle = QueueHandle(stateHandle),
@@ -231,6 +233,7 @@ class ChatViewModel(
         },
         activeAccountProvider = activeAccountProvider,
         onQueuedDropped = { count -> _queuedMessagesDropped.trySend(count) },
+        onQueueChanged = ::persistDraftState,
     )
 
     // --- Delegate-owned flows exposed to the UI ---
@@ -477,6 +480,14 @@ class ChatViewModel(
             restoreDraft(NEW_CHAT_DRAFT_KEY)
         }
 
+        // The platform attachment tray is a separate StateFlow from ChatUiState. Persist each
+        // completed upload/removal after initial recovery, including metadata-only transitions.
+        viewModelScope.launch {
+            fileDelegate.attachedFiles.drop(1).collect {
+                persistDraftState()
+            }
+        }
+
         // Observe share intents that arrive while this ViewModel is already active
         viewModelScope.launch {
             shareConsumer.shareAvailable.collect {
@@ -699,9 +710,6 @@ class ChatViewModel(
     }
 
     /**
-     * Restores a previously saved draft for the given key (conversation ID or [NEW_CHAT_DRAFT_KEY]).
-     */
-    /**
      * Puts an early-aborted turn's text back into the composer (the un-send flow: the Stop
      * landed before the server persisted anything, so the optimistic bubble was removed).
      * Yields to anything the user has since typed — same rule as [restoreDraft] — and persists
@@ -712,24 +720,50 @@ class ChatViewModel(
             if (it.inputText.isBlank()) it.copy(composer = it.composer.copy(inputText = text)) else it
         }
         if (_uiState.value.inputText != text) return
-        val draftKey = _uiState.value.conversationId ?: NEW_CHAT_DRAFT_KEY
-        viewModelScope.launch {
-            draftRepository.saveDraft(draftKey, text)
-        }
+        persistDraftState()
     }
 
     private fun restoreDraft(draftKey: String) {
         viewModelScope.launch {
-            // awaitDraft (not getDraft) so a first launch that opens the chat screen while identity is
+            // awaitDraftState (not getDraftState) so a first launch that opens the chat screen while identity is
             // still warming — e.g. straight after a cold start or the pre-tenancy DB migration — waits
             // for the account to resolve instead of reading null and leaving a saved draft hidden until
             // the next launch. The blank-check below still yields to anything the user has since typed.
-            val draft = draftRepository.awaitDraft(draftKey)
-            if (!draft.isNullOrBlank()) {
+            val snapshot = draftRepository.awaitDraftState(draftKey)
+            val recovery = decodeChatDraftRecovery(snapshot?.stateJson)
+            if (!snapshot?.text.isNullOrBlank()) {
                 _uiState.update {
-                    if (it.inputText.isBlank()) it.copy(composer = it.composer.copy(inputText = draft)) else it
+                    if (it.inputText.isBlank()) {
+                        it.copy(composer = it.composer.copy(inputText = snapshot.text))
+                    } else {
+                        it
+                    }
                 }
             }
+            if (fileDelegate.attachedFiles.value.isEmpty()) {
+                fileDelegate.restoreAttachedFiles(
+                    recovery?.attachments.orEmpty().map(PersistedAttachment::toAttachedFile),
+                )
+            }
+            if (_uiState.value.messageQueue.isEmpty() && recovery?.queuedMessages?.isNotEmpty() == true) {
+                _uiState.update {
+                    it.copy(
+                        queue = it.queue.copy(
+                            messageQueue = recovery.queuedMessages.map(PersistedQueuedMessage::toQueuedMessage),
+                            // A cold start must never send recovered user content automatically.
+                            isQueuePaused = true,
+                        ),
+                    )
+                }
+            }
+            val lostCount = recovery?.lostLocalAttachmentCount ?: 0
+            if (lostCount > 0) {
+                _uiState.update {
+                    it.copy(error = "$lostCount local attachment(s) could not be restored after restart")
+                }
+            }
+            draftRecoveryReady = true
+            persistDraftState()
         }
     }
 
@@ -782,10 +816,7 @@ class ChatViewModel(
         // While editing a queued item the composer holds that item, not the persisted draft —
         // don't overwrite the on-disk new-message draft (it's restored on commit/cancel).
         if (_uiState.value.isEditingQueued) return
-        val draftKey = _uiState.value.conversationId ?: NEW_CHAT_DRAFT_KEY
-        viewModelScope.launch {
-            draftRepository.saveDraft(draftKey, text)
-        }
+        persistDraftState()
     }
 
     /** Cycle the next-message Anthropic cache lifetime: 1h → 5m → conversation default. */
@@ -921,6 +952,7 @@ class ChatViewModel(
                 ),
             )
         }
+        persistDraftState()
     }
 
     /** "Update" in queued-edit mode: re-queue the edited item at its original slot (or drop it if
@@ -954,6 +986,7 @@ class ChatViewModel(
     private fun finishQueuedEdit(session: QueuedEditSession) {
         applyComposer(session.stashed)
         _uiState.update { it.copy(composer = it.composer.copy(editingQueuedItem = null)) }
+        persistDraftState()
         // Draining was frozen during the edit; resume it now if the queue is idle (a reply may
         // have finished while editing).
         tryResumeDrain()
@@ -1075,14 +1108,50 @@ class ChatViewModel(
         }
     }
 
-    /** Clears the input, its persisted draft, and any attached files. */
+    /** Clears composer content while retaining any independently queued follow-ups. */
     private fun clearComposer() {
-        val draftKey = _uiState.value.conversationId ?: NEW_CHAT_DRAFT_KEY
         _uiState.update {
             it.copy(composer = it.composer.copy(inputText = "", armedCacheTtl = null))
         }
-        viewModelScope.launch { draftRepository.deleteDraft(draftKey) }
         fileDelegate.clearAttachedFiles()
+        persistDraftState()
+    }
+
+    /**
+     * Stores the new-message draft, uploaded attachment references, and queue as one Room row.
+     * During queued-edit mode the stashed new-message composer and original borrowed queue item
+     * are persisted; a process restart therefore abandons only the in-progress edit.
+     */
+    private fun persistDraftState() {
+        if (!draftRecoveryReady) return
+        val state = _uiState.value
+        val editSession = state.editingQueuedItem
+        val composer = editSession?.stashed ?: captureComposer()
+        val recoverableQueue = state.messageQueue.toMutableList().apply {
+            if (editSession != null && none { it.localId == editSession.original.localId }) {
+                add(editSession.originalIndex.coerceIn(0, size), editSession.original)
+            }
+        }
+        val uploadedAttachments = composer.attachments.mapNotNull(AttachedFile::toPersistedAttachment)
+        val lostLocalCount = composer.attachments.count { it.fileId == null }
+        val recovery = ChatDraftRecovery(
+            attachments = uploadedAttachments,
+            lostLocalAttachmentCount = lostLocalCount,
+            queuedMessages = recoverableQueue.map(QueuedMessage::toPersisted),
+            isQueuePaused = state.isQueuePaused,
+        )
+        val hasRecoveryState = uploadedAttachments.isNotEmpty() ||
+            lostLocalCount > 0 ||
+            recoverableQueue.isNotEmpty()
+        val encoded = if (hasRecoveryState) encodeChatDraftRecovery(recovery) else null
+        val draftKey = state.conversationId ?: NEW_CHAT_DRAFT_KEY
+        viewModelScope.launch {
+            draftRepository.saveDraftState(
+                conversationId = draftKey,
+                text = composer.text,
+                stateJson = encoded,
+            )
+        }
     }
 
     /**

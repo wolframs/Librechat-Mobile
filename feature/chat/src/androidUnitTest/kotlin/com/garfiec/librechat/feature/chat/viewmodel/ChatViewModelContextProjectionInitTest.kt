@@ -24,6 +24,7 @@ import com.garfiec.librechat.core.data.repository.UserRepository
 import com.garfiec.librechat.core.data.util.PermissionGate
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.feature.chat.viewmodel.delegate.PlatformDelegateFactory
+import com.garfiec.librechat.feature.chat.viewmodel.delegate.PlatformFileHandler
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -93,6 +94,7 @@ class ChatViewModelContextProjectionInitTest {
     private val serverDataStore = mockk<com.garfiec.librechat.core.data.datastore.ServerDataStore>(relaxed = true)
     private val settingsDataStore = mockk<com.garfiec.librechat.core.data.datastore.SettingsDataStore>(relaxed = true)
     private val platformDelegateFactory = mockk<PlatformDelegateFactory>(relaxed = true)
+    private val fileHandler = mockk<PlatformFileHandler>(relaxed = true)
     private val serverFileSelectionHandoff = mockk<ServerFileSelectionHandoff>(relaxed = true)
 
     private val selectionHandoff = NewChatSelectionHandoff()
@@ -112,6 +114,8 @@ class ChatViewModelContextProjectionInitTest {
         every { configRepository.endpointConfigs } returns MutableStateFlow(emptyMap())
         every { configRepository.availableModels } returns MutableStateFlow(emptyMap())
         every { favoritesRepository.favorites } returns MutableStateFlow(emptyList())
+        every { fileHandler.attachedFiles } returns MutableStateFlow(emptyList())
+        every { platformDelegateFactory.createFileHandler(any()) } returns fileHandler
 
         // Two init-time `.first()` reads over relaxed flows (relaxed -> emptyFlow -> NoSuchElement).
         every { settingsDataStore.selectedMcpServers } returns flowOf(emptySet())

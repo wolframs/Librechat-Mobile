@@ -80,7 +80,7 @@ changes materially.
 | UX-005 | P1 | Credential Manager lifecycle | `AUTO_VERIFIED` | Passed | Not started |
 | UX-006 | P1 | Agent editor draft protection | `AUTO_VERIFIED` | Passed | Not started |
 | UX-007 | P1 | Memory-safe, cancellable uploads | `AUTO_VERIFIED` | Passed | Not started |
-| UX-008 | P2 | Draft attachment and queue recovery | `SCOUTED` | Not started | Not started |
+| UX-008 | P2 | Draft attachment and queue recovery | `AUTO_VERIFIED` | Passed | Not started |
 | UX-009 | P2 | Banner dismissal persistence and scope | `AUTO_VERIFIED` | Passed | Not started |
 | UX-010 | P2 | Localization completeness | `SCOUTED` | Not started | Not started |
 | UX-011 | P2 | Accessibility audit | `SCOUTED` | Not started | Not started |
@@ -565,7 +565,7 @@ cancel UX.
 
 **Priority:** P2
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -588,12 +588,28 @@ states.
 
 ### Acceptance checks
 
-- [ ] Text plus already-uploaded attachment references survive process death.
-- [ ] Local-only/unuploaded files are restored honestly or explicitly reported lost.
-- [ ] Queued sends have documented recovery semantics.
-- [ ] Draft cleanup on successful send/delete is atomic.
-- [ ] Migration handles existing text-only drafts.
+- [x] Text plus already-uploaded attachment references survive process death.
+- [x] Local-only/unuploaded files are restored honestly or explicitly reported lost.
+- [x] Queued sends have documented recovery semantics.
+- [x] Draft cleanup on successful send/delete is atomic.
+- [x] Migration handles existing text-only drafts.
 - [ ] User verifies force-stop/relaunch behavior.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- Room v9 adds a nullable, feature-owned recovery payload beside draft text; both fields are cached
+  and written atomically, while existing text-only rows migrate with a null payload.
+- Uploaded attachment references and complete queued-send configuration now survive process death.
+  Local platform handles are never serialized and a relaunch reports how many could not be restored.
+- Every recovered queue starts paused, regardless of its pre-restart state, so cold launch never
+  sends user content automatically.
+- A queued edit persists the stashed new-message composer and the borrowed original queue item,
+  abandoning only the in-progress edit if the process dies.
+- New focused serialization and repository tests cover full configuration round-trips, exclusion of
+  local-only handles, unknown payload versions, atomic text/payload writes, and legacy rows.
+- Complete `core:data` and `feature:chat` unit suites plus metadata Detekt and whitespace checks pass.
+- Device force-stop/relaunch verification remains pending.
 
 ---
 
@@ -918,3 +934,12 @@ conclusion. Correct earlier entries with a new dated note.
 - Cleared draft state after successful save, delete, revert, or explicit discard.
 - Complete Agents unit tests and static checks pass; device navigation and process-kill
   verification remain pending.
+
+### 2026-07-27 — UX-008 attachment and queue recovery
+
+- Added a versioned, account-scoped draft payload for uploaded attachment references and queued
+  message snapshots.
+- Restored queues are always paused; inaccessible local attachments are explicitly reported lost.
+- Migrated Room from v8 to v9 without invalidating existing text-only drafts.
+- Complete affected unit suites and static checks pass; device force-stop/relaunch verification
+  remains pending.

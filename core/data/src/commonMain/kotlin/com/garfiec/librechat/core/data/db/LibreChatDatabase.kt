@@ -33,7 +33,7 @@ import com.garfiec.librechat.core.data.db.entity.PresetEntity
         DraftEntity::class,
         ArtifactShortcutEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -49,6 +49,9 @@ import com.garfiec.librechat.core.data.db.entity.PresetEntity
         AutoMigration(from = 6, to = 7),
         // 7 -> 8 persists the nullable Anthropic cacheTTL marker on messages.
         AutoMigration(from = 7, to = 8),
+        // 8 -> 9 adds an optional feature-owned payload to text drafts. Existing rows remain
+        // valid text-only drafts; chat uses the payload for uploaded attachments and queued sends.
+        AutoMigration(from = 8, to = 9),
     ],
 )
 @TypeConverters(Converters::class)

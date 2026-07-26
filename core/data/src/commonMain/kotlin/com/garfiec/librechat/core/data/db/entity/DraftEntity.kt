@@ -12,6 +12,9 @@ data class DraftEntity(
     val conversationId: String,
     @ColumnInfo(name = "text")
     val text: String,
+    /** Feature-owned JSON payload. Null for text-only drafts written by older app versions. */
+    @ColumnInfo(name = "state_json")
+    val stateJson: String? = null,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long = Clock.System.now().toEpochMilliseconds(),
     /** Row-tenancy owner (self-owning; drafts can be conversation-less/new-chat). See ConversationEntity.accountId. */

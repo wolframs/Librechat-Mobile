@@ -13,7 +13,8 @@ import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
  *
  * Draining is driven by the stream lifecycle: a successful `Final` calls [drainNext]; a Stop
  * or stream-error calls [pause] so nothing auto-fires until the user taps "Send queued"
- * ([resume]). The queue is never persisted — it lives and dies with the ViewModel.
+ * ([resume]). [onQueueChanged] lets the owner persist a recoverable snapshot after each completed
+ * mutation. A restored queue is deliberately paused by `ChatViewModel` until the user resumes it.
  */
 class MessageQueueDelegate(
     private val handle: QueueHandle,
@@ -27,10 +28,13 @@ class MessageQueueDelegate(
      *  account (a switch happened since queueing). Set by `ChatViewModel` to surface a snackbar so a
      *  silently-discarded follow-up leaves a user-visible trail. */
     private val onQueuedDropped: (count: Int) -> Unit,
+    /** Persists the recoverable queue after a completed queue mutation. */
+    private val onQueueChanged: () -> Unit,
 ) {
 
     fun enqueue(spec: QueuedMessage) {
         handle.update { queue = queue.copy(messageQueue = queue.messageQueue + spec) }
+        onQueueChanged()
     }
 
     /**
@@ -67,9 +71,11 @@ class MessageQueueDelegate(
             // Clearing the last item while paused lifts the (now meaningless) pause.
             queue = queue.copy(messageQueue = next, isQueuePaused = queue.isQueuePaused && next.isNotEmpty())
         }
+        onQueueChanged()
     }
 
     fun reorder(fromIndex: Int, toIndex: Int) {
+        var changed = false
         handle.update {
             val list = queue.messageQueue
             if (fromIndex !in list.indices || toIndex !in list.indices || fromIndex == toIndex) {
@@ -78,7 +84,9 @@ class MessageQueueDelegate(
             val mutable = list.toMutableList()
             mutable.add(toIndex, mutable.removeAt(fromIndex))
             queue = queue.copy(messageQueue = mutable)
+            changed = true
         }
+        if (changed) onQueueChanged()
     }
 
     /** Holds the queue after a Stop / stream-error. No-op when nothing is queued — but an item
@@ -87,12 +95,14 @@ class MessageQueueDelegate(
     fun pause() {
         if (handle.state.messageQueue.isEmpty() && !handle.state.isEditingQueued) return
         handle.update { queue = queue.copy(isQueuePaused = true) }
+        onQueueChanged()
     }
 
     /** User tapped "Send queued": lift the pause and start draining. The reply already settled
      *  while paused, so no settle-wait is needed. */
     fun resume() {
         handle.update { queue = queue.copy(isQueuePaused = false) }
+        onQueueChanged()
         drainNext(awaitSettle = false)
     }
 
@@ -127,10 +137,12 @@ class MessageQueueDelegate(
                     queue = queue.copy(messageQueue = queue.messageQueue.filter { it.accountId == null || it.accountId == current })
                 }
                 onQueuedDropped(foreign)
+                onQueueChanged()
             }
         }
         val head = handle.state.messageQueue.firstOrNull() ?: return
         handle.update { queue = queue.copy(messageQueue = queue.messageQueue.drop(1)) }
+        onQueueChanged()
         sendWithSpec(head, awaitSettle)
     }
 }

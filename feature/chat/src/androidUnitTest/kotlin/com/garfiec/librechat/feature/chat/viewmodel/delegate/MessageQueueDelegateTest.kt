@@ -40,6 +40,7 @@ class MessageQueueDelegateTest {
             awaitSettleFlags.add(awaitSettle)
         },
         onQueuedDropped = { droppedCounts.add(it) },
+        onQueueChanged = {},
     )
 
     private fun spec(id: String, text: String = id, model: String? = "gpt-4") = QueuedMessage(
@@ -329,6 +330,7 @@ class MessageQueueDelegateTest {
             activeAccountProvider = warming,
             sendWithSpec = { spec, _ -> warmingSent.add(spec) },
             onQueuedDropped = { warmingDropped.add(it) },
+            onQueueChanged = {},
         )
         warmingDelegate.enqueue(spec("a").copy(accountId = "srv:user-A"))
 

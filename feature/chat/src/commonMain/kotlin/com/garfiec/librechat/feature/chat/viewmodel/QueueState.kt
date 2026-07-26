@@ -8,15 +8,17 @@ import com.garfiec.librechat.feature.chat.components.AttachedFile
 import kotlinx.serialization.json.JsonObject
 
 /**
- * The in-memory FIFO follow-up queue staged while a reply streams. Owned by
- * [com.garfiec.librechat.feature.chat.viewmodel.delegate.MessageQueueDelegate];
- * never persisted (lives and dies with the ViewModel).
+ * The live FIFO follow-up queue staged while a reply streams. Owned by
+ * [com.garfiec.librechat.feature.chat.viewmodel.delegate.MessageQueueDelegate]. A recoverable,
+ * credential-free snapshot is stored beside the conversation draft; recovered queues always start
+ * paused so a cold launch cannot send user content on its own.
  */
 @Immutable
 data class QueueState(
     /** Follow-up messages queued while a reply streams, drained FIFO on each successful
      *  completion. Rendered as ghost bubbles after the streaming bubble; never part of the
-     *  message tree. In-memory only (dropped on conversation switch / process death). */
+     *  message tree. Server-uploaded attachment references and send configuration survive process
+     *  death; inaccessible local platform handles do not. */
     val messageQueue: List<QueuedMessage> = emptyList(),
     /** True after Stop/stream-error with a non-empty queue: draining is held until the user
      *  explicitly taps "Send queued". A successful Final drains automatically instead. */
@@ -34,8 +36,9 @@ data class QueueState(
  * (conversationId / parentMessageId / userMessageId) are deliberately NOT snapshotted — they
  * are recomputed from the current tree when the item actually fires.
  *
- * [attachments] holds the already-uploaded [AttachedFile]s (not bare FileReferences) so editing
- * a queued item restores its composer chips — including the local-uri image thumbnail — intact.
+ * [attachments] holds [AttachedFile]s (not bare FileReferences) so editing a queued item restores
+ * its composer chips — including the local-uri image thumbnail — intact in-process. Recovery keeps
+ * only attachments with a server file id and reconstructs their chips from server metadata.
  */
 @Immutable
 data class QueuedMessage(
