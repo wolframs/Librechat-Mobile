@@ -25,6 +25,7 @@ data class SkillsListUiState(
     val isLoadingMore: Boolean = false,
     val isRefreshing: Boolean = false,
     val error: String? = null,
+    val loadMoreError: String? = null,
     val searchQuery: String = "",
     val hasMore: Boolean = false,
     val cursor: String? = null,
@@ -73,25 +74,41 @@ class SkillsListViewModel(
 
     fun loadFirstPage() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            _uiState.value = _uiState.value.copy(
+                isLoading = true,
+                error = null,
+                loadMoreError = null,
+            )
             fetchPage(cursor = null, replace = true)
         }
     }
 
     fun refresh() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isRefreshing = true, error = null)
+            _uiState.value = _uiState.value.copy(
+                isRefreshing = true,
+                error = null,
+                loadMoreError = null,
+            )
             fetchPage(cursor = null, replace = true)
         }
     }
 
     fun loadMore() {
         val state = _uiState.value
-        if (!state.hasMore || state.isLoadingMore || state.isLoading) return
+        if (!state.hasMore || state.isLoadingMore || state.isLoading || state.loadMoreError != null) return
         viewModelScope.launch {
-            _uiState.value = state.copy(isLoadingMore = true)
+            _uiState.value = state.copy(isLoadingMore = true, loadMoreError = null)
             fetchPage(cursor = state.cursor, replace = false)
         }
+    }
+
+    /** Retries only the failed cursor page; existing rows and search state stay intact. */
+    fun retryLoadMore() {
+        val state = _uiState.value
+        if (state.loadMoreError == null || state.isLoadingMore || state.isLoading) return
+        _uiState.value = state.copy(loadMoreError = null)
+        loadMore()
     }
 
     /** Imports a skill from a picked .md/.zip/.skill and refreshes on success.
@@ -119,7 +136,11 @@ class SkillsListViewModel(
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             delay(SEARCH_DEBOUNCE_MS)
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            _uiState.value = _uiState.value.copy(
+                isLoading = true,
+                error = null,
+                loadMoreError = null,
+            )
             fetchPage(cursor = null, replace = true)
         }
     }
@@ -138,6 +159,7 @@ class SkillsListViewModel(
                     isLoadingMore = false,
                     isRefreshing = false,
                     error = null,
+                    loadMoreError = null,
                 )
             }
             is Result.Error -> {
@@ -145,7 +167,12 @@ class SkillsListViewModel(
                     isLoading = false,
                     isLoadingMore = false,
                     isRefreshing = false,
-                    error = result.message ?: "Failed to load skills",
+                    error = if (replace) result.message ?: "Failed to load skills" else null,
+                    loadMoreError = if (replace) {
+                        null
+                    } else {
+                        result.message ?: "Failed to load more skills"
+                    },
                 )
             }
             is Result.Loading -> { /* no-op */ }

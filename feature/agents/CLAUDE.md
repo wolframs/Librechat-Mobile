@@ -16,7 +16,9 @@
 - Categories fetched from `getAgentCategories()` API (server-driven, not client-derived)
 - `onCategorySelected()` toggles category filter and resets to page 1
 - `onSearchQueryChanged()` debounces 500ms, then resets to page 1 with server-side search
-- `loadMore()` appends next page; no-ops if already loading or no more pages
+- `loadMore()` appends next page; no-ops if already loading, no more pages, or a page
+  failure is latched. A failed next page leaves existing cards visible and requires the
+  inline Retry action (`retryLoadMore`) before that cursor/page is requested again
 - Pull-to-refresh resets to page 1
 - **Gotcha**: Search and category changes reset pagination — always load from page 1 when filters change
 
@@ -38,8 +40,9 @@
 
 ## Infinite Scroll
 - `LazyVerticalGrid` with `rememberLazyGridState()` + `derivedStateOf` for scroll detection
-- Triggers `loadMore()` when last visible item is within 3 of the end
+- Triggers `loadMore()` when last visible item is within 3 of the end and no page error is latched
 - Shows `CircularProgressIndicator` in a full-span grid item while loading more
+- Shows a full-span inline error with Retry after a next-page failure
 
 ## Spec Notes (not yet implemented)
 - Category tabs with slide animation (`AnimatedContent` with `slideInHorizontally`)

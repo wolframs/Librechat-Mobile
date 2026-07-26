@@ -37,6 +37,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.garfiec.librechat.core.model.SkillSummary
+import com.garfiec.librechat.core.ui.components.ErrorBanner
 import com.garfiec.librechat.feature.skills.components.rememberSkillFilePicker
 import com.garfiec.librechat.feature.skills.resources.*
 import com.garfiec.librechat.feature.skills.resources.Res
@@ -67,7 +68,10 @@ fun SkillsListScreen(
     val shouldLoadMore by remember {
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= uiState.skills.size - 3 && uiState.hasMore && !uiState.isLoadingMore
+            last >= uiState.skills.size - 3 &&
+                uiState.hasMore &&
+                !uiState.isLoadingMore &&
+                uiState.loadMoreError == null
         }
     }
     androidx.compose.runtime.LaunchedEffect(shouldLoadMore) {
@@ -159,6 +163,13 @@ fun SkillsListScreen(
                                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator()
                                 }
+                            }
+                        } else if (uiState.loadMoreError != null) {
+                            item(contentType = "load-more-error") {
+                                ErrorBanner(
+                                    message = uiState.loadMoreError ?: "",
+                                    onRetry = viewModel::retryLoadMore,
+                                )
                             }
                         }
                     }

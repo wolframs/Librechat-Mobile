@@ -76,7 +76,7 @@ changes materially.
 | UX-001 | P0 | Signed-in server management | `AUTO_VERIFIED` | Passed | Not started |
 | UX-002 | P0 | Server/account-scoped tools and MCP | `AUTO_VERIFIED` | Passed | Not started |
 | UX-003 | P0 | Stream teardown after clean EOF | `AUTO_VERIFIED` | Passed | Not started |
-| UX-004 | P0 | Pagination retry loop | `SCOUTED` | Not started | Not started |
+| UX-004 | P0 | Pagination retry loop | `AUTO_VERIFIED` | Passed | Not started |
 | UX-005 | P1 | Credential Manager lifecycle | `AUTO_VERIFIED` | Passed | Not started |
 | UX-006 | P1 | Agent editor draft protection | `SCOUTED` | Not started | Not started |
 | UX-007 | P1 | Memory-safe, cancellable uploads | `SCOUTED` | Not started | Not started |
@@ -324,7 +324,7 @@ terminal event must transition to a deterministic recoverable state exactly once
 
 **Priority:** P0
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -353,12 +353,25 @@ a visible retry state and requires explicit retry or a meaningful new trigger.
 
 ### Acceptance checks
 
-- [ ] Persistent page failure results in one request, not an unbounded loop.
-- [ ] Existing rows remain visible.
-- [ ] An inline error and Retry action are visible.
-- [ ] Retry succeeds without a full screen reload.
-- [ ] Tests cover both Agent Marketplace and Skills.
+- [x] Persistent page failure results in one request, not an unbounded loop.
+- [x] Existing rows remain visible.
+- [x] An inline error and Retry action are visible.
+- [x] Retry succeeds without a full screen reload.
+- [x] Tests cover both Agent Marketplace and Skills.
 - [ ] User verifies with a mocked/throttled page failure.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- Agent Marketplace and Skills now keep next-page failures separate from first-page errors.
+- A failed page latches its error, preserves existing rows and cursor/page state, and blocks
+  threshold-driven requests until the user chooses the inline Retry action.
+- Retry requests only the failed next page; search, category, refresh, and first-page loads
+  intentionally clear the stale page latch.
+- Separate tests for both features prove repeated automatic `loadMore` calls remain no-ops
+  after failure and that explicit retry appends the recovered page.
+- Complete Agent and Skills Android unit suites and module Detekt pass.
+- Mocked/throttled device verification remains pending.
 
 ---
 

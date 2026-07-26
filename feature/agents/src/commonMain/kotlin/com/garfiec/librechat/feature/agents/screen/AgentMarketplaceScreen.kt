@@ -87,7 +87,8 @@ fun AgentMarketplaceScreen(
             lastVisibleItem >= totalItems - 3 &&
                 uiState.hasMore &&
                 !uiState.isLoadingMore &&
-                !uiState.isLoading
+                !uiState.isLoading &&
+                uiState.loadMoreError == null
         }
     }
 
@@ -242,6 +243,17 @@ fun AgentMarketplaceScreen(
                                     ) {
                                         CircularProgressIndicator()
                                     }
+                                }
+                            } else if (uiState.loadMoreError != null) {
+                                item(
+                                    span = { GridItemSpan(maxLineSpan) },
+                                    contentType = "load-more-error",
+                                ) {
+                                    ErrorBanner(
+                                        message = uiState.loadMoreError
+                                            ?: stringResource(Res.string.error_unknown),
+                                        onRetry = viewModel::retryLoadMore,
+                                    )
                                 }
                             }
                         }

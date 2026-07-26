@@ -28,6 +28,7 @@ data class AgentMarketplaceUiState(
     val isLoadingMore: Boolean = false,
     val isRefreshing: Boolean = false,
     val error: String? = null,
+    val loadMoreError: String? = null,
     val selectedCategory: String? = null,
     val searchQuery: String = "",
     val categories: List<String> = emptyList(),
@@ -108,6 +109,7 @@ class AgentMarketplaceViewModel(
             _uiState.value = _uiState.value.copy(
                 isLoading = true,
                 error = null,
+                loadMoreError = null,
                 currentPage = 1,
                 hasMore = true,
             )
@@ -139,14 +141,14 @@ class AgentMarketplaceViewModel(
         }
     }
 
-    /** Fetches the next page and appends results. No-ops if already loading or no more pages. */
+    /** Appends the next page. No-ops while loading, at the end, or until a failed page is retried. */
     fun loadMore() {
         val state = _uiState.value
-        if (!state.hasMore || state.isLoadingMore || state.isLoading) return
+        if (!state.hasMore || state.isLoadingMore || state.isLoading || state.loadMoreError != null) return
 
         viewModelScope.launch {
             val nextPage = state.currentPage + 1
-            _uiState.value = state.copy(isLoadingMore = true)
+            _uiState.value = state.copy(isLoadingMore = true, loadMoreError = null)
             when (val result = agentRepository.getAgentsPaginated(
                 page = nextPage,
                 limit = PAGE_SIZE,
@@ -160,6 +162,7 @@ class AgentMarketplaceViewModel(
                         agents = newAgents,
                         filteredAgents = newAgents,
                         isLoadingMore = false,
+                        loadMoreError = null,
                         hasMore = result.data.hasMore,
                         currentPage = nextPage,
                     )
@@ -167,7 +170,7 @@ class AgentMarketplaceViewModel(
                 is Result.Error -> {
                     _uiState.value = _uiState.value.copy(
                         isLoadingMore = false,
-                        error = result.message ?: "Failed to load more agents",
+                        loadMoreError = result.message ?: "Failed to load more agents",
                     )
                 }
                 is Result.Loading -> { /* no-op */ }
@@ -175,9 +178,21 @@ class AgentMarketplaceViewModel(
         }
     }
 
+    /** Retries only the failed next page; existing rows and filter state stay intact. */
+    fun retryLoadMore() {
+        val state = _uiState.value
+        if (state.loadMoreError == null || state.isLoadingMore || state.isLoading) return
+        _uiState.value = state.copy(loadMoreError = null)
+        loadMore()
+    }
+
     fun refresh() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isRefreshing = true)
+            _uiState.value = _uiState.value.copy(
+                isRefreshing = true,
+                error = null,
+                loadMoreError = null,
+            )
             val state = _uiState.value
             when (val result = agentRepository.getAgentsPaginated(
                 page = 1,
@@ -191,6 +206,7 @@ class AgentMarketplaceViewModel(
                         agents = displayAgents,
                         filteredAgents = displayAgents,
                         isRefreshing = false,
+                        loadMoreError = null,
                         hasMore = result.data.hasMore,
                         currentPage = 1,
                     )
@@ -231,6 +247,7 @@ class AgentMarketplaceViewModel(
     fun onCategorySelected(category: String?) {
         _uiState.value = _uiState.value.copy(
             selectedCategory = if (_uiState.value.selectedCategory == category) null else category,
+            loadMoreError = null,
         )
         loadAgents()
     }

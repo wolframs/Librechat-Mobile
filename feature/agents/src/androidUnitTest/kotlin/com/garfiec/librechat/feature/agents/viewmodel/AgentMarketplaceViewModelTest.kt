@@ -169,7 +169,7 @@ class AgentMarketplaceViewModelTest {
     }
 
     @Test
-    fun `loadMore error surfaces error message`() = runTest {
+    fun `loadMore error surfaces page error message`() = runTest {
         coEvery {
             agentRepository.getAgentsPaginated(page = 2, limit = any(), search = any(), category = any())
         } returns Result.Error(message = "Load more failed")
@@ -180,7 +180,8 @@ class AgentMarketplaceViewModelTest {
         viewModel.loadMore()
         advanceUntilIdle()
 
-        assertThat(viewModel.uiState.value.error).isEqualTo("Load more failed")
+        assertThat(viewModel.uiState.value.loadMoreError).isEqualTo("Load more failed")
+        assertThat(viewModel.uiState.value.error).isNull()
         assertThat(viewModel.uiState.value.isLoadingMore).isFalse()
     }
 
