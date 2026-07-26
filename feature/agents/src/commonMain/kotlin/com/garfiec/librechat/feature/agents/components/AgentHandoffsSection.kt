@@ -211,10 +211,16 @@ private fun HandoffEdgeRow(
                 }
             }
             IconButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = null)
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = stringResource(Res.string.cd_edit_handoff, summary),
+                )
             }
             IconButton(onClick = onRemove) {
-                Icon(Icons.Default.Close, contentDescription = null)
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = stringResource(Res.string.cd_remove_handoff, summary),
+                )
             }
         }
     }

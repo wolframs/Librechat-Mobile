@@ -19,6 +19,7 @@
     <string name="cd_clear_search">Suche löschen</string>
     <string name="cd_bookmarked">Mit Lesezeichen versehen</string>
     <string name="cd_conversation_actions">Unterhaltungsaktionen</string>
+    <string name="cd_project_actions">Aktionen für Projekt %1$s</string>
     <string name="cd_add_tag">Tag hinzufügen</string>
     <string name="cd_hide_tags">Tags ausblenden</string>
     <string name="cd_show_tags">Tags anzeigen</string>

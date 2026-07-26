@@ -20,6 +20,7 @@
     <string name="cd_clear_search">Clear search</string>
     <string name="cd_bookmarked">Bookmarked</string>
     <string name="cd_conversation_actions">Conversation actions</string>
+    <string name="cd_project_actions">Actions for project %1$s</string>
     <string name="cd_add_tag">Add tag</string>
     <string name="cd_hide_tags">Hide tags</string>
     <string name="cd_show_tags">Show tags</string>

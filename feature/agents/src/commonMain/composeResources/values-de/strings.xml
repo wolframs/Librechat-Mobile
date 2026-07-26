@@ -26,6 +26,8 @@
     <string name="cd_remove_item">%1$s entfernen</string>
     <string name="cd_edit_action">Aktion bearbeiten</string>
     <string name="cd_delete_action">Aktion löschen</string>
+    <string name="cd_edit_handoff">Übergabe %1$s bearbeiten</string>
+    <string name="cd_remove_handoff">Übergabe %1$s entfernen</string>
     <string name="cd_add_starter">Starter hinzufügen</string>
     <string name="cd_agent_avatar_tap">Agent-Avatar. Zum Ändern tippen.</string>
     <string name="cd_agent_avatar_name">%1$s-Avatar</string>

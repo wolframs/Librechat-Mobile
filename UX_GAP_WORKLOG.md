@@ -83,7 +83,7 @@ changes materially.
 | UX-008 | P2 | Draft attachment and queue recovery | `AUTO_VERIFIED` | Passed | Not started |
 | UX-009 | P2 | Banner dismissal persistence and scope | `AUTO_VERIFIED` | Passed | Not started |
 | UX-010 | P2 | Localization completeness | `IMPLEMENTED` | German coverage passed | Not started |
-| UX-011 | P2 | Accessibility audit | `SCOUTED` | Not started | Not started |
+| UX-011 | P2 | Accessibility audit | `IMPLEMENTED` | Static regression passed | Not started |
 | UX-012 | P2 | Cold-start token decryption | `SCOUTED` | Not started | Not started |
 | UX-013 | P3 | Multi-account sign-out wording | `SCOUTED` | Not started | Not started |
 | UX-014 | P3 | Archived favorite reconciliation | `SCOUTED` | Not started | Not started |
@@ -719,7 +719,7 @@ recomputed before implementation.
 
 **Priority:** P2
 
-**Status:** `SCOUTED`
+**Status:** `IMPLEMENTED`
 
 ### Observed behavior
 
@@ -746,11 +746,24 @@ semantics, so its clean error count does not settle this item.
 
 ### Acceptance checks
 
-- [ ] Run a semantic code audit without converting decorative icons into noisy labels.
+- [x] Run a semantic code audit without converting decorative icons into noisy labels.
 - [ ] Add Compose UI assertions for critical navigation and chat actions.
 - [ ] Test TalkBack traversal on the server, login, drawer, chat, settings, and Agent
   editor paths.
 - [ ] Verify largest supported font size without clipped essential controls.
+
+### Implementation update — 2026-07-27
+
+- Status: `IMPLEMENTED`
+- Audited icon-only Compose actions separately from decorative icons nested beside visible labels.
+- Added localized, context-bearing labels to the Projects screen/drawer overflow controls and to
+  Agent handoff edit/remove controls. Conversation-row overflow was revalidated as already labeled.
+- Added the custom `IconButtonContentDescription` Detekt rule. It rejects a null Icon description
+  specifically inside `IconButton`, while allowing decorative null descriptions elsewhere.
+- New isolated rule tests cover rejection, labeled actions, and the decorative-icon exception;
+  the rule passes across the affected common source sets.
+- Remaining: Compose semantics journey assertions, TalkBack traversal, font scaling, contrast, and
+  device-level focus/live-update behavior.
 
 ---
 
@@ -963,3 +976,10 @@ conclusion. Correct earlier entries with a new dated note.
 - Filled the 166 revalidated German key gaps without claiming external human review.
 - Other locale gaps remain explicit English fallbacks and are reported by the same check.
 - Hardcoded-string extraction plus RTL, long-string, and device review remain pending.
+
+### 2026-07-27 — UX-011 icon-action accessibility guard
+
+- Labeled the four revalidated icon-only actions that had disappeared from accessibility services.
+- Added a narrow custom Detekt rule and isolated tests preventing null descriptions inside
+  `IconButton` without making decorative icons noisy.
+- Full TalkBack, font-scale, contrast, focus-order, and Compose journey checks remain pending.

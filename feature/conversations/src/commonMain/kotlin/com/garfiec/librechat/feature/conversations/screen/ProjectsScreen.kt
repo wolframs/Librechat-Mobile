@@ -50,6 +50,7 @@ import com.garfiec.librechat.feature.conversations.components.ProjectDeleteDialo
 import com.garfiec.librechat.feature.conversations.components.ProjectNameDialog
 import com.garfiec.librechat.feature.conversations.resources.Res
 import com.garfiec.librechat.feature.conversations.resources.back
+import com.garfiec.librechat.feature.conversations.resources.cd_project_actions
 import com.garfiec.librechat.feature.conversations.resources.project_count
 import com.garfiec.librechat.feature.conversations.resources.project_new
 import com.garfiec.librechat.feature.conversations.resources.project_unassigned
@@ -152,7 +153,10 @@ fun ProjectsScreen(
                         onClick = { onProjectClick(project.id, project.name) },
                         overflow = {
                             IconButton(onClick = { menuOpen = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = null)
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = stringResource(Res.string.cd_project_actions, project.name),
+                                )
                             }
                             ProjectActionsMenu(
                                 expanded = menuOpen,

@@ -110,6 +110,7 @@ import com.garfiec.librechat.feature.conversations.resources.cd_clear_search
 import com.garfiec.librechat.feature.conversations.resources.cd_collapse_section
 import com.garfiec.librechat.feature.conversations.resources.cd_conversation_actions
 import com.garfiec.librechat.feature.conversations.resources.cd_expand_section
+import com.garfiec.librechat.feature.conversations.resources.cd_project_actions
 import com.garfiec.librechat.feature.conversations.resources.cd_search
 import com.garfiec.librechat.feature.conversations.resources.chats
 import com.garfiec.librechat.feature.conversations.resources.favorites
@@ -1042,7 +1043,10 @@ private fun DrawerProjectsList(
                 onToggle = { onToggleProject(folder.id) },
                 menuContent = {
                     IconButton(onClick = { menuOpenId = folder.id }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = null)
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = stringResource(Res.string.cd_project_actions, folder.name),
+                        )
                     }
                     ProjectActionsMenu(
                         expanded = menuOpenId == folder.id,

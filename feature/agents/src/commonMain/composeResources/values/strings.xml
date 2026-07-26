@@ -26,6 +26,8 @@
     <string name="cd_remove_item">Remove %1$s</string>
     <string name="cd_edit_action">Edit action</string>
     <string name="cd_delete_action">Delete action</string>
+    <string name="cd_edit_handoff">Edit handoff %1$s</string>
+    <string name="cd_remove_handoff">Remove handoff %1$s</string>
     <string name="cd_add_starter">Add starter</string>
     <string name="cd_agent_avatar_tap">Agent avatar. Tap to change.</string>
     <string name="cd_agent_avatar_name">%1$s avatar</string>
