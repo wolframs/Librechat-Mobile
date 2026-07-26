@@ -131,11 +131,9 @@ class ChatViewModelContextProjectionInitTest {
         // cache to the agent-detail fetch; a benign Error keeps the path deterministic and network-free.
         coEvery { agentRepository.getAgentForEditing(any()) } returns Result.Error(message = "test")
 
-        // Pin the AGENTS selection: `init` -> loadConversationModel -> getConversation. A non-Success
-        // result makes `applyConversationModel` a no-op, so the handoff's AGENTS selection survives to
-        // the projection. Left to relaxed mockk this is load-bearing but implicit — an Error keeps the
-        // precondition explicit so a change in relaxed handling of the sealed Result can't silently
-        // flip the selection off AGENTS and fail this test on correct code.
+        // Pin the AGENTS selection: a failed detail refresh and cache fallback make
+        // `applyConversationModel` a no-op, so the handoff's AGENTS selection survives.
+        coEvery { conversationRepository.refreshConversation(any(), any()) } returns Result.Error(message = "test")
         coEvery { conversationRepository.getConversation(any(), any()) } returns Result.Error(message = "test")
     }
 

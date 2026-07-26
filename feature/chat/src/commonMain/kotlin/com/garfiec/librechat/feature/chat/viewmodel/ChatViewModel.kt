@@ -734,8 +734,8 @@ class ChatViewModel(
     }
 
     private fun loadConversationModel(conversationId: String) {
-        // SECURITY: do not remove — temp-chat data-at-rest guard. getConversation below
-        // round-trips through refreshConversation, which upserts the conversation row to Room.
+        // SECURITY: do not remove — temp-chat data-at-rest guard. The detail refresh below
+        // upserts the conversation row to Room.
         // Temp chats must never persist, and their model/endpoint was already seeded from the
         // NewChatSelectionHandoff in init — so there is nothing to load and nothing to write.
         if (_uiState.value.isTemporaryChat) {
@@ -744,7 +744,7 @@ class ChatViewModel(
             return
         }
         viewModelScope.launch {
-            val result = conversationRepository.getConversation(conversationId, originAccount = null)
+            val result = conversationRepository.loadConversationSnapshot(conversationId)
             val conversation = result.getOrNull()
             if (conversation != null) {
                 _uiState.update { it.copy(conversation = it.conversation.copy(conversationTitle = conversation.title)) }

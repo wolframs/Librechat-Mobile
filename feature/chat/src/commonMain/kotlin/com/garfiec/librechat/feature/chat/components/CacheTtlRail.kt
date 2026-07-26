@@ -63,6 +63,7 @@ fun CacheTtlRail(
         mutableLongStateOf(Clock.System.now().toEpochMilliseconds())
     }
     LaunchedEffect(anchor?.messageId) {
+        if (anchor == null) return@LaunchedEffect
         while (true) {
             delay(1_000)
             nowMillis = Clock.System.now().toEpochMilliseconds()

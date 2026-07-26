@@ -98,23 +98,34 @@ class ModelSelectionDelegate(
     var conversationModelResolved = false
 
     /**
-     * Applies an authoritative conversation (endpoint, model) as the active selection and
+     * Applies an authoritative conversation selection as the active selection and
      * marks the conversation model both loaded and resolved. The single write point for a
-     * resolved existing/just-created conversation's selection — used by the new-chat handoff
-     * and by [ChatViewModel]'s conversation reads — so the flags can't drift from the value.
+     * resolved existing/just-created conversation — used by the new-chat handoff and by
+     * [ChatViewModel]'s conversation reads — so the flags can't drift from the value.
+     * [modelParameters] is null for a just-created handoff, which preserves the parameters already
+     * staged by the landing screen; an existing conversation supplies its persisted snapshot.
      */
-    fun applyResolvedConversationModel(endpoint: String, model: String?) {
-        applySelection(endpoint, model, reason = "conversationResolved")
+    fun applyResolvedConversationModel(
+        endpoint: String,
+        model: String?,
+        modelParameters: ModelParameters? = null,
+    ) {
+        applySelection(
+            endpoint = endpoint,
+            model = model,
+            reason = "conversationResolved",
+            modelParameters = modelParameters,
+        )
         conversationModelLoaded = true
         conversationModelResolved = true
     }
 
     /**
-     * Resolves a loaded [conversation]'s authoritative (endpoint, model) and applies it as
-     * the active selection via [applyResolvedConversationModel]. Agents conversations carry
-     * the agent in `agentId`, so prefer that over `model` for the AGENTS endpoint. Returns
-     * true when a concrete selection was applied (i.e. the conversation model is now
-     * resolved), false when the conversation lacked enough info.
+     * Resolves a loaded [conversation]'s authoritative endpoint, model, and parameter snapshot and
+     * applies them via [applyResolvedConversationModel]. Agents conversations carry the agent in
+     * `agentId`, so prefer that over `model` for the AGENTS endpoint. Returns true when a concrete
+     * selection was applied (i.e. the conversation model is now resolved), false when the
+     * conversation lacked enough info.
      */
     fun applyConversationModel(conversation: Conversation): Boolean {
         val endpoint = conversation.endpoint
@@ -125,7 +136,11 @@ class ModelSelectionDelegate(
             conversation.model
         }
         if (endpoint != null && resolvedModel != null) {
-            applyResolvedConversationModel(endpoint, resolvedModel)
+            applyResolvedConversationModel(
+                endpoint = endpoint,
+                model = resolvedModel,
+                modelParameters = conversation.toModelParameters(),
+            )
             return true
         }
         return false
@@ -515,11 +530,20 @@ class ModelSelectionDelegate(
         applySelection(firstEntry.key, firstEntry.value.firstOrNull(), reason = "tier3-firstModel")
     }
 
-    private fun applySelection(endpoint: String, model: String?, reason: String) {
+    private fun applySelection(
+        endpoint: String,
+        model: String?,
+        reason: String,
+        modelParameters: ModelParameters? = null,
+    ) {
         val previous = handle.state
         val changed = previous.selectedEndpoint != endpoint || previous.selectedModel != model
         handle.update {
-            selection = selection.copy(selectedEndpoint = endpoint, selectedModel = model)
+            selection = selection.copy(
+                selectedEndpoint = endpoint,
+                selectedModel = model,
+                modelParameters = modelParameters ?: selection.modelParameters,
+            )
         }
         if (changed) {
             Diag.d(

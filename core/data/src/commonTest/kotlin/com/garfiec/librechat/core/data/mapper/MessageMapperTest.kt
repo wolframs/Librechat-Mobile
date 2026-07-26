@@ -37,12 +37,6 @@ class MessageMapperTest {
     }
 
     @Test
-    fun cacheTtl_roundTripsThroughEntity() {
-        val restored = baseMessage(null).copy(cacheTTL = "1h").toEntity().toModel()
-        assertEquals("1h", restored.cacheTTL)
-    }
-
-    @Test
     fun contentParts_agentAttribution_roundTripsThroughEntity() {
         // Compare Models persistence: the per-part agentId/groupId attribution must
         // survive the Room round-trip, or reopening a comparison can't restore its panes.

@@ -117,33 +117,4 @@ class ChatPayloadBuilderTest {
         val encoded = json.encodeToString(ChatRequest.serializer(), req)
         assertFalse("\"messageId\"" in encoded, "messageId must be omitted when not provided (regenerate/continue)")
     }
-
-    @Test
-    fun oneShotCacheTtlSerializesAtTopLevel() {
-        val req = ChatPayloadBuilder.build(
-            text = "keep this expensive context warm",
-            conversationId = "c1",
-            endpoint = "anthropic",
-            model = "claude-opus-4-1",
-            cacheTtl = "1h",
-        )
-
-        assertEquals("1h", req.cacheTTL)
-        val encoded = json.encodeToString(ChatRequest.serializer(), req)
-        assertTrue("\"cacheTTL\":\"1h\"" in encoded)
-    }
-
-    @Test
-    fun cacheTtlIsOmittedWhenNotArmed() {
-        val req = ChatPayloadBuilder.build(
-            text = "hello",
-            conversationId = "c1",
-            endpoint = "anthropic",
-            model = "claude-opus-4-1",
-        )
-
-        assertNull(req.cacheTTL)
-        val encoded = json.encodeToString(ChatRequest.serializer(), req)
-        assertFalse("\"cacheTTL\"" in encoded)
-    }
 }

@@ -6,6 +6,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import com.garfiec.librechat.core.common.identity.CrossAccount
 import com.garfiec.librechat.core.data.db.entity.ConversationEntity
+import com.garfiec.librechat.core.data.db.preserveLocalCacheFieldsFrom
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -32,12 +33,11 @@ interface ConversationDao {
     @Upsert
     suspend fun upsertAll(conversations: List<ConversationEntity>)
 
-    // Atomic read-merge-write that preserves locally-stored tags when a row already exists for this
-    // account. Used by paths that receive server responses without the `tags` field (list endpoint +
-    // streaming save). Must run inside a single transaction so it can't be interleaved by a concurrent
-    // updateTags write from `syncFavoritesFromServer` (which would otherwise get clobbered). The body
-    // threads `accountId` (reads via `getByIdForAccount`), so it is account-safe despite @CrossAccount
-    // suppressing the concrete-body lint.
+    // Atomic read-merge-write that preserves locally-stored tags and a complete model-parameter
+    // snapshot when a sparse server response omits either. Used by paths such as the list endpoint
+    // and streaming save. Must run inside a single transaction so it can't be interleaved by a
+    // concurrent local write. The body threads `accountId` (reads via `getByIdForAccount`), so it is
+    // account-safe despite @CrossAccount suppressing the concrete-body lint.
     @CrossAccount
     @Transaction
     suspend fun upsertPreservingTags(accountId: String, entities: List<ConversationEntity>) {
@@ -47,14 +47,36 @@ interface ConversationDao {
                 continue
             }
             val existing = getByIdForAccount(entity.conversationId, accountId)
-            val toUpsert = if (existing != null) entity.copy(tags = existing.tags) else entity
-            upsert(toUpsert)
+            upsert(entity.preserveLocalCacheFieldsFrom(existing))
         }
     }
 
     @CrossAccount
     suspend fun upsertPreservingTags(accountId: String, entity: ConversationEntity) {
         upsertPreservingTags(accountId, listOf(entity))
+    }
+
+    /**
+     * Stores an authoritative detail response while retaining local-only tags.
+     *
+     * Unlike [upsertPreservingTags], a null [ConversationEntity.modelParams] clears an older
+     * snapshot: it means the detail response resolved entirely to endpoint defaults, not that a
+     * sparse list response omitted the fields.
+     */
+    @CrossAccount
+    @Transaction
+    suspend fun upsertAuthoritativeSnapshot(accountId: String, entity: ConversationEntity) {
+        if (entity.conversationId.isBlank()) {
+            upsert(entity)
+            return
+        }
+        val existing = getByIdForAccount(entity.conversationId, accountId)
+        upsert(
+            entity.preserveLocalCacheFieldsFrom(
+                existing = existing,
+                preserveModelParamsWhenMissing = false,
+            ),
+        )
     }
 
     @Query("DELETE FROM conversations WHERE conversationId = :id AND accountId = :accountId")

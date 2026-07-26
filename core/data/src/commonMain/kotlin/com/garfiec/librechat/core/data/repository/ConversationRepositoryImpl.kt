@@ -134,7 +134,10 @@ class ConversationRepositoryImpl(
             val accountId = resolveWriteAccountId(originAccount, activeAccountProvider, roster)
             val conversation = conversationsApi.getConversation(id)
             if (accountId != null) {
-                conversationDao.upsertPreservingTags(accountId, conversation.toEntity().copy(accountId = accountId))
+                conversationDao.upsertAuthoritativeSnapshot(
+                    accountId,
+                    conversation.toEntity().copy(accountId = accountId),
+                )
             }
             conversation
         }

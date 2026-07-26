@@ -1,10 +1,13 @@
 package com.garfiec.librechat.core.model
 
 import com.garfiec.librechat.core.model.serializer.LenientInstantSerializer
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNames
 import kotlin.time.Instant
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class Conversation(
     val conversationId: String? = null,
@@ -18,16 +21,25 @@ data class Conversation(
     val tags: List<String> = emptyList(),
     val isArchived: Boolean = false,
     val temperature: Double? = null,
-    @SerialName("top_p") val topP: Double? = null,
+    @SerialName("top_p") @JsonNames("topP") val topP: Double? = null,
     val topK: Int? = null,
-    @SerialName("frequency_penalty") val frequencyPenalty: Double? = null,
-    @SerialName("presence_penalty") val presencePenalty: Double? = null,
+    @SerialName("frequency_penalty") @JsonNames("frequencyPenalty") val frequencyPenalty: Double? = null,
+    @SerialName("presence_penalty") @JsonNames("presencePenalty") val presencePenalty: Double? = null,
     val maxOutputTokens: Int? = null,
     val maxContextTokens: Int? = null,
-    val maxTokens: Int? = null,
+    @SerialName("max_tokens") @JsonNames("maxTokens") val maxTokens: Int? = null,
     val system: String? = null,
-    @SerialName("reasoning_effort") val reasoningEffort: String? = null,
+    val promptPrefix: String? = null,
+    val modelLabel: String? = null,
+    val chatGptLabel: String? = null,
+    @SerialName("reasoning_effort") @JsonNames("reasoningEffort") val reasoningEffort: String? = null,
+    @SerialName("reasoning_summary") @JsonNames("reasoningSummary") val reasoningSummary: String? = null,
     val effort: String? = null,
+    val verbosity: String? = null,
+    val useResponsesApi: Boolean? = null,
+    val disableStreaming: Boolean? = null,
+    val thinking: Boolean? = null,
+    val thinkingBudget: Int? = null,
     @SerialName("thinkingLevel") val thinkingLevel: String? = null,
     val thinkingDisplay: String? = null,
     val stop: List<String>? = null,
@@ -35,11 +47,16 @@ data class Conversation(
     val greeting: String? = null,
     val spec: String? = null,
     val tools: List<String>? = null,
-    @SerialName("web_search") val webSearch: Boolean? = null,
+    @SerialName("web_search") @JsonNames("webSearch") val webSearch: Boolean? = null,
     /** Google Gemini "URL Context" grounding (v0.8.7). Google-only, sibling of [webSearch]. */
-    @SerialName("url_context") val urlContext: Boolean? = null,
+    @SerialName("url_context") @JsonNames("urlContext") val urlContext: Boolean? = null,
+    val promptCache: Boolean? = null,
     /** Anthropic prompt-cache duration: `"5m"` | `"1h"` (v0.8.7). Persisted per-conversation. */
     val promptCacheTtl: String? = null,
+    val imageDetail: String? = null,
+    val fileTokenLimit: Int? = null,
+    val region: String? = null,
+    val resendFiles: Boolean? = null,
     /** Whether the conversation is pinned to the top of the list (v0.8.7). */
     val pinned: Boolean? = null,
     /** Chat Project (folder) this conversation is assigned to, or null if unassigned (v0.8.7). */

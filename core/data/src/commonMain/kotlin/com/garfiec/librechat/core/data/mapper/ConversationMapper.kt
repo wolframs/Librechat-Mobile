@@ -29,32 +29,34 @@ fun Conversation.toEntity(): ConversationEntity {
         tags = json.encodeToString(ListSerializer(serializer<String>()), tags),
         iconURL = iconURL,
         greeting = greeting,
-        modelParams = null,
+        modelParams = encodeCachedModelParams(json),
         createdAt = createdAt?.toEpochMilliseconds() ?: now,
         updatedAt = updatedAt?.toEpochMilliseconds() ?: now,
     )
 }
 
-fun ConversationEntity.toModel(): Conversation = Conversation(
-    conversationId = conversationId,
-    title = title,
-    user = user,
-    endpoint = endpoint,
-    endpointType = endpointType,
-    model = model,
-    agentId = agentId,
-    isArchived = isArchived,
-    pinned = pinned,
-    chatProjectId = chatProjectId,
-    tags = try {
-        json.decodeFromString<List<String>>(tags)
-    } catch (_: Exception) {
-        emptyList()
-    },
-    iconURL = iconURL,
-    greeting = greeting,
-    createdAt = Instant.fromEpochMilliseconds(createdAt),
-    updatedAt = Instant.fromEpochMilliseconds(updatedAt),
-)
+fun ConversationEntity.toModel(): Conversation {
+    return Conversation(
+        conversationId = conversationId,
+        title = title,
+        user = user,
+        endpoint = endpoint,
+        endpointType = endpointType,
+        model = model,
+        agentId = agentId,
+        isArchived = isArchived,
+        pinned = pinned,
+        chatProjectId = chatProjectId,
+        tags = try {
+            json.decodeFromString<List<String>>(tags)
+        } catch (_: Exception) {
+            emptyList()
+        },
+        iconURL = iconURL,
+        greeting = greeting,
+        createdAt = Instant.fromEpochMilliseconds(createdAt),
+        updatedAt = Instant.fromEpochMilliseconds(updatedAt),
+    ).restoreCachedModelParams(modelParams, json)
+}
 
 fun List<ConversationEntity>.toModels(): List<Conversation> = map { it.toModel() }
