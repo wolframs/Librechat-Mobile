@@ -13,6 +13,7 @@
     <string name="action_revoke_all">Alle widerrufen</string>
     <string name="action_save">Speichern</string>
     <string name="action_sign_out">Abmelden</string>
+    <string name="action_sign_out_this_account">Von diesem Konto abmelden</string>
     <string name="action_upload">Hochladen</string>
     <string name="action_uploading">Wird hochgeladen…</string>
     <string name="action_verify">Überprüfen</string>
@@ -232,6 +233,11 @@
     <string name="delete_account">Konto löschen</string>
     <string name="dialog_title_sign_out">Abmelden</string>
     <string name="dialog_sign_out_message">Möchtest du dich wirklich abmelden?</string>
+    <string name="dialog_title_sign_out_account">Von diesem Konto abmelden?</string>
+    <string name="dialog_sign_out_last_account_message">%1$s auf %2$s wird von diesem Gerät entfernt. Danach gelangst du zur Anmeldung.</string>
+    <string name="dialog_sign_out_switch_account_message">%1$s auf %2$s wird von diesem Gerät entfernt. Du verwendest anschließend %3$s auf %4$s.</string>
+    <string name="sign_out_this_account">dieses Konto</string>
+    <string name="sign_out_this_server">diesem Server</string>
     <string name="dialog_title_delete_account">Konto löschen</string>
     <string name="dialog_delete_account_message">Diese Aktion kann nicht rückgängig gemacht werden. Alle deine Daten werden dauerhaft gelöscht.</string>
 

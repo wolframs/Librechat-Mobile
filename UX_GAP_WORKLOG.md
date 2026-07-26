@@ -822,7 +822,7 @@ navigation deterministic and avoiding a flash of unauthenticated UI.
 
 **Priority:** P3
 
-**Status:** `SCOUTED`
+**Status:** `IMPLEMENTED`
 
 ### Observed behavior
 
@@ -843,9 +843,19 @@ confirmed "Sign out of all accounts" action if it serves a real user need.
 
 ### Acceptance checks
 
-- [ ] Confirmation names the account/server being removed.
-- [ ] Copy differs appropriately for last-account versus multi-account state.
-- [ ] Promoted-account transition is visually understandable.
+- [x] Confirmation names the account/server being removed.
+- [x] Copy differs appropriately for last-account versus multi-account state.
+- [x] Promoted-account transition is visually understandable.
+
+### Implementation update — 2026-07-27
+
+- A dedicated roster-backed presentation model mirrors the repository’s established promotion rule:
+  the most-recently-active surviving account.
+- The confirmation names the current account and server. With another account present, both the
+  action label and title say “Sign out of this account” and the message names the exact account/server
+  that will appear after removal. The last-account copy instead explains the return to sign-in.
+- The actual revoke, local purge, promotion, account transition, and navigation paths are unchanged.
+  Focused tests cover both successor selection and the last-account state.
 
 ---
 

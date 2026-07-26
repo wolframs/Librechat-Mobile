@@ -53,6 +53,7 @@ import com.garfiec.librechat.feature.settings.screen.sections.BackupCodesDialog
 import com.garfiec.librechat.feature.settings.screen.sections.TwoFactorCodeDialog
 import com.garfiec.librechat.feature.settings.screen.sections.TwoFactorSetupDialog
 import com.garfiec.librechat.feature.settings.viewmodel.SettingsViewModel
+import com.garfiec.librechat.feature.settings.viewmodel.SignOutViewModel
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 
@@ -114,8 +115,10 @@ fun AccountSettingsContent(
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     viewModel: SettingsViewModel = koinViewModel(),
+    signOutViewModel: SignOutViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val signOutState by signOutViewModel.uiState.collectAsStateWithLifecycle()
     val currentOnLogout by rememberUpdatedState(onLogout)
     val retryLabel = stringResource(Res.string.action_retry)
 
@@ -160,6 +163,7 @@ fun AccountSettingsContent(
             item(key = "sign_out") {
                 SignOutButton(
                     isDeleting = uiState.isDeletingAccount,
+                    hasOtherAccounts = signOutState.successor != null,
                     onLogoutClick = { showLogoutDialog = true },
                 )
             }
@@ -281,10 +285,46 @@ fun AccountSettingsContent(
 
         // Logout confirmation dialog
         if (showLogoutDialog) {
+            val accountLabel = signOutState.current?.displayLabel
+                ?: uiState.user?.name?.takeIf(String::isNotBlank)
+                ?: uiState.user?.email?.takeIf(String::isNotBlank)
+                ?: stringResource(Res.string.sign_out_this_account)
+            val serverLabel = signOutState.current?.serverHost
+                ?: uiState.serverUrl.takeIf(String::isNotBlank)
+                ?: stringResource(Res.string.sign_out_this_server)
+            val successor = signOutState.successor
             AlertDialog(
                 onDismissRequest = { showLogoutDialog = false },
-                title = { Text(stringResource(Res.string.dialog_title_sign_out)) },
-                text = { Text(stringResource(Res.string.dialog_sign_out_message)) },
+                title = {
+                    Text(
+                        stringResource(
+                            if (successor == null) {
+                                Res.string.dialog_title_sign_out
+                            } else {
+                                Res.string.dialog_title_sign_out_account
+                            },
+                        ),
+                    )
+                },
+                text = {
+                    Text(
+                        if (successor == null) {
+                            stringResource(
+                                Res.string.dialog_sign_out_last_account_message,
+                                accountLabel,
+                                serverLabel,
+                            )
+                        } else {
+                            stringResource(
+                                Res.string.dialog_sign_out_switch_account_message,
+                                accountLabel,
+                                serverLabel,
+                                successor.displayLabel,
+                                successor.serverHost,
+                            )
+                        },
+                    )
+                },
                 confirmButton = {
                     TextButton(
                         onClick = {
@@ -292,7 +332,15 @@ fun AccountSettingsContent(
                             viewModel.logout()
                         },
                     ) {
-                        Text(stringResource(Res.string.action_sign_out))
+                        Text(
+                            stringResource(
+                                if (successor == null) {
+                                    Res.string.action_sign_out
+                                } else {
+                                    Res.string.action_sign_out_this_account
+                                },
+                            ),
+                        )
                     }
                 },
                 dismissButton = {
@@ -403,6 +451,7 @@ private fun SectionHeader(title: String) {
 @Composable
 private fun SignOutButton(
     isDeleting: Boolean,
+    hasOtherAccounts: Boolean,
     onLogoutClick: () -> Unit,
 ) {
     // Sign out closes out the profile group; the divider below it separates the
@@ -415,7 +464,15 @@ private fun SignOutButton(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text(stringResource(Res.string.action_sign_out))
+            Text(
+                stringResource(
+                    if (hasOtherAccounts) {
+                        Res.string.action_sign_out_this_account
+                    } else {
+                        Res.string.action_sign_out
+                    },
+                ),
+            )
         }
         HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
     }
