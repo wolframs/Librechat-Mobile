@@ -2,6 +2,12 @@
 
 Native mobile client for LibreChat (Android & iOS). Connects to existing LibreChat backend servers (no backend changes). Users specify server URL during onboarding.
 
+## Active UX Work
+
+Read `UX_GAP_WORKLOG.md` before starting UX-gap implementation. It is the persistent
+status, evidence, acceptance-test, and session ledger for the current reliability and
+polish backlog. Update it whenever an item changes state.
+
 ## Tech Stack
 
 - **UI**: Jetpack Compose + Navigation Compose 3 (Nav 3)
