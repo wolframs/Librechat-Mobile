@@ -281,4 +281,10 @@
     <string name="subagents_allow_self">Allow spawning itself</string>
     <string name="add_subagent">Add subagent</string>
     <string name="subagents_full">Maximum number of subagents reached.</string>
+
+    <!-- Unsaved editor draft -->
+    <string name="discard_agent_changes_title">Discard unsaved changes?</string>
+    <string name="discard_agent_changes_message">Your changes to this agent have not been saved.</string>
+    <string name="discard">Discard</string>
+    <string name="stay">Stay</string>
 </resources>

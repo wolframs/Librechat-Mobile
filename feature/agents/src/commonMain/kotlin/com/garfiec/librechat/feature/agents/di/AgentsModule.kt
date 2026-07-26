@@ -42,6 +42,7 @@ val agentsModule = module {
             roleRepository = get(),
             contentReader = get(),
             ioDispatcher = get(KoinQualifiers.IO),
+            savedStateHandle = params.get(),
             initialAgentId = params.getOrNull(),
         )
     }

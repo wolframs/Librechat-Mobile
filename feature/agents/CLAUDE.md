@@ -56,5 +56,11 @@
   - `AgentSharingSection` — visibility (Private/Team/Public) + collaborative toggle
   - `AgentHandoffConfig` — select agents for handoff, displayed as InputChips
 - `AgentEditorViewModel` depends on both `AgentRepository` and `McpRepository`
+- User-editable Agent editor content is compared against a clean content-only baseline.
+  Dirty drafts are serialized into the navigation entry's `SavedStateHandle`, so Android
+  configuration changes and process recreation restore the form without making drafts
+  long-lived application preferences.
+- Both the top-bar and system back paths call `requestBack`; dirty forms require an
+  explicit Discard action. Successful save/delete/revert clears the saved draft.
 - **Gotcha**: MCP tools load requires a separate `McpRepository.getTools()` call; they're not bundled with agent data
 - **Gotcha**: `isPublic`/`isCollaborative` map to the sharing section, not individual toggles in the agent model

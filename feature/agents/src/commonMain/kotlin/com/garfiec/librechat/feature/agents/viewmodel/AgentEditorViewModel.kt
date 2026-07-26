@@ -1,6 +1,7 @@
 package com.garfiec.librechat.feature.agents.viewmodel
 
 import androidx.compose.runtime.Immutable
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.garfiec.librechat.core.data.repository.AgentRepository
@@ -181,6 +182,10 @@ data class AgentEditorUiState(
     /** Agent runtime `tool_kwargs`. See [Agent.toolKwargs] for shape + the
      *  wire-level caveat that the field is stripped server-side today. */
     val toolKwargs: JsonElement? = null,
+    /** True only when user-editable content differs from the loaded/default baseline. */
+    val hasUnsavedChanges: Boolean = false,
+    /** Controls the leave-with-unsaved-work confirmation dialog. */
+    val showDiscardConfirm: Boolean = false,
 )
 
 /**
@@ -217,6 +222,7 @@ class AgentEditorViewModel(
     private val roleRepository: RoleRepository,
     private val contentReader: ContentReader,
     private val ioDispatcher: CoroutineDispatcher,
+    savedStateHandle: SavedStateHandle,
     initialAgentId: String? = null,
 ) : ViewModel() {
 
@@ -233,7 +239,12 @@ class AgentEditorViewModel(
     private val _events = MutableSharedFlow<AgentEditorEvent>()
     val events: SharedFlow<AgentEditorEvent> = _events.asSharedFlow()
 
-    private val stateHandle = AgentEditorStateHandle(_uiState, viewModelScope)
+    private val stateHandle = AgentEditorStateHandle(
+        stateFlow = _uiState,
+        scope = viewModelScope,
+        savedStateHandle = savedStateHandle,
+        agentId = editAgentId,
+    )
 
     private val filesDelegate = AgentFilesDelegate(
         stateHandle = stateHandle,
@@ -285,6 +296,8 @@ class AgentEditorViewModel(
             loaderDelegate.loadAgent(editAgentId)
             actionsDelegate.loadActions()
             filesDelegate.loadAgentFiles(editAgentId)
+        } else {
+            stateHandle.initializeDraftTracking(_uiState.value)
         }
     }
 
@@ -480,6 +493,14 @@ class AgentEditorViewModel(
     fun dismissVersionHistory() {
         stateHandle.update { copy(showVersionHistory = false) }
     }
+
+    // --- Navigation and draft protection ---
+
+    fun requestBack(): Boolean = stateHandle.requestBack()
+
+    fun dismissDiscardConfirmation() = stateHandle.dismissDiscardConfirmation()
+
+    fun discardDraft() = stateHandle.discardDraft()
 
     // --- Avatar ---
 

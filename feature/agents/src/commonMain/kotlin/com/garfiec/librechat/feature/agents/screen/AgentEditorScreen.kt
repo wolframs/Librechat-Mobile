@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.garfiec.librechat.core.ui.components.LoadingIndicator
+import com.garfiec.librechat.core.ui.components.PlatformBackHandler
 import com.garfiec.librechat.feature.agents.components.rememberAgentFilePicker
 import com.garfiec.librechat.feature.agents.resources.*
 import com.garfiec.librechat.feature.agents.resources.Res
@@ -47,7 +48,16 @@ fun AgentEditorScreen(
     val currentOnSaved by rememberUpdatedState(onSave)
     val currentOnDuplicated by rememberUpdatedState(onDuplicate)
     val currentOnDeleted by rememberUpdatedState(onDelete)
+    val currentOnBack by rememberUpdatedState(onBack)
     val snackbarHostState = remember { SnackbarHostState() }
+    val requestBack = {
+        if (viewModel.requestBack()) currentOnBack()
+    }
+
+    PlatformBackHandler(
+        enabled = uiState.hasUnsavedChanges,
+        onBack = requestBack,
+    )
 
     // One picker per slot; iOS impl is a stub today.
     val codeFilePicker = rememberAgentFilePicker(
@@ -103,6 +113,10 @@ fun AgentEditorScreen(
         viewModel = viewModel,
         showToolDialog = showToolDialog,
         onDismissToolDialog = { showToolDialog = false },
+        onDiscardDraft = {
+            viewModel.discardDraft()
+            currentOnBack()
+        },
     )
 
     Scaffold(
@@ -111,7 +125,7 @@ fun AgentEditorScreen(
         topBar = {
             AgentEditorTopBar(
                 isEditMode = uiState.isEditMode,
-                onBack = onBack,
+                onBack = requestBack,
                 onDuplicate = viewModel::showDuplicateConfirmation,
                 onVersionHistory = viewModel::showVersionHistory,
                 onDelete = viewModel::showDeleteConfirmation,

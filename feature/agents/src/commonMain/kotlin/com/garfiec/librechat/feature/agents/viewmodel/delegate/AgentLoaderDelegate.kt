@@ -67,7 +67,7 @@ class AgentLoaderDelegate(
                     val newState = stateHandle.state
                         .applyAgentData(agent)
                         .copy(isLoading = false)
-                    stateHandle.update { newState }
+                    stateHandle.initializeDraftTracking(newState)
                     // If loadAgentFiles already returned, re-merge now that
                     // the per-capability slot lists are populated. Without
                     // this, an earlier-finishing files request would have

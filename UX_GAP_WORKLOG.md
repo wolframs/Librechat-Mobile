@@ -78,7 +78,7 @@ changes materially.
 | UX-003 | P0 | Stream teardown after clean EOF | `AUTO_VERIFIED` | Passed | Not started |
 | UX-004 | P0 | Pagination retry loop | `AUTO_VERIFIED` | Passed | Not started |
 | UX-005 | P1 | Credential Manager lifecycle | `AUTO_VERIFIED` | Passed | Not started |
-| UX-006 | P1 | Agent editor draft protection | `SCOUTED` | Not started | Not started |
+| UX-006 | P1 | Agent editor draft protection | `AUTO_VERIFIED` | Passed | Not started |
 | UX-007 | P1 | Memory-safe, cancellable uploads | `AUTO_VERIFIED` | Passed | Not started |
 | UX-008 | P2 | Draft attachment and queue recovery | `SCOUTED` | Not started | Not started |
 | UX-009 | P2 | Banner dismissal persistence and scope | `AUTO_VERIFIED` | Passed | Not started |
@@ -445,7 +445,7 @@ a visible retry state and requires explicit retry or a meaningful new trigger.
 
 **Priority:** P1
 
-**Status:** `SCOUTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -468,12 +468,31 @@ discard confirmation, local draft, or process-restoration mechanism.
 
 ### Acceptance checks
 
-- [ ] Back with no changes exits immediately.
-- [ ] Back with changes offers Stay/Discard.
-- [ ] Save then Back does not show a stale warning.
-- [ ] Rotation/configuration recreation preserves edits.
-- [ ] Process-death behavior is documented and tested to the chosen level.
+- [x] Back with no changes exits immediately.
+- [x] Back with changes offers Stay/Discard.
+- [x] Save then Back does not show a stale warning.
+- [x] Rotation/configuration recreation preserves edits.
+- [x] Process-death behavior is documented and tested to the chosen level.
 - [ ] User verifies a multi-section edit on device.
+
+### Implementation update — 2026-07-27
+
+- Status: `AUTO_VERIFIED`
+- A content-only `AgentEditorDraft` defines both dirty comparison and restoration. Server
+  reference catalogs, validation messages, loading state, and modal state are excluded so
+  asynchronous background loads do not produce false unsaved-change warnings.
+- Drafts are serialized into the navigation entry's cross-platform `SavedStateHandle`.
+  This preserves edits across Android configuration changes and Android process
+  recreation while avoiding indefinite storage in application preferences.
+- Draft payloads include an explicit create/edit identity; a draft for one agent cannot
+  hydrate another agent or a new-agent destination.
+- Top-bar and platform back actions share the same confirmation path. Successful
+  save/delete/revert and explicit discard clear the restoration payload.
+- Tests added: `AgentEditorDraftStateTest`; the Koin verification fixture now recognizes
+  `SavedStateHandle` as a dynamically supplied ViewModel parameter.
+- Automated verification: the complete Agents unit suite, Agents Android compilation,
+  module verification, metadata Detekt, and whitespace checks pass.
+- Device verification remains pending.
 
 ---
 
@@ -889,4 +908,13 @@ conclusion. Correct earlier entries with a new dated note.
 - Confirmed Ktor closes the streaming source after EOF, read failure, network failure, or
   request cancellation.
 - Android automated verification passes; memory-constrained device stress and Apple-host
+  verification remain pending.
+
+### 2026-07-27 — UX-006 Agent editor draft protection
+
+- Added content-aware dirty tracking and a shared top-bar/system-back discard flow.
+- Restored multi-section drafts through `SavedStateHandle`, scoped to the exact create or
+  edit destination.
+- Cleared draft state after successful save, delete, revert, or explicit discard.
+- Complete Agents unit tests and static checks pass; device navigation and process-kill
   verification remain pending.

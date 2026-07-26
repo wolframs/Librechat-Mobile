@@ -255,6 +255,7 @@ class AgentSaveDelegate(
             when (result) {
                 is Result.Success -> {
                     stateHandle.update { copy(isSaving = false) }
+                    stateHandle.markSaved()
                     events.emit(AgentEditorEvent.SaveSuccess(result.data.id))
                 }
                 is Result.Error -> {
@@ -293,6 +294,7 @@ class AgentSaveDelegate(
             when (val result = agentRepository.deleteAgent(agentId)) {
                 is Result.Success -> {
                     stateHandle.update { copy(isDeleting = false) }
+                    stateHandle.markSaved()
                     events.emit(AgentEditorEvent.DeleteSuccess)
                 }
                 is Result.Error -> {
@@ -311,7 +313,9 @@ class AgentSaveDelegate(
             stateHandle.update { copy(showVersionHistory = false, isLoading = true) }
             when (val result = agentRepository.revertAgent(agentId, RevertAgentRequest(version))) {
                 is Result.Success -> {
-                    stateHandle.update { applyAgentData(result.data).copy(isLoading = false) }
+                    stateHandle.replaceWithCleanState(
+                        stateHandle.state.applyAgentData(result.data).copy(isLoading = false),
+                    )
                     // A reverted version often has a different file set (different
                     // execute_code / file_search / context attachments). Clear the
                     // stale enrichment cache and re-fetch /api/files/agent/:id so

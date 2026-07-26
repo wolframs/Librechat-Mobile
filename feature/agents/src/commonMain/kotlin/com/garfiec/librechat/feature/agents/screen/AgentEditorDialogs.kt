@@ -28,7 +28,29 @@ internal fun AgentEditorDialogs(
     viewModel: AgentEditorViewModel,
     showToolDialog: Boolean,
     onDismissToolDialog: () -> Unit,
+    onDiscardDraft: () -> Unit,
 ) {
+    if (uiState.showDiscardConfirm) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDiscardConfirmation,
+            title = { Text(stringResource(Res.string.discard_agent_changes_title)) },
+            text = { Text(stringResource(Res.string.discard_agent_changes_message)) },
+            confirmButton = {
+                TextButton(onClick = onDiscardDraft) {
+                    Text(
+                        stringResource(Res.string.discard),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissDiscardConfirmation) {
+                    Text(stringResource(Res.string.stay))
+                }
+            },
+        )
+    }
+
     // Delete confirmation dialog
     if (uiState.showDeleteConfirm) {
         AlertDialog(
