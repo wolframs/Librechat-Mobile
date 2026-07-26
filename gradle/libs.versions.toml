@@ -39,6 +39,7 @@ paging = "3.5.0"
 
 # Browser
 browser = "1.10.0"
+credentials = "1.6.0"
 
 # Markdown
 markdown-renderer = "0.40.2"
@@ -161,6 +162,8 @@ paging-common = { group = "androidx.paging", name = "paging-common", version.ref
 
 # Browser
 browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
+credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
+credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 
 # Markdown
 markdown-renderer-m3 = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-m3", version.ref = "markdown-renderer" }

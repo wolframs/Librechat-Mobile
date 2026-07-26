@@ -93,6 +93,7 @@ fun EntryProviderScope<NavKey>.authEntries(
             onNavigateToTwoFactor = { tempToken ->
                 onNavigate(TwoFactor(tempToken = tempToken))
             },
+            onBack = onBack,
         )
     }
     entry<Register> {

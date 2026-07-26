@@ -149,6 +149,13 @@ class NavigatorTest {
     }
 
     @Test
+    fun `navigateToAuth skips picker but keeps it below login when server is remembered`() {
+        val navigator = createNavigator(NewChat(), Chat("conv-1"))
+        navigator.navigateToAuth(hasServerUrl = true)
+        assertEquals(listOf(ServerUrl, Login), navigator.backStack.toList())
+    }
+
+    @Test
     fun `navigateToChat no-arg clears stack and adds NewChat()`() {
         val navigator = createNavigator(ServerUrl, Login)
         navigator.navigateToChat()

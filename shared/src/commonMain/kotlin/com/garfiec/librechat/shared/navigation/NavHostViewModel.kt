@@ -230,6 +230,9 @@ class NavHostViewModel(
      *  LIVE server, so the NavHost strips them. */
     fun hasPendingAdd(): Boolean = accountSwitcher.pendingAdd != null
 
+    /** Waits for the persisted URL warm-up before deciding whether auth can skip the picker. */
+    suspend fun hasSavedServerUrl(): Boolean = serverUrlProvider.awaitBaseUrl().isNotBlank()
+
     /**
      * Attempts the upgrade-path account restore, swallowing transient failures. Returns `true` when the
      * account is resolved (or restore wasn't needed), `false` when a logged-in upgrade user is still

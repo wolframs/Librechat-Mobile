@@ -121,7 +121,7 @@ fun LibreChatNavHost(
         if (!initialAuthRedirectDone) {
             initialAuthRedirectDone = true
             if (!navHostViewModel.isLoggedIn.value && !hasPendingDeepLink) {
-                navigator.navigateToAuth()
+                navigator.navigateToAuth(navHostViewModel.hasSavedServerUrl())
             }
         }
     }
@@ -151,7 +151,7 @@ fun LibreChatNavHost(
     // Handle session expiry
     LaunchedEffect(Unit) {
         navHostViewModel.sessionExpired.collect {
-            navigator.navigateToAuth()
+            navigator.navigateToAuth(navHostViewModel.hasSavedServerUrl())
         }
     }
 

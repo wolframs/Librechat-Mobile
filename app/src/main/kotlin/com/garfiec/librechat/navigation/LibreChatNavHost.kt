@@ -54,10 +54,14 @@ fun LibreChatNavHost(
                     when {
                         // Auth-required target while logged out → login. (Resuming to the target
                         // after login is a follow-up; this at least never lands on a broken screen.)
-                        resolution.requiresAuth && !loggedIn -> navigator.navigateToAuth()
+                        resolution.requiresAuth && !loggedIn ->
+                            navigator.navigateToAuth(navHostViewModel.hasSavedServerUrl())
                         // Open-logged-out target (device-scoped artifact) sits atop an auth base so
                         // backing out lands on login; rebuilds the stack so repeat taps can't pile up.
-                        !loggedIn -> navigator.navigateToDeepLinkLoggedOut(target)
+                        !loggedIn -> navigator.navigateToDeepLinkLoggedOut(
+                            target,
+                            hasServerUrl = navHostViewModel.hasSavedServerUrl(),
+                        )
                         // Switching chats replaces the current chat entry so back returns to NewChat.
                         target is Chat -> target.conversationId?.let { navigator.navigateToChat(it) }
                         // Model shortcut: NewChat carries an endpoint/model payload. Go through top-level

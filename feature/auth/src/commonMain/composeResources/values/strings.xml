@@ -9,6 +9,10 @@
     <string name="insecure_connection_title">Insecure connection</string>
     <string name="insecure_connection_message">You are connecting over HTTP. Your login credentials and messages will be sent unencrypted and could be intercepted by others on the network.\n\nOnly use HTTP for local development servers.</string>
     <string name="connect_anyway">Connect anyway</string>
+    <string name="dont_warn_for_server">Don't warn again for this server</string>
+    <string name="remembered_servers">Remembered servers</string>
+    <string name="forget_server">Forget</string>
+    <string name="restore_http_warning">Warn again</string>
     <string name="cancel">Cancel</string>
 
     <!-- Login -->
@@ -19,6 +23,8 @@
     <string name="forgot_password">Forgot password?</string>
     <string name="no_account_sign_up">Don't have an account? Sign up</string>
     <string name="or_continue_with">Or continue with</string>
+    <string name="use_saved_login">Use saved login</string>
+    <string name="password_manager_note">Passwords are saved by your device password manager, not by LibreChat.</string>
 
     <!-- Register -->
     <string name="register_title">Create account</string>

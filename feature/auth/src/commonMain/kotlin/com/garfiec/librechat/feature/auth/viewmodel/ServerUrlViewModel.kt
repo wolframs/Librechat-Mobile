@@ -15,10 +15,14 @@ import kotlinx.coroutines.launch
 @Immutable
 data class ServerUrlUiState(
     val url: String = "",
+    val rememberedServers: List<String> = emptyList(),
+    val httpWarningSuppressedServers: Set<String> = emptySet(),
+    val canForgetServers: Boolean = true,
     val isLoading: Boolean = false,
     val error: String? = null,
     val isValidated: Boolean = false,
     val showHttpWarning: Boolean = false,
+    val suppressHttpWarning: Boolean = false,
 )
 
 /**
@@ -40,7 +44,7 @@ class ServerUrlViewModel(
     private val addAccount: Boolean = false,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ServerUrlUiState())
+    private val _uiState = MutableStateFlow(ServerUrlUiState(canForgetServers = !addAccount))
     val uiState: StateFlow<ServerUrlUiState> = _uiState.asStateFlow()
 
     init {
@@ -56,25 +60,54 @@ class ServerUrlViewModel(
                 )
             }
         }
+        viewModelScope.launch {
+            serverDataStore.rememberedServers.collect { servers ->
+                _uiState.value = _uiState.value.copy(rememberedServers = servers)
+            }
+        }
+        viewModelScope.launch {
+            serverDataStore.httpWarningSuppressedServers.collect { servers ->
+                _uiState.value = _uiState.value.copy(httpWarningSuppressedServers = servers)
+            }
+        }
     }
 
     fun onUrlChanged(url: String) {
         _uiState.value = _uiState.value.copy(url = url, error = null)
     }
 
+    fun selectServer(url: String) {
+        _uiState.value = _uiState.value.copy(url = url, error = null)
+    }
+
+    fun forgetServer(url: String) {
+        if (addAccount) return
+        viewModelScope.launch {
+            val currentUrl = serverDataStore.awaitBaseUrl()
+            if (normalizeUrl(currentUrl) == normalizeUrl(url)) {
+                serverDataStore.clearServerUrl()
+                if (normalizeUrl(_uiState.value.url) == normalizeUrl(url)) {
+                    _uiState.value = _uiState.value.copy(url = "")
+                }
+            }
+            serverDataStore.forgetServer(url)
+        }
+    }
+
+    fun restoreHttpWarning(url: String) {
+        viewModelScope.launch {
+            serverDataStore.setHttpWarningSuppressed(url, suppressed = false)
+        }
+    }
+
     fun validateAndConnect() {
-        val url = _uiState.value.url.trim().trimEnd('/')
+        val url = normalizeUrl(_uiState.value.url)
         if (url.isBlank()) {
             _uiState.value = _uiState.value.copy(error = "Please enter a server URL")
             return
         }
 
         // Show warning dialog if user enters an HTTP URL
-        if (url.startsWith("http://", ignoreCase = true)) {
-            _uiState.value = _uiState.value.copy(showHttpWarning = true)
-            return
-        }
-
         // Auto-add https:// if no scheme provided
         val normalizedUrl = if (!url.startsWith("http://", ignoreCase = true) &&
             !url.startsWith("https://", ignoreCase = true)
@@ -84,20 +117,43 @@ class ServerUrlViewModel(
             url
         }
 
-        doValidateAndConnect(normalizedUrl)
+        if (normalizedUrl.startsWith("http://", ignoreCase = true)) {
+            viewModelScope.launch {
+                if (serverDataStore.isHttpWarningSuppressed(normalizedUrl)) {
+                    doValidateAndConnect(normalizedUrl)
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        showHttpWarning = true,
+                        suppressHttpWarning = false,
+                    )
+                }
+            }
+        } else {
+            doValidateAndConnect(normalizedUrl)
+        }
     }
 
     fun confirmHttpConnection() {
         _uiState.value = _uiState.value.copy(showHttpWarning = false)
-        val url = _uiState.value.url.trim().trimEnd('/')
-        doValidateAndConnect(url)
+        val url = normalizeUrl(_uiState.value.url)
+        doValidateAndConnect(url, suppressHttpWarningOnSuccess = _uiState.value.suppressHttpWarning)
     }
 
     fun dismissHttpWarning() {
-        _uiState.value = _uiState.value.copy(showHttpWarning = false)
+        _uiState.value = _uiState.value.copy(
+            showHttpWarning = false,
+            suppressHttpWarning = false,
+        )
     }
 
-    private fun doValidateAndConnect(url: String) {
+    fun setSuppressHttpWarning(suppress: Boolean) {
+        _uiState.value = _uiState.value.copy(suppressHttpWarning = suppress)
+    }
+
+    private fun doValidateAndConnect(
+        url: String,
+        suppressHttpWarningOnSuccess: Boolean = false,
+    ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
@@ -105,9 +161,14 @@ class ServerUrlViewModel(
 
             when (result) {
                 is Result.Success -> {
+                    serverDataStore.rememberServer(url)
+                    if (suppressHttpWarningOnSuccess) {
+                        serverDataStore.setHttpWarningSuppressed(url, suppressed = true)
+                    }
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         isValidated = true,
+                        suppressHttpWarning = false,
                     )
                 }
                 is Result.Error -> {
@@ -122,11 +183,16 @@ class ServerUrlViewModel(
     }
 
     private suspend fun validateLiveServer(url: String): Result<*> {
+        val previousUrl = serverDataStore.awaitBaseUrl()
         // Set the URL first so API calls use it
         serverDataStore.setServerUrl(url)
         val result = configRepository.validateServerUrl(url)
         if (result is Result.Error) {
-            serverDataStore.setServerUrl("")
+            if (previousUrl.isBlank()) {
+                serverDataStore.clearServerUrl()
+            } else {
+                serverDataStore.setServerUrl(previousUrl)
+            }
         }
         return result
     }
@@ -151,4 +217,6 @@ class ServerUrlViewModel(
         }
         return result
     }
+
+    private fun normalizeUrl(url: String): String = url.trim().trimEnd('/')
 }

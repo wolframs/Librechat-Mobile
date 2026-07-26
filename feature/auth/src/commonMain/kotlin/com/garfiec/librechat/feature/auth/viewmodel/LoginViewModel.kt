@@ -3,13 +3,16 @@ package com.garfiec.librechat.feature.auth.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.garfiec.librechat.core.common.extensions.serverHostLabel
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.data.datastore.SavedLoginCredentialRef
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.model.LoginOutcome
 import com.garfiec.librechat.feature.auth.oauth.OAuthLauncher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +29,14 @@ data class LoginUiState(
     val registrationEnabled: Boolean = false,
     val socialLoginEnabled: Boolean = false,
     val socialLogins: List<String> = emptyList(),
+    val savedCredentials: List<SavedLoginCredentialRef> = emptyList(),
+    val pendingCredentialSave: PendingCredentialSave? = null,
+)
+
+@Immutable
+data class PendingCredentialSave(
+    val ref: SavedLoginCredentialRef,
+    val password: String,
 )
 
 class LoginViewModel(
@@ -56,6 +67,14 @@ class LoginViewModel(
                 }
             }
         }
+        viewModelScope.launch {
+            val serverUrl = accountSwitcher.pendingAdd?.serverUrl ?: serverDataStore.awaitBaseUrl()
+            if (serverUrl.isNotBlank()) {
+                serverDataStore.savedLoginCredentials(serverUrl).collect { credentials ->
+                    _uiState.value = _uiState.value.copy(savedCredentials = credentials)
+                }
+            }
+        }
     }
 
     /** The server this screen is signing into: the pending add target when set, else the live one. */
@@ -79,6 +98,7 @@ class LoginViewModel(
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            val serverUrl = signInServerUrl()
 
             when (val result = authRepository.login(state.email, state.password)) {
                 is Result.Success -> {
@@ -86,7 +106,14 @@ class LoginViewModel(
                         is LoginOutcome.Success -> {
                             _uiState.value = _uiState.value.copy(
                                 isLoading = false,
-                                isLoggedIn = true,
+                                pendingCredentialSave = PendingCredentialSave(
+                                    ref = SavedLoginCredentialRef(
+                                        serverUrl = serverUrl,
+                                        credentialId = credentialId(state.email, serverUrl),
+                                        username = state.email.trim(),
+                                    ),
+                                    password = state.password,
+                                ),
                             )
                         }
                         is LoginOutcome.TwoFactorRequired -> {
@@ -105,6 +132,37 @@ class LoginViewModel(
                 }
                 is Result.Loading -> { /* no-op */ }
             }
+        }
+    }
+
+    fun loginWithSavedCredential(ref: SavedLoginCredentialRef, password: String) {
+        if (_uiState.value.savedCredentials.none { it == ref }) return
+        _uiState.value = _uiState.value.copy(
+            email = ref.username,
+            password = password,
+            error = null,
+        )
+        login()
+    }
+
+    fun onCredentialSaveHandled(saved: Boolean) {
+        val pending = _uiState.value.pendingCredentialSave ?: return
+        viewModelScope.launch {
+            if (saved) {
+                try {
+                    serverDataStore.rememberLoginCredential(pending.ref)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Credential-provider success already completed the login; a non-secret
+                    // DataStore pointer failure must not strand the user on this screen.
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                password = "",
+                pendingCredentialSave = null,
+                isLoggedIn = true,
+            )
         }
     }
 
@@ -165,4 +223,7 @@ class LoginViewModel(
             }
         }
     }
+
+    private fun credentialId(email: String, serverUrl: String): String =
+        "${email.trim()} · ${serverUrl.serverHostLabel()}"
 }

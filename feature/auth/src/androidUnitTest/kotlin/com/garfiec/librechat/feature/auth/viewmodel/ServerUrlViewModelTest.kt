@@ -8,9 +8,11 @@ import com.garfiec.librechat.core.model.config.StartupConfig
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -41,6 +43,10 @@ class ServerUrlViewModelTest {
     @Before
     fun setup() {
         Dispatchers.setMain(testDispatcher)
+        every { serverDataStore.rememberedServers } returns flowOf(emptyList())
+        every { serverDataStore.httpWarningSuppressedServers } returns flowOf(emptySet())
+        coEvery { serverDataStore.awaitBaseUrl() } returns ""
+        coEvery { serverDataStore.isHttpWarningSuppressed(any()) } returns false
         // Pass block-running calls through so the probe actually executes.
         coEvery { accountSwitcher.withPendingIdentity(any<suspend () -> Result<StartupConfig>>()) } coAnswers {
             firstArg<suspend () -> Result<StartupConfig>>().invoke()
@@ -108,7 +114,9 @@ class ServerUrlViewModelTest {
     }
 
     @Test
-    fun `normal mode sets the URL then validates, resetting it on failure`() = runTest(testDispatcher) {
+    fun `normal mode restores the previous URL when validation fails`() = runTest(testDispatcher) {
+        val previousUrl = "https://working.example.com"
+        coEvery { serverDataStore.awaitBaseUrl() } returns previousUrl
         coEvery { configRepository.validateServerUrl(pendingUrl) } returns Result.Error(message = "nope")
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
@@ -118,7 +126,46 @@ class ServerUrlViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { serverDataStore.setServerUrl(pendingUrl) }
-        coVerify(exactly = 1) { serverDataStore.setServerUrl("") }
+        coVerify(exactly = 1) { serverDataStore.setServerUrl(previousUrl) }
+        coVerify(exactly = 0) { serverDataStore.clearServerUrl() }
         coVerify(exactly = 0) { accountSwitcher.beginAdd(any()) }
+    }
+
+    @Test
+    fun `suppressed HTTP warning connects without showing the dialog`() = runTest(testDispatcher) {
+        val httpUrl = "http://local.example.com"
+        coEvery { serverDataStore.isHttpWarningSuppressed(httpUrl) } returns true
+        coEvery { configRepository.validateServerUrl(httpUrl) } returns Result.Success(config)
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged(httpUrl)
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.showHttpWarning).isFalse()
+        assertThat(viewModel.uiState.value.isValidated).isTrue()
+        coVerify(exactly = 1) { serverDataStore.rememberServer(httpUrl) }
+    }
+
+    @Test
+    fun `HTTP warning preference is saved only after a successful connection`() = runTest(testDispatcher) {
+        val httpUrl = "http://local.example.com"
+        coEvery { configRepository.validateServerUrl(httpUrl) } returns Result.Success(config)
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged(httpUrl)
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.showHttpWarning).isTrue()
+
+        viewModel.setSuppressHttpWarning(true)
+        viewModel.confirmHttpConnection()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            serverDataStore.setHttpWarningSuppressed(httpUrl, suppressed = true)
+        }
     }
 }

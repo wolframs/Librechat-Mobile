@@ -13,6 +13,8 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.browser)
+            implementation(libs.credentials)
+            implementation(libs.credentials.play.services.auth)
         }
         named("androidUnitTest").dependencies {
             implementation(libs.kotlinx.serialization.json)

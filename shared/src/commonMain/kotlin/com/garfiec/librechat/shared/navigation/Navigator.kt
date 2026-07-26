@@ -3,6 +3,7 @@ package com.garfiec.librechat.shared.navigation
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
 import com.garfiec.librechat.feature.auth.navigation.AuthRoute
+import com.garfiec.librechat.feature.auth.navigation.Login
 import com.garfiec.librechat.feature.auth.navigation.ServerUrl
 import com.garfiec.librechat.feature.chat.navigation.Chat
 import com.garfiec.librechat.feature.chat.navigation.NewChat
@@ -67,10 +68,14 @@ class Navigator(val backStack: NavBackStack<NavKey>) {
         }
     }
 
-    /** Clear back stack and navigate to auth (session expiry / logout). */
-    fun navigateToAuth() {
+    /**
+     * Clear the back stack and establish the logged-out flow. A remembered server skips directly
+     * to login while keeping the server picker underneath it as the Back / change-server target.
+     */
+    fun navigateToAuth(hasServerUrl: Boolean = false) {
         backStack.clear()
         backStack.add(ServerUrl)
+        if (hasServerUrl) backStack.add(Login)
     }
 
     /**
@@ -79,9 +84,10 @@ class Navigator(val backStack: NavBackStack<NavKey>) {
      * backing out of it lands on login rather than a half-initialized logged-out screen. The shared
      * host's initial auth redirect is skipped when a deep link is pending, so this owns that setup.
      */
-    fun navigateToDeepLinkLoggedOut(route: NavKey) {
+    fun navigateToDeepLinkLoggedOut(route: NavKey, hasServerUrl: Boolean = false) {
         backStack.clear()
         backStack.add(ServerUrl)
+        if (hasServerUrl) backStack.add(Login)
         backStack.add(route)
     }
 

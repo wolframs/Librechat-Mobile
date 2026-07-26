@@ -16,6 +16,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -46,6 +47,9 @@ class LoginViewModelTest {
         every { configRepository.startupConfig } returns configFlow
         // No add-account flow pending: the VM reads the global config + live server URL.
         every { accountSwitcher.pendingAdd } returns null
+        every { serverDataStore.savedLoginCredentials(any()) } returns flowOf(emptyList())
+        coEvery { serverDataStore.awaitBaseUrl() } returns "https://chat.example.com"
+        every { serverDataStore.getBaseUrl() } returns "https://chat.example.com"
     }
 
     @After
@@ -122,7 +126,7 @@ class LoginViewModelTest {
     }
 
     @Test
-    fun `successful login sets isLoggedIn true`() = runTest {
+    fun `successful login requests a system credential save before completing navigation`() = runTest {
         val user = User(email = "user@example.com", name = "Test User")
         coEvery { authRepository.login("user@example.com", "password123") } returns
             Result.Success(LoginOutcome.Success(user))
@@ -136,9 +140,18 @@ class LoginViewModelTest {
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        assertThat(state.isLoggedIn).isTrue()
+        assertThat(state.isLoggedIn).isFalse()
+        assertThat(state.pendingCredentialSave?.ref?.username).isEqualTo("user@example.com")
+        assertThat(state.pendingCredentialSave?.password).isEqualTo("password123")
         assertThat(state.isLoading).isFalse()
         assertThat(state.error).isNull()
+
+        viewModel.onCredentialSaveHandled(saved = false)
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.isLoggedIn).isTrue()
+        assertThat(viewModel.uiState.value.pendingCredentialSave).isNull()
+        assertThat(viewModel.uiState.value.password).isEmpty()
     }
 
     @Test
