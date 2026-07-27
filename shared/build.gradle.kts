@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.skie)
 }
 
-android {
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
     namespace = "com.garfiec.librechat.shared"
 }
 

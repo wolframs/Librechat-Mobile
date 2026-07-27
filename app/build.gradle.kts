@@ -5,7 +5,7 @@ plugins {
     id("librechat.kotlin.serialization")
 }
 
-android {
+extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
     namespace = "com.garfiec.librechat"
 
     defaultConfig {

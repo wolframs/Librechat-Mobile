@@ -30,8 +30,6 @@ class KmpComposeConventionPlugin : Plugin<Project> {
             }
 
             val composeExtension = extensions.getByType<ComposeExtension>()
-            val compose = composeExtension.dependencies
-
             // Override Compose Resources' default package. ResourcesExtension is a
             // sub-extension of ComposeExtension — `extensions.configure<ResourcesExtension>`
             // at project level throws "extension does not exist".
@@ -42,18 +40,20 @@ class KmpComposeConventionPlugin : Plugin<Project> {
 
             extensions.configure<KotlinMultiplatformExtension> {
                 sourceSets.commonMain.dependencies {
-                    implementation(compose.runtime)
-                    implementation(compose.foundation)
-                    implementation(compose.material3)
-                    implementation(compose.materialIconsExtended)
-                    implementation(compose.ui)
-                    implementation(compose.animation)
-                    @Suppress("DEPRECATION")
-                    implementation(compose.components.resources)
-                    @Suppress("DEPRECATION")
-                    implementation(compose.components.uiToolingPreview)
+                    implementation(libs.findLibrary("compose-runtime-mpp").get())
+                    implementation(libs.findLibrary("compose-foundation-mpp").get())
+                    implementation(libs.findLibrary("compose-material3-mpp").get())
+                    implementation(libs.findLibrary("compose-material-icons-mpp").get())
+                    implementation(libs.findLibrary("compose-ui-mpp").get())
+                    implementation(libs.findLibrary("compose-animation-mpp").get())
+                    implementation(libs.findLibrary("compose-resources-mpp").get())
+                    implementation(libs.findLibrary("compose-ui-tooling-preview-mpp").get())
                 }
             }
         }
     }
 }
+
+private val Project.libs
+    get() = extensions.getByType(org.gradle.api.artifacts.VersionCatalogsExtension::class.java)
+        .named("libs")

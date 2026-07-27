@@ -3,7 +3,7 @@ plugins {
     id("librechat.kotlin.serialization")
 }
 
-android {
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
     namespace = "com.garfiec.librechat.core.model"
 }
 

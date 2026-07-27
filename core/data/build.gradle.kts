@@ -5,7 +5,7 @@ plugins {
     id("librechat.kotlin.serialization")
 }
 
-android {
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
     namespace = "com.garfiec.librechat.core.data"
     testOptions {
         // Robolectric needs the merged manifest + resources on the host-JVM unit-test classpath.

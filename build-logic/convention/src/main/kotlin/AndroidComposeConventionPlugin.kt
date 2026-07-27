@@ -1,3 +1,4 @@
+import com.android.build.api.dsl.LibraryExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.kotlin.dsl.dependencies
@@ -35,7 +36,7 @@ class AndroidComposeConventionPlugin : Plugin<Project> {
                 }
             }
 
-            extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)?.apply {
+            extensions.findByType(LibraryExtension::class.java)?.apply {
                 buildFeatures.compose = true
             }
             extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)?.apply {

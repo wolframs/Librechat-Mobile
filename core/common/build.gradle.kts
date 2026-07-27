@@ -206,7 +206,7 @@ val generateBackendCommitMap = tasks.register("generateBackendCommitMap") {
     }
 }
 
-android {
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
     namespace = "com.garfiec.librechat.core.common"
     buildFeatures {
         buildConfig = true

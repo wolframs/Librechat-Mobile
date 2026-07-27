@@ -2,7 +2,7 @@ plugins {
     id("librechat.kmp.feature")
 }
 
-android {
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
     namespace = "com.garfiec.librechat.feature.files"
 }
 
