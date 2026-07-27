@@ -20,7 +20,6 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -178,10 +177,13 @@ class ConversationRepositoryImplTest {
     fun `syncFavoritesFromServer adds SAVED_TAG to existing rows server reports as favorited`() = runTest {
         val serverConvo = Conversation(conversationId = "convo-1", title = "Cross-client fav")
         coEvery {
-            conversationsApi.getConversations(any(), any(), any(), any(), any(), any(), any())
+            conversationsApi.getConversations(any(), any(), false, any(), any(), any(), any())
         } returns ConversationListResponse(conversations = listOf(serverConvo), nextCursor = null)
+        coEvery {
+            conversationsApi.getConversations(any(), any(), true, any(), any(), any(), any())
+        } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         coEvery { conversationDao.getByIdForAccount("convo-1", account.value) } returns entity("convo-1", """["work"]""")
-        coEvery { conversationDao.observeConversationsForAccount(account.value, false) } returns flowOf(emptyList())
+        coEvery { conversationDao.getConversationsWithTagForAccount(account.value, any()) } returns emptyList()
         coEvery { conversationDao.updateTags(any(), any(), any(), any()) } just Runs
 
         repository.syncFavoritesFromServer()
@@ -200,7 +202,9 @@ class ConversationRepositoryImplTest {
             conversationsApi.getConversations(any(), any(), any(), any(), any(), any(), any())
         } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         val staleFav = entity("convo-stale", """["work","Saved"]""")
-        coEvery { conversationDao.observeConversationsForAccount(account.value, false) } returns flowOf(listOf(staleFav))
+        coEvery {
+            conversationDao.getConversationsWithTagForAccount(account.value, any())
+        } returns listOf(staleFav)
         coEvery { conversationDao.updateTags(any(), any(), any(), any()) } just Runs
 
         repository.syncFavoritesFromServer()
@@ -217,10 +221,13 @@ class ConversationRepositoryImplTest {
     fun `syncFavoritesFromServer upserts missing conversations with SAVED_TAG preset`() = runTest {
         val serverConvo = Conversation(conversationId = "convo-new", title = "From web")
         coEvery {
-            conversationsApi.getConversations(any(), any(), any(), any(), any(), any(), any())
+            conversationsApi.getConversations(any(), any(), false, any(), any(), any(), any())
         } returns ConversationListResponse(conversations = listOf(serverConvo), nextCursor = null)
+        coEvery {
+            conversationsApi.getConversations(any(), any(), true, any(), any(), any(), any())
+        } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         coEvery { conversationDao.getByIdForAccount("convo-new", account.value) } returns null
-        coEvery { conversationDao.observeConversationsForAccount(account.value, false) } returns flowOf(emptyList())
+        coEvery { conversationDao.getConversationsWithTagForAccount(account.value, any()) } returns emptyList()
 
         val upsertCaptor = slot<ConversationEntity>()
         coEvery { conversationDao.upsert(capture(upsertCaptor)) } answers {}
@@ -243,22 +250,25 @@ class ConversationRepositoryImplTest {
             nextCursor = null,
         )
         coEvery {
-            conversationsApi.getConversations(null, any(), any(), any(), any(), any(), any())
+            conversationsApi.getConversations(null, any(), false, any(), any(), any(), any())
         } returns page1
         coEvery {
-            conversationsApi.getConversations("cursor-2", any(), any(), any(), any(), any(), any())
+            conversationsApi.getConversations("cursor-2", any(), false, any(), any(), any(), any())
         } returns page2
+        coEvery {
+            conversationsApi.getConversations(any(), any(), true, any(), any(), any(), any())
+        } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         coEvery { conversationDao.getByIdForAccount(any(), any()) } returns null
-        coEvery { conversationDao.observeConversationsForAccount(account.value, false) } returns flowOf(emptyList())
+        coEvery { conversationDao.getConversationsWithTagForAccount(account.value, any()) } returns emptyList()
         coEvery { conversationDao.upsert(any()) } answers {}
 
         repository.syncFavoritesFromServer()
 
         coVerify(exactly = 1) {
-            conversationsApi.getConversations(null, any(), any(), any(), any(), any(), any())
+            conversationsApi.getConversations(null, any(), false, any(), any(), any(), any())
         }
         coVerify(exactly = 1) {
-            conversationsApi.getConversations("cursor-2", any(), any(), any(), any(), any(), any())
+            conversationsApi.getConversations("cursor-2", any(), false, any(), any(), any(), any())
         }
         coVerify(exactly = 2) { conversationDao.upsert(any()) }
     }
@@ -267,12 +277,15 @@ class ConversationRepositoryImplTest {
     fun `syncFavoritesFromServer no-op when local and server match`() = runTest {
         val serverConvo = Conversation(conversationId = "convo-1")
         coEvery {
-            conversationsApi.getConversations(any(), any(), any(), any(), any(), any(), any())
+            conversationsApi.getConversations(any(), any(), false, any(), any(), any(), any())
         } returns ConversationListResponse(conversations = listOf(serverConvo), nextCursor = null)
+        coEvery {
+            conversationsApi.getConversations(any(), any(), true, any(), any(), any(), any())
+        } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         coEvery { conversationDao.getByIdForAccount("convo-1", account.value) } returns entity("convo-1", """["Saved"]""")
         coEvery {
-            conversationDao.observeConversationsForAccount(account.value, false)
-        } returns flowOf(listOf(entity("convo-1", """["Saved"]""")))
+            conversationDao.getConversationsWithTagForAccount(account.value, any())
+        } returns listOf(entity("convo-1", """["Saved"]"""))
 
         repository.syncFavoritesFromServer()
 

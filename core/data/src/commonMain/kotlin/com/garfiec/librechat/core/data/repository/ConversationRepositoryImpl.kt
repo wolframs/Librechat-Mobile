@@ -20,7 +20,6 @@ import com.garfiec.librechat.core.model.request.ForkConversationRequest
 import com.garfiec.librechat.core.network.api.ConversationsApi
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
@@ -306,20 +305,44 @@ class ConversationRepositoryImpl(
     }
 
     // Reconciles SAVED_TAG attachment between the local Room cache and server by
-    // paginating `GET /api/convos?tags=Saved`. Needed because upstream's
-    // getConvosByCursor projection omits `tags`, so the main conversation list
-    // endpoint can't deliver cross-client favorite changes. Only the reserved
-    // SAVED_TAG is synced; other user-created tags aren't fetched here. Known
-    // gap: the stale-removal pass below only scans non-archived rows, so a
-    // conversation that was archived while favorited and later unfavorited
-    // elsewhere will keep its local SAVED_TAG until the user unarchives it.
+    // paginating the tag-filtered active AND archived endpoints. Needed because
+    // upstream's getConvosByCursor projection omits `tags`, so the main conversation
+    // list endpoint can't deliver cross-client favorite changes. Only the reserved
+    // SAVED_TAG is synced; other user-created tags aren't fetched here.
     override suspend fun syncFavoritesFromServer(): Result<Unit> = safeApiCall {
         val account = activeAccountProvider.currentAccountId() ?: return@safeApiCall
         val serverFavoriteIds = mutableSetOf<String>()
+        collectServerFavorites(account, isArchived = false, serverFavoriteIds)
+        collectServerFavorites(account, isArchived = true, serverFavoriteIds)
+
+        // Query only locally-favorited rows, across both archive states. Loading complete active and
+        // archived histories would make a session-start task scale with all cached conversations.
+        val localFavorites = conversationDao.getConversationsWithTagForAccount(
+            accountId = account.value,
+            tagJsonToken = json.encodeToString(SAVED_TAG),
+        )
+        for (entity in localFavorites) {
+            val currentTags = entity.toModel().tags
+            if (entity.conversationId !in serverFavoriteIds) {
+                setTagsForAccount(
+                    id = entity.conversationId,
+                    tags = currentTags.filterNot { it == SAVED_TAG },
+                    accountId = account.value,
+                )
+            }
+        }
+    }
+
+    private suspend fun collectServerFavorites(
+        account: AccountId,
+        isArchived: Boolean,
+        serverFavoriteIds: MutableSet<String>,
+    ) {
         var cursor: String? = null
         do {
             val response = conversationsApi.getConversations(
                 cursor = cursor,
+                isArchived = isArchived,
                 tags = listOf(SAVED_TAG),
             )
             for (convo in response.conversations) {
@@ -334,23 +357,25 @@ class ConversationRepositoryImpl(
                 } else {
                     val currentTags = existing.toModel().tags
                     if (SAVED_TAG !in currentTags) {
-                        updateConversationTagsLocal(id, currentTags + SAVED_TAG)
+                        setTagsForAccount(id, currentTags + SAVED_TAG, account.value)
                     }
                 }
             }
             cursor = response.nextCursor
         } while (cursor != null)
+    }
 
-        val localEntities = conversationDao.observeConversationsForAccount(account.value, isArchived = false).first()
-        for (entity in localEntities) {
-            val currentTags = entity.toModel().tags
-            if (SAVED_TAG in currentTags && entity.conversationId !in serverFavoriteIds) {
-                updateConversationTagsLocal(
-                    entity.conversationId,
-                    currentTags.filterNot { it == SAVED_TAG },
-                )
-            }
-        }
+    private suspend fun setTagsForAccount(
+        id: String,
+        tags: List<String>,
+        accountId: String,
+    ) {
+        conversationDao.updateTags(
+            id = id,
+            tagsJson = encodeTags(tags),
+            updatedAt = Clock.System.now().toEpochMilliseconds(),
+            accountId = accountId,
+        )
     }
 
     // Stamps + caches a single server-returned conversation for the account captured at request time.

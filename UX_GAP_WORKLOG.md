@@ -863,7 +863,7 @@ confirmed "Sign out of all accounts" action if it serves a real user need.
 
 **Priority:** P3
 
-**Status:** `SCOUTED`
+**Status:** `IMPLEMENTED`
 
 ### Observed behavior
 
@@ -878,9 +878,20 @@ the local saved tag until it is unarchived.
 
 ### Acceptance checks
 
-- [ ] Archived favorites reconcile without loading an unbounded conversation history.
-- [ ] Unarchiving does not briefly show a stale favorite.
-- [ ] Repository tests cover archive → remote unfavorite → sync → unarchive.
+- [x] Archived favorites reconcile without loading an unbounded conversation history.
+- [x] Unarchiving does not briefly show a stale favorite.
+- [x] Repository tests cover archive → remote unfavorite → sync → unarchive.
+
+### Implementation update — 2026-07-27
+
+- Favorite sync now paginates the server’s tag-filtered active and archived partitions. It still
+  fetches only `Saved` conversations, never an unfiltered archive.
+- Stale removal uses one account-scoped Room query restricted to rows whose serialized tag array
+  contains the exact `"Saved"` token, across both archive states.
+- Writes retain the account captured at the start of reconciliation instead of consulting a possibly
+  switched live identity mid-sync.
+- A separate regression suite covers the archive → remote unfavorite → sync → unarchive sequence and
+  archived multi-page retrieval.
 
 ---
 

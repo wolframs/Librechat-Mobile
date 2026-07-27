@@ -27,6 +27,23 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations WHERE conversationId = :id AND accountId = :accountId")
     fun observeByIdForAccount(id: String, accountId: String): Flow<ConversationEntity?>
 
+    /**
+     * Bounded reconciliation read: returns only rows whose serialized tag array contains the exact
+     * JSON string token (for example `"Saved"`), across active and archived conversations.
+     *
+     * This deliberately avoids observing/loading either complete history partition merely to remove
+     * a stale reserved tag. Tag names are JSON-encoded strings, so including the quotes in
+     * [tagJsonToken] prevents a substring such as `Saved for later` from matching.
+     */
+    @Query(
+        "SELECT * FROM conversations WHERE accountId = :accountId " +
+            "AND tags LIKE '%' || :tagJsonToken || '%'",
+    )
+    suspend fun getConversationsWithTagForAccount(
+        accountId: String,
+        tagJsonToken: String,
+    ): List<ConversationEntity>
+
     @Upsert
     suspend fun upsert(conversation: ConversationEntity)
 
