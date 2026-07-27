@@ -1,6 +1,7 @@
 package com.garfiec.librechat.feature.agents.di
 
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.ui.platform.IosPickedImage
 import com.garfiec.librechat.feature.agents.components.PreloadedFileRef
 import com.garfiec.librechat.feature.agents.util.ContentReader
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -26,6 +27,7 @@ actual val agentsPlatformModule: Module = module {
                 // hand them back here. NSURL handling stays as a fallback
                 // for code paths that haven't been migrated.
                 if (uri is PreloadedFileRef) return uri.bytes
+                if (uri is IosPickedImage) return uri.bytes
                 val nsUrl = uri as? NSURL
                 if (nsUrl == null) {
                     Logger.w("AgentsContentReader") { "readBytes called with non-NSURL: ${uri::class}" }
@@ -47,6 +49,7 @@ actual val agentsPlatformModule: Module = module {
 
             override fun getMimeType(uri: Any): String? {
                 if (uri is PreloadedFileRef) return uri.mimeType
+                if (uri is IosPickedImage) return uri.mimeType
                 val nsUrl = uri as? NSURL ?: return null
                 val ext = nsUrl.pathExtension?.lowercase() ?: return null
                 return mimeTypeFromExtension(ext)
@@ -54,6 +57,7 @@ actual val agentsPlatformModule: Module = module {
 
             override fun getFileName(uri: Any): String? {
                 if (uri is PreloadedFileRef) return uri.filename
+                if (uri is IosPickedImage) return uri.filename
                 val nsUrl = uri as? NSURL ?: return null
                 return nsUrl.lastPathComponent
             }

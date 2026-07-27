@@ -1,6 +1,7 @@
 package com.garfiec.librechat.feature.settings.di
 
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.ui.platform.IosPickedImage
 import com.garfiec.librechat.feature.settings.util.ContentReader
 import com.garfiec.librechat.feature.settings.util.PlatformCacheCleaner
 import com.garfiec.librechat.feature.settings.viewmodel.delegate.IosSpeechSettingsDelegate
@@ -28,6 +29,7 @@ actual val settingsPlatformModule: Module = module {
         @OptIn(ExperimentalForeignApi::class)
         object : ContentReader {
             override fun readBytes(uri: Any): ByteArray? {
+                if (uri is IosPickedImage) return uri.bytes
                 val nsUrl = uri as? NSURL
                 if (nsUrl == null) {
                     Logger.w("SettingsContentReader") { "readBytes called with non-NSURL: ${uri::class}" }
