@@ -31,6 +31,7 @@ import org.koin.compose.koinInject
  * auth graph is shown as the start destination.
  */
 @Composable
+@OptIn(coil3.annotation.ExperimentalCoilApi::class)
 fun LibreChatApp() {
     val httpClient = koinInject<HttpClient>()
     val imageLoaderFactory = remember(httpClient) {

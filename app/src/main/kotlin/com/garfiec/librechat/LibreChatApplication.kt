@@ -83,6 +83,7 @@ class LibreChatApplication : Application(), SingletonImageLoader.Factory {
         startMainThreadWatchdog(exceptionHandler)
     }
 
+    @OptIn(coil3.annotation.ExperimentalCoilApi::class)
     override fun newImageLoader(context: coil3.PlatformContext): ImageLoader {
         return ImageLoader.Builder(context)
             .components {
