@@ -3,6 +3,7 @@ package com.garfiec.librechat.core.common.extensions
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
+import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -77,10 +78,10 @@ fun Instant.toRelativeTimeString(
         days < 7 -> "${days}d ago"
         else -> {
             val date = toLocalDateTime(reference.timeZone).date
-            "${formatMonthAbbrev(date.monthNumber)} ${date.dayOfMonth}"
+            "${formatMonthAbbrev(date.month.number)} ${date.day}"
         }
     }
 }
 
 private fun LocalDate.formatMonthYear(): String =
-    formatMonthYear(monthNumber, year)
+    formatMonthYear(month.number, year)

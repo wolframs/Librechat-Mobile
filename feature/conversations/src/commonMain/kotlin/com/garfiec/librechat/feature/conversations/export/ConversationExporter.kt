@@ -8,6 +8,7 @@ import com.garfiec.librechat.core.model.Message
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlin.time.Clock
@@ -59,8 +60,8 @@ class ConversationExporter(
 
         val markdown = withContext(ioDispatcher) {
             val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-            val month = now.monthNumber.toString().padStart(2, '0')
-            val day = now.dayOfMonth.toString().padStart(2, '0')
+            val month = now.month.number.toString().padStart(2, '0')
+            val day = now.day.toString().padStart(2, '0')
             val hour = now.hour.toString().padStart(2, '0')
             val minute = now.minute.toString().padStart(2, '0')
             val exportDate = "${now.year}-$month-$day $hour:$minute"

@@ -1,6 +1,7 @@
 package com.garfiec.librechat.core.common.extensions
 
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -68,7 +69,7 @@ class DateExtTest {
         val old = now - 31.days
         val oldDate = old.toLocalDateTime(TimeZone.UTC).date
         assertEquals(
-            formatMonthYear(oldDate.monthNumber, oldDate.year),
+            formatMonthYear(oldDate.month.number, oldDate.year),
             old.toRelativeDateGroup(reference),
         )
     }
