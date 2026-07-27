@@ -83,7 +83,7 @@ class FilesApi constructor(
         height: Int? = null,
         onProgress: ((Float) -> Unit)? = null,
     ): FileObject {
-        Logger.d("FilesApi") {
+        Logger.d(tag = "FilesApi") {
             "uploadFile: filename=$filename, type=$type, size=${source.contentLength ?: "unknown"} bytes, fileId=$fileId, " +
                 "endpoint=$endpoint, model=$model, agentId=$agentId, messageFile=$messageFile, width=$width, height=$height"
         }
@@ -137,14 +137,14 @@ class FilesApi constructor(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            Logger.w("FilesApi", e) { "onProgress callback threw; suppressing to keep upload alive" }
+                            Logger.w(e, tag = "FilesApi") { "onProgress callback threw; suppressing to keep upload alive" }
                         }
                     }
                 }
             }
         }.body()
 
-        Logger.d("FilesApi") {
+        Logger.d(tag = "FilesApi") {
             "uploadFile success: fileId=${response.fileId}, filepath=${response.filepath}, " +
                 "type=${response.type}, width=${response.width}, height=${response.height}"
         }

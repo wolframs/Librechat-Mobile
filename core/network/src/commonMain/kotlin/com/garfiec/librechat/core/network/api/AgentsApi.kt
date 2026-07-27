@@ -54,7 +54,7 @@ class AgentsApi constructor(
         }.body()
 
     suspend fun getAgent(agentId: String): Agent {
-        Logger.d("AgentsApi") { "getAgent($agentId) - using VIEW endpoint" }
+        Logger.d(tag = "AgentsApi") { "getAgent($agentId) - using VIEW endpoint" }
         return client.get {
             url { path("api/agents/$agentId") }
         }.body()
@@ -73,7 +73,7 @@ class AgentsApi constructor(
      * and returns the complete agent document with all fields.
      */
     suspend fun getAgentForEditing(agentId: String): Agent {
-        Logger.d("AgentsApi") { "getAgentForEditing($agentId) - using EXPANDED endpoint" }
+        Logger.d(tag = "AgentsApi") { "getAgentForEditing($agentId) - using EXPANDED endpoint" }
         return client.get {
             url { path("api/agents/$agentId/expanded") }
         }.body()

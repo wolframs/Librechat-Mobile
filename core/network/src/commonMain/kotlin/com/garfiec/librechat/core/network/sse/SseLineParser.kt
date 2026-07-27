@@ -68,10 +68,10 @@ class SseLineParser(
                 }
             }
         } catch (e: SseStreamException) {
-            Logger.e("SSE", e) { "SSE parse error" }
+            Logger.e(e, tag = "SSE") { "SSE parse error" }
             throw e
         } catch (e: Exception) {
-            Logger.e("SSE", e) { "SSE parse error" }
+            Logger.e(e, tag = "SSE") { "SSE parse error" }
             throw e
         }
 

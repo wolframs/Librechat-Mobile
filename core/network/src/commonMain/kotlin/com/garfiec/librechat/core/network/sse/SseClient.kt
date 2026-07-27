@@ -166,12 +166,14 @@ class SseClient(
                     try {
                         val isConnected = connectivityFlow.first()
                         if (!isConnected) {
-                            Logger.d("SSE") { "SSE: network is down, waiting for connectivity before retry $attempt" }
+                            Logger.d(tag = "SSE") {
+                                "SSE: network is down, waiting for connectivity before retry $attempt"
+                            }
                             connectivityFlow.first { it }
-                            Logger.d("SSE") { "SSE: network restored, proceeding with retry $attempt" }
+                            Logger.d(tag = "SSE") { "SSE: network restored, proceeding with retry $attempt" }
                         }
                     } catch (e: Exception) {
-                        Logger.w("SSE", e) { "SSE: error checking connectivity, falling back to delay" }
+                        Logger.w(e, tag = "SSE") { "SSE: error checking connectivity, falling back to delay" }
                     }
                 }
 

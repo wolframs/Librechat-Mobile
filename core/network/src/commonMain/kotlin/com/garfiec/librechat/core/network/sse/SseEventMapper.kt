@@ -171,7 +171,7 @@ class SseEventMapper(private val json: Json) {
         val conversation = root["conversation"]?.let {
             try { json.decodeFromJsonElement(Conversation.serializer(), it) } catch (e: Exception) {
                 val msg = "Failed to parse final conversation: ${e.message}"
-                Logger.w("SSE", e) { msg }
+                Logger.w(e, tag = "SSE") { msg }
                 parseErrors.add(msg)
                 null
             }
@@ -179,7 +179,7 @@ class SseEventMapper(private val json: Json) {
         val requestMessage = root["requestMessage"]?.let {
             try { json.decodeFromJsonElement(Message.serializer(), it) } catch (e: Exception) {
                 val msg = "Failed to parse final requestMessage: ${e.message}"
-                Logger.w("SSE", e) { msg }
+                Logger.w(e, tag = "SSE") { msg }
                 parseErrors.add(msg)
                 null
             }
@@ -187,7 +187,7 @@ class SseEventMapper(private val json: Json) {
         val responseMessage = root["responseMessage"]?.let {
             try { json.decodeFromJsonElement(Message.serializer(), it) } catch (e: Exception) {
                 val msg = "Failed to parse final responseMessage: ${e.message}"
-                Logger.w("SSE", e) { msg }
+                Logger.w(e, tag = "SSE") { msg }
                 parseErrors.add(msg)
                 null
             }
@@ -196,7 +196,7 @@ class SseEventMapper(private val json: Json) {
         val legacyMessage = root["message"]?.let {
             try { json.decodeFromJsonElement(Message.serializer(), it) } catch (e: Exception) {
                 val msg = "Failed to parse final legacy message: ${e.message}"
-                Logger.w("SSE", e) { msg }
+                Logger.w(e, tag = "SSE") { msg }
                 parseErrors.add(msg)
                 null
             }
@@ -270,7 +270,7 @@ class SseEventMapper(private val json: Json) {
                     element,
                 )
             } catch (e: Exception) {
-                Logger.w("SSE", e) { "Failed to parse sync aggregatedContent part" }
+                Logger.w(e, tag = "SSE") { "Failed to parse sync aggregatedContent part" }
                 null
             }
         }
@@ -520,7 +520,7 @@ class SseEventMapper(private val json: Json) {
         val usage = try {
             json.decodeFromJsonElement(com.garfiec.librechat.core.model.usage.TokenUsage.serializer(), data)
         } catch (e: Exception) {
-            Logger.w("SSE", e) { "Failed to parse on_token_usage" }
+            Logger.w(e, tag = "SSE") { "Failed to parse on_token_usage" }
             return null
         }
         return StreamEvent.TokenUsageUpdate(usage)
@@ -531,7 +531,7 @@ class SseEventMapper(private val json: Json) {
         val usage = try {
             json.decodeFromJsonElement(com.garfiec.librechat.core.model.usage.ContextUsage.serializer(), data)
         } catch (e: Exception) {
-            Logger.w("SSE", e) { "Failed to parse on_context_usage" }
+            Logger.w(e, tag = "SSE") { "Failed to parse on_context_usage" }
             return null
         }
         return StreamEvent.ContextUsageUpdate(usage)
@@ -551,7 +551,7 @@ class SseEventMapper(private val json: Json) {
             try {
                 json.decodeFromJsonElement(com.garfiec.librechat.core.model.WebSearchData.serializer(), element)
             } catch (e: Exception) {
-                Logger.w("SSE", e) { "Failed to parse web_search attachment data" }
+                Logger.w(e, tag = "SSE") { "Failed to parse web_search attachment data" }
                 null
             }
         }

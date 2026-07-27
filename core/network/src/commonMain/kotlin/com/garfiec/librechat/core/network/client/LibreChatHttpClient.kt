@@ -49,7 +49,7 @@ object LibreChatHttpClient {
                 override fun log(message: String) {
                     // Route through the shared redactor so Logcat/NSLog get the same scrubbing as the
                     // persistent sink (tokens, JWTs, emails, hosts, IDs) — one redaction policy, not two.
-                    Logger.d("HTTP") { redactor.redact(message) }
+                    Logger.d(tag = "HTTP") { redactor.redact(message) }
                 }
             }
             level = if (debug) LogLevel.HEADERS else LogLevel.NONE

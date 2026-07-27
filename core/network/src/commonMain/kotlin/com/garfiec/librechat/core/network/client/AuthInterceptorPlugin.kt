@@ -136,12 +136,12 @@ class AuthInterceptorPlugin private constructor(
                 // down the live account's session over its own dead credentials.
                 val alreadyRetried = request.attributes.getOrNull(RetryFlag) == true
                 if (alreadyRetried) {
-                    Logger.w("Auth") { "401 after retry - session expired" }
+                    Logger.w(tag = "Auth") { "401 after retry - session expired" }
                     plugin.tokenManager.emitSessionExpired(snapshot?.accountId)
                     return@intercept originalCall
                 }
 
-                Logger.d("Auth") { "401 received, attempting token refresh" }
+                Logger.d(tag = "Auth") { "401 received, attempting token refresh" }
                 when (val refresh = plugin.tokenManager.refreshBearerFor(snapshot)) {
                     is BearerResult.Refreshed -> {
                         request.headers {
@@ -153,7 +153,7 @@ class AuthInterceptorPlugin private constructor(
                     }
                     BearerResult.Expired -> {
                         // Hard failure: the session is gone. Route the (snapshot's) account to re-auth.
-                        Logger.w("Auth") { "Token refresh failed - session expired" }
+                        Logger.w(tag = "Auth") { "Token refresh failed - session expired" }
                         plugin.tokenManager.emitSessionExpired(snapshot?.accountId)
                         originalCall
                     }
@@ -161,7 +161,7 @@ class AuthInterceptorPlugin private constructor(
                         // Recoverable failure (network/5xx/malformed/server false-negative). Do NOT
                         // emit session-expired — fail just this request and keep the user signed in so
                         // a later request (or relaunch) recovers instead of a spurious logout.
-                        Logger.w("Auth") { "Token refresh transient failure - keeping session" }
+                        Logger.w(tag = "Auth") { "Token refresh transient failure - keeping session" }
                         originalCall
                     }
                 }
