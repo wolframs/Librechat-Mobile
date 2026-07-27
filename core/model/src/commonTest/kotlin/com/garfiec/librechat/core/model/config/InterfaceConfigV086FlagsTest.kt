@@ -35,7 +35,7 @@ class InterfaceConfigV086FlagsTest {
         val skills = cfg.skills
         assertNotNull(skills)
         assertTrue(skills is JsonObject)
-        assertEquals(JsonPrimitive(true), (skills as JsonObject)["use"])
+        assertEquals(JsonPrimitive(true), skills["use"])
 
         assertEquals(true, cfg.buildInfo)
         assertEquals(false, cfg.autoSubmitFromUrl)

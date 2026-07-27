@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package com.garfiec.librechat.core.data.repository
 
 import com.garfiec.librechat.core.common.result.Result

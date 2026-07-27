@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package com.garfiec.librechat.core.common.identity
 
 import com.garfiec.librechat.core.common.identity.AccountState.Resolved

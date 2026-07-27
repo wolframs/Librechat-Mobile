@@ -1,3 +1,5 @@
+@file:OptIn(org.koin.core.annotation.KoinExperimentalAPI::class)
+
 package com.garfiec.librechat.core.data.di
 
 import android.app.Application
