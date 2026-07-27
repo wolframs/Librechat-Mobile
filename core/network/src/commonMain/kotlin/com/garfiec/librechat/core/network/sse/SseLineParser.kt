@@ -4,7 +4,8 @@ import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.logging.LogOrigin
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.readUTF8Line
+import io.ktor.utils.io.LineEnding
+import io.ktor.utils.io.readLine
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -22,7 +23,7 @@ class SseLineParser(
             while (!channel.isClosedForRead) {
                 val line = try {
                     withTimeout(lineReadTimeoutMs) {
-                        channel.readUTF8Line()
+                        channel.readLine(lineEnding = LineEnding.Lenient)
                     }
                 } catch (e: TimeoutCancellationException) {
                     Diag.w(
