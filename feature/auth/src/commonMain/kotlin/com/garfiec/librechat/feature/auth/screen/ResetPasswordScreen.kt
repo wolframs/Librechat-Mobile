@@ -28,6 +28,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.autofill.contentType
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -124,7 +126,9 @@ fun ResetPasswordScreen(
                     value = uiState.password,
                     onValueChange = viewModel::onPasswordChanged,
                     label = { Text(stringResource(Res.string.new_password_label)) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .contentType(ContentType.NewPassword),
                     singleLine = true,
                     visualTransformation = passwordMaskTransformation(),
                     keyboardOptions = KeyboardOptions(
@@ -140,7 +144,9 @@ fun ResetPasswordScreen(
                     value = uiState.confirmPassword,
                     onValueChange = viewModel::onConfirmPasswordChanged,
                     label = { Text(stringResource(Res.string.confirm_new_password_label)) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .contentType(ContentType.NewPassword),
                     singleLine = true,
                     visualTransformation = passwordMaskTransformation(),
                     keyboardOptions = KeyboardOptions(

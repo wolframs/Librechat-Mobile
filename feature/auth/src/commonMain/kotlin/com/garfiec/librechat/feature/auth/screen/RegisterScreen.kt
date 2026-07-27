@@ -24,6 +24,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.autofill.contentType
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -85,7 +87,9 @@ fun RegisterScreen(
             value = uiState.username,
             onValueChange = viewModel::onUsernameChanged,
             label = { Text(stringResource(Res.string.username_label)) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .contentType(ContentType.Username),
             singleLine = true,
             enabled = !uiState.isLoading,
         )
@@ -96,7 +100,9 @@ fun RegisterScreen(
             value = uiState.email,
             onValueChange = viewModel::onEmailChanged,
             label = { Text(stringResource(Res.string.email_label)) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .contentType(ContentType.EmailAddress),
             singleLine = true,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Email,
@@ -111,7 +117,9 @@ fun RegisterScreen(
             value = uiState.password,
             onValueChange = viewModel::onPasswordChanged,
             label = { Text(stringResource(Res.string.password_label)) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .contentType(ContentType.NewPassword),
             singleLine = true,
             visualTransformation = passwordMaskTransformation(),
             keyboardOptions = KeyboardOptions(
@@ -127,7 +135,9 @@ fun RegisterScreen(
             value = uiState.confirmPassword,
             onValueChange = viewModel::onConfirmPasswordChanged,
             label = { Text(stringResource(Res.string.confirm_password_label)) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .contentType(ContentType.NewPassword),
             singleLine = true,
             visualTransformation = passwordMaskTransformation(),
             keyboardOptions = KeyboardOptions(
