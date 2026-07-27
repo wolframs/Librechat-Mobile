@@ -1,5 +1,6 @@
 package com.garfiec.librechat.feature.chat.screen
 
+import android.annotation.SuppressLint
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.compose.BackHandler
@@ -99,6 +100,7 @@ private class PullUpGesture {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 actual fun ChatScreen(
     modifier: Modifier,
