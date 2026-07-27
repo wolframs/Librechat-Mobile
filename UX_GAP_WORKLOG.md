@@ -50,8 +50,8 @@ This document is intentionally separate from `DISCOVERY.md`:
 Last refreshed: **2026-07-27**
 
 - Branch: `develop`
-- HEAD: `c3b2bc673ba7` (`feat(auth): remember servers and use system password manager`)
-- Relative to freshly fetched `upstream/develop`: 0 behind, 5 ahead
+- Code checkpoint: `072359cf` (`fix(chat): make Android API guards explicit`)
+- At that checkpoint, relative to freshly fetched `upstream/develop`: 0 behind, 27 ahead
 - Existing local feature commits:
   - `829f16f0` — Anthropic cache TTL controls
   - `40b0e72d` — vertical cache TTL thread-gutter control
@@ -85,9 +85,9 @@ changes materially.
 | UX-010 | P2 | Localization completeness | `IMPLEMENTED` | German coverage passed | Not started |
 | UX-011 | P2 | Accessibility audit | `IMPLEMENTED` | Static regression passed | Not started |
 | UX-012 | P2 | Cold-start token decryption | `AUTO_VERIFIED` | Passed | Agent-tested Pixel 7 |
-| UX-013 | P3 | Multi-account sign-out wording | `SCOUTED` | Not started | Not started |
-| UX-014 | P3 | Archived favorite reconciliation | `SCOUTED` | Not started | Not started |
-| UX-015 | P3 | iOS parity placeholders | `SCOUTED` | Not started | Not started |
+| UX-013 | P3 | Multi-account sign-out wording | `AUTO_VERIFIED` | Passed | Not started |
+| UX-014 | P3 | Archived favorite reconciliation | `AUTO_VERIFIED` | Passed | Not started |
+| UX-015 | P3 | iOS parity placeholders | `IMPLEMENTED` | Partial Apple/static pass | Not started |
 
 Priority meaning:
 
@@ -822,7 +822,7 @@ navigation deterministic and avoiding a flash of unauthenticated UI.
 
 **Priority:** P3
 
-**Status:** `IMPLEMENTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -863,7 +863,7 @@ confirmed "Sign out of all accounts" action if it serves a real user need.
 
 **Priority:** P3
 
-**Status:** `IMPLEMENTED`
+**Status:** `AUTO_VERIFIED`
 
 ### Observed behavior
 
@@ -899,28 +899,89 @@ the local saved tag until it is unarchived.
 
 **Priority:** P3
 
-**Status:** `SCOUTED`
+**Status:** `IMPLEMENTED`
 
-### Observed placeholders
+### Revalidated platform tracks
 
-- Password Credential Manager implementation returns no result.
-- Settings avatar upload is a placeholder.
-- Agent avatar picker is a placeholder.
-- PDF preview reports that it is unavailable.
-- Some chat attachment platform handling remains no-op or partial.
+| Track | Finding | Status |
+|---|---|---|
+| UX-015-A | iOS password handling used native field semantics incompletely | `IMPLEMENTED` |
+| UX-015-B | Settings avatar dialog was a placeholder | `IMPLEMENTED` |
+| UX-015-C | Agent avatar picker was a placeholder | `IMPLEMENTED` |
+| UX-015-D | Files-screen document picker was a no-op | `IMPLEMENTED` |
+| UX-015-E | Files-screen PDF preview was a placeholder | `IMPLEMENTED` |
+| UX-015-F | In-app chat attachments were suspected to be partial | `REJECTED` |
+| UX-015-G | Receiving files from other apps needs an iOS share extension | `DEFERRED` |
 
 ### Evidence
 
 - `feature/auth/src/iosMain/.../PasswordCredentialManager.ios.kt`
 - `feature/settings/src/iosMain/.../AvatarUploadDialog.ios.kt`
 - `feature/agents/src/iosMain/.../AgentAvatarPicker.ios.kt`
+- `feature/files/src/iosMain/.../FilePickerLauncher.ios.kt`
+- `feature/files/src/iosMain/.../IosFileReader.kt`
 - `feature/files/src/iosMain/.../PdfPreview.ios.kt`
-- `feature/chat/.../viewmodel/delegate/PlatformFileHandler.kt`
+- `feature/chat/src/iosMain/.../IosFilePicker.kt`
+- `feature/chat/src/iosMain/.../IosFileHandler.kt`
+- `feature/chat/src/iosMain/.../IosShareConsumer.kt`
 
-### Execution note
+### Decisions and implementation
 
-Split this umbrella item before implementation. Each platform feature needs its own
-acceptance path and should not be declared complete from Android-only verification.
+#### UX-015-A — Native password semantics
+
+- Password AutoFill on iOS is driven by username/password/new-password field semantics and
+  the user's configured password provider. It is not equivalent to Android's explicit
+  Credential Manager request button.
+- Registration now marks username, email, password, and confirmation fields correctly;
+  reset fields use new-password semantics. Login already declared username/password semantics.
+- `rememberPasswordCredentialManager()` intentionally remains `null` on iOS so the Android-only
+  explicit saved-login button is not shown. `ASCredentialIdentityStore` is for credential-provider
+  extensions and stores credential identities, not an app-owned password vault.
+- Arbitrary runtime self-hosted domains cannot all be declared in a fixed Associated Domains
+  entitlement. The app therefore does not introduce its own password database as a workaround.
+
+#### UX-015-B/C — Avatar pickers
+
+- A shared iOS PhotosUI launcher retains its weak picker delegate and materializes the chosen image
+  while the item provider owns it.
+- Settings now mirrors the Android choose/preview/upload dialog.
+- Agent editing now supports choose, immediate preview, and upload through the existing content-reader
+  path.
+
+#### UX-015-D/E — Files and PDF
+
+- The Files screen now presents `UIDocumentPickerViewController` and streams the selected
+  security-scoped resource. Each multipart retry opens a fresh channel and owns a balanced
+  start/stop scope; large files are not materialized in memory.
+- The Files preview now downloads through the existing callback and renders with PDFKit, including
+  explicit loading and locked/empty/corrupt-document fallback states.
+
+#### UX-015-F/G — Chat audit boundary
+
+- The suspected in-app chat attachment gap is rejected: document, photo, camera, and clipboard
+  selection already feed implemented iOS upload handling.
+- `IosShareConsumer` is a no-op because receiving files from another app is a distinct share-extension
+  target, not the in-app picker path. Adding a new Apple extension target, entitlements, shared
+  container, and host-app handoff is deferred as a separate project-scope decision.
+
+### Acceptance and verification
+
+- [x] Each placeholder was split into an independently reviewable track.
+- [x] Android compilation and affected unit suites remain green.
+- [x] iOS-target Detekt passes for all changed platform sources.
+- [x] The dependency-free `core:ui` iOS simulator target compiles on this Linux host.
+- [ ] Full feature iOS compilation on an Apple host. It is skipped on Linux because
+  `core:network` has the `nwparams_defaults` Apple cinterop.
+- [ ] Device verification of Password AutoFill offers, PhotosUI avatar upload, Files-provider
+  cancellation/retry, and PDFKit rendering.
+- [ ] Decide separately whether external share-extension ingestion is worth the additional target.
+
+### Implementation update — 2026-07-27
+
+- Commits: `53fa162b`, `a34751bd`, `0dc71dec`.
+- No new app-owned password storage was introduced.
+- No Android behavior changed except shared registration/reset autofill metadata.
+- Remaining risks are confined to Apple-host compilation and device integration paths recorded above.
 
 ---
 
@@ -1032,3 +1093,44 @@ conclusion. Correct earlier entries with a new dated note.
   explicitly unresolved until reconciliation completes.
 - Post-change first draw measured 955–1,156 ms versus 2,421–2,605 ms in the immediately preceding
   instrumented baseline; recorded frames showed no login/authenticated-content flash.
+
+### 2026-07-27 — UX-013 explicit sign-out consequences
+
+- Added a roster-derived confirmation model that names the current account/server and the exact
+  account/server promoted after removal.
+- Last-account copy instead explains that the app returns to sign-in.
+- Focused unit tests and affected module checks pass; device confirmation remains pending.
+
+### 2026-07-27 — UX-014 archived favorite reconciliation
+
+- Favorite sync now walks bounded, tag-filtered active and archived pages.
+- Account-scoped local cleanup removes stale exact `Saved` tags before an archived conversation can
+  be unarchived with obsolete favorite state.
+- Separate regression tests cover multi-page archives and archive → remote unfavorite → sync →
+  unarchive; affected data tests and static checks pass.
+
+### 2026-07-27 — UX-015 iOS parity split
+
+- Completed native password-field semantics without adding an app-owned password vault.
+- Replaced Settings and Agent avatar placeholders with a retained PhotosUI picker.
+- Replaced the Files picker no-op with security-scoped streaming and added PDFKit preview.
+- Rejected the suspected in-app chat attachment gap after tracing its implemented document, photo,
+  camera, clipboard, and upload paths.
+- Deferred external share ingestion because it requires a separate Apple extension target and
+  host-app handoff.
+- iOS-target static analysis and the independent `core:ui` Apple compile pass. Full feature Apple
+  compilation is blocked on Linux by the existing Network.framework cinterop and remains an
+  Apple-host/device verification item.
+
+### 2026-07-27 — Repository-wide verification closeout
+
+- Ran `testDebugUnitTest detekt lintDebug :app:assembleDebug` across the complete Android graph;
+  all 826 tasks completed successfully.
+- The broad sweep exposed and prompted three separate hygiene fixes: navigation graph verification
+  now accounts for `SavedStateHandle`, Android locale reads observe configuration changes, and the
+  speech-recognizer API guard sits beside its API-31 platform call.
+- `scripts/check-localization.py --require-complete de` passes.
+- `git diff --check` passes, and the intended worktree is clean apart from the pre-existing local
+  Android Studio Gradle configuration files.
+- Full feature-level Apple compilation and Apple device behavior remain explicitly unverified on
+  this Linux host; those limits are recorded under UX-015 rather than hidden by Android success.
