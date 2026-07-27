@@ -15,7 +15,7 @@ polish backlog. Update it whenever an item changes state.
 - **Network**: Ktor Client (OkHttp engine)
 - **Serialization**: Kotlinx Serialization
 - **Local Storage**: Room (cache), DataStore (prefs), EncryptedSharedPreferences (tokens)
-- **Build**: Gradle 9.4.1, AGP 9.1.0, Kotlin 2.3.20, compileSdk 36, minSdk 26
+- **Build**: Gradle 9.5.1, AGP 9.2.1, Kotlin 2.3.20, compileSdk 36, minSdk 26
 
 ## Module Layout
 
