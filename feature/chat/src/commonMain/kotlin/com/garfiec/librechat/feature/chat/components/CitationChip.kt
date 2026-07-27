@@ -81,7 +81,7 @@ fun parseCitations(text: String): Pair<AnnotatedString, List<Citation>> {
         val sourceText = source?.trim()
         val extractedUrl = sourceText?.let { URL_REGEX.find(it)?.value }
         val title = if (extractedUrl != null) {
-            sourceText?.replace(extractedUrl, "")?.trim()?.ifEmpty { null }
+            sourceText.replace(extractedUrl, "").trim().ifEmpty { null }
         } else {
             sourceText
         }

@@ -200,7 +200,7 @@ private fun parseToolResourceFiles(
     val obj = toolResources ?: return emptyList()
     return try {
         val resourceObj = obj[resource] as? JsonObject ?: return emptyList()
-        val ids = resourceObj["file_ids"] as? JsonElement ?: return emptyList()
+        val ids = resourceObj["file_ids"] ?: return emptyList()
         ids.jsonArray.mapNotNull { element ->
             val id = (element as? JsonPrimitive)?.content ?: return@mapNotNull null
             AgentFile(fileId = id, originResource = resource)

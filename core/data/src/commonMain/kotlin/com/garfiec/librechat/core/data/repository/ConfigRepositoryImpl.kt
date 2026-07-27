@@ -105,7 +105,7 @@ class ConfigRepositoryImpl(
             val message = when (e.statusCode) {
                 404 -> "This doesn't appear to be a LibreChat server"
                 in 500..599 -> "Server error. Please try again later."
-                else -> e.message ?: "Could not connect to server"
+                else -> e.message
             }
             Result.Error(e, message)
         } catch (e: HttpRequestTimeoutException) {

@@ -139,11 +139,6 @@ internal fun ContentPartDispatcher(
                 useKatex = useKatex,
             )
         }
-        else -> {
-            if (!part.text.isNullOrEmpty()) {
-                MarkdownContent(part.text.orEmpty(), mod, fontSizeMultiplier, useKatex)
-            }
-        }
     }
 }
 

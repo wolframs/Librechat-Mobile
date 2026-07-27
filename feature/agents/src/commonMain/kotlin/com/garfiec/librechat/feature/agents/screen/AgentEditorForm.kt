@@ -89,7 +89,7 @@ internal fun AgentEditorForm(
     ) {
         if (uiState.error != null) {
             ErrorBanner(
-                message = uiState.error ?: stringResource(Res.string.error_unknown),
+                message = uiState.error,
                 onRetry = { viewModel.dismissError() },
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -445,11 +445,12 @@ internal fun AgentEditorForm(
         // a notice instead of the legacy Private/Team/Public toggle — which
         // would silently no-op since v0.8.5+ dropped the projects/isCollaborative
         // model the toggle wrote to.
+        val agentId = uiState.agentId
         when {
-            uiState.isAclAvailable && uiState.agentId != null -> {
+            uiState.isAclAvailable && agentId != null -> {
                 val aclViewModel: AgentAclViewModel = koinViewModel()
-                LaunchedEffect(uiState.agentId) {
-                    aclViewModel.load(uiState.agentId!!)
+                LaunchedEffect(agentId) {
+                    aclViewModel.load(agentId)
                 }
                 AgentAclSharingSection(viewModel = aclViewModel)
             }
