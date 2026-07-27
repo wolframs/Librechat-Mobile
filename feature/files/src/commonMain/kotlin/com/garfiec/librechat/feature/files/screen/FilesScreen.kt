@@ -50,7 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
@@ -279,7 +279,7 @@ fun FilesScreen(
                 // File type filter tabs
                 val filters = FileTypeFilter.entries
                 val selectedIndex = filters.indexOf(uiState.selectedFilter)
-                ScrollableTabRow(
+                PrimaryScrollableTabRow(
                     selectedTabIndex = selectedIndex,
                     edgePadding = 16.dp,
                 ) {

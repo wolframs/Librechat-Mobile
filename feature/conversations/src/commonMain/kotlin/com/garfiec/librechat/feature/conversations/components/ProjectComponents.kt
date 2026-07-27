@@ -2,9 +2,9 @@ package com.garfiec.librechat.feature.conversations.components
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -53,7 +53,7 @@ fun ProjectActionsMenu(
     ) {
         DropdownMenuItem(
             text = { Text(stringResource(Res.string.project_open)) },
-            leadingIcon = { Icon(Icons.Default.OpenInNew, contentDescription = null) },
+            leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
             onClick = { onDismiss(); onOpen() },
         )
         DropdownMenuItem(

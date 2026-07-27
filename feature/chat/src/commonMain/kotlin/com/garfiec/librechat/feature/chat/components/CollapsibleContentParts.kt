@@ -16,9 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -195,7 +195,7 @@ internal fun SummaryContentPart(
     if (summaryText.isBlank()) return
 
     CollapsibleDisclosureCard(
-        leadingIcon = Icons.Default.Notes,
+        leadingIcon = Icons.AutoMirrored.Filled.Notes,
         leadingIconContentDescription = stringResource(Res.string.cd_summary_indicator),
         title = stringResource(Res.string.label_summary),
         expandActionContentDescription = Res.string.cd_expand_summary,

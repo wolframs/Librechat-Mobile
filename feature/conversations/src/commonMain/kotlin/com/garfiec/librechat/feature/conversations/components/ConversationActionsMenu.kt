@@ -2,13 +2,13 @@ package com.garfiec.librechat.feature.conversations.components
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.PushPin
@@ -125,7 +125,7 @@ fun ConversationActionsMenu(
 
         if (showMoveToProject) {
             MenuActionItem(
-                icon = Icons.Default.DriveFileMove,
+                icon = Icons.AutoMirrored.Filled.DriveFileMove,
                 label = stringResource(Res.string.move_to_project),
                 onClick = {
                     onDismiss()
