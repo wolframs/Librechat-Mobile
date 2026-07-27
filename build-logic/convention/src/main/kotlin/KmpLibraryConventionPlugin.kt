@@ -17,6 +17,7 @@ class KmpLibraryConventionPlugin : Plugin<Project> {
                 compilerOptions {
                     freeCompilerArgs.addAll(
                         "-opt-in=kotlin.time.ExperimentalTime",
+                        "-Xexpect-actual-classes",
                     )
                 }
                 androidTarget()
