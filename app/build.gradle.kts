@@ -15,7 +15,11 @@ extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
     buildTypes {
         debug {
             // Release must keep the bare id — Obtainium tracks updates by package name.
-            applicationIdSuffix = ".debug"
+            // Older fork debug builds used the bare id. Opt in to updating those in place,
+            // preserving their database, preferences, and Android Keystore identity.
+            if (!providers.gradleProperty("legacyDebugApplicationId").map(String::toBoolean).getOrElse(false)) {
+                applicationIdSuffix = ".debug"
+            }
             versionNameSuffix = "-debug"
         }
     }

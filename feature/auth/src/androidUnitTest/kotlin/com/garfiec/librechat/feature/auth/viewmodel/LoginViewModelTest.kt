@@ -203,6 +203,18 @@ class LoginViewModelTest {
     }
 
     @Test
+    fun `credential username is readable and normalizes equivalent server URLs`() {
+        val id = buildCredentialId(" user@example.com ", " HTTPS://Chat.Example.com:443/alpha/ ")
+        assertThat(id).isEqualTo("user@example.com · https://chat.example.com/alpha")
+        assertThat(buildCredentialId("user@example.com", "https://chat.example.com/alpha"))
+            .isEqualTo(id)
+        assertThat(buildCredentialId("user@example.com", "https://chat.example.com:8443/alpha"))
+            .isNotEqualTo(id)
+        assertThat(buildCredentialId("user@example.com", "http://chat.example.com/alpha"))
+            .isNotEqualTo(id)
+    }
+
+    @Test
     fun `credential identity distinguishes deployments on different paths`() {
         val first = buildCredentialId("user@example.com", "https://chat.example.com/alpha")
         val second = buildCredentialId("user@example.com", "https://chat.example.com/beta")

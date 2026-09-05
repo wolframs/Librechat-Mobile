@@ -104,9 +104,29 @@ Regression coverage includes provider-vs-parameter-panel identity, restricted TT
 locked YAML defaults, renamed marketplace endpoints, missing quotes, both MCP names,
 audio MIME routing, persistent banners, and the fork database migration.
 
-Device/iOS execution remains unverified: this Linux host has no attached Android
-device or configured AVD, and cannot link or run iOS. Before installing over a daily
-build, verify on a device:
+Pixel 7 installation and launch were verified on 2026-09-05. For older fork debug
+installations using `com.garfiec.librechat`, build with
+`./gradlew :app:assembleDebug -PlegacyDebugApplicationId=true` and update with
+`adb install --no-streaming -r -t app/build/outputs/apk/debug/app-debug.apk`.
+The opt-in keeps the original package ID; the default still installs alongside it.
+Check signing certificates before upgrading an existing installation; do not
+uninstall it to resolve a signature mismatch, since that discards its data.
+
+The original Pixel installation's certificate matched the repository debug key.
+After backing up its APK and app files, the in-place update migrated database v9
+to v10. All 42 conversation rows and 149 message rows were unchanged, and the
+settings DataStore remained byte-identical. The app opened directly to chat.
+The initial agent-loading and provider-key save failures were traced to disconnected
+Tailscale on the phone (server hostname resolution failed). Reconnecting restored
+DNS and reachability; the user subsequently reported the app working.
+iOS execution remains unverified on this Linux host.
+
+New password-manager save requests use `email · normalized server URL`, removing
+the internal server ID previously displayed as part of the username. Existing saved
+credential references retain their original IDs. All 72 auth tests and the legacy-ID
+debug APK build passed; this latest password-manager change has not yet been installed
+on the phone.
+Remaining device acceptance:
 
 1. Existing accounts, cached messages, drafts and paused queue survive the upgrade.
 2. Select `Surplus (Claude)`: the cache rail is visible but cannot arm 1h. Native

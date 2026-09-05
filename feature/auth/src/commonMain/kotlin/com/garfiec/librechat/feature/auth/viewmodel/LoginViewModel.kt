@@ -3,8 +3,7 @@ package com.garfiec.librechat.feature.auth.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.garfiec.librechat.core.common.extensions.serverHostLabel
-import com.garfiec.librechat.core.common.identity.deriveServerId
+import com.garfiec.librechat.core.common.identity.normalizeServerUrl
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.SavedLoginCredentialRef
@@ -273,8 +272,9 @@ class LoginViewModel(
 }
 
 /**
- * Human-recognizable credential label with the canonical deployment identity appended. The host
- * remains useful in the system picker while the server id keeps different paths and ports distinct.
+ * Credential Manager displays this ID as the username, so never append an internal server ID.
+ * Keep the readable deployment URL to distinguish the same email on different servers, paths,
+ * ports, and schemes. Existing saved references retain their original IDs for retrieval.
  */
 internal fun buildCredentialId(email: String, serverUrl: String): String =
-    "${email.trim()} · ${serverUrl.serverHostLabel()} · ${deriveServerId(serverUrl).value}"
+    "${email.trim()} · ${normalizeServerUrl(serverUrl)}"
