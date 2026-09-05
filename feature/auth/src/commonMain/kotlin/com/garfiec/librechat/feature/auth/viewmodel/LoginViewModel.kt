@@ -3,7 +3,6 @@ package com.garfiec.librechat.feature.auth.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.garfiec.librechat.core.common.identity.normalizeServerUrl
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.SavedLoginCredentialRef
@@ -12,6 +11,7 @@ import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.model.LoginOutcome
+import com.garfiec.librechat.feature.auth.credentials.PasswordCredential
 import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSave
 import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
 import com.garfiec.librechat.feature.auth.oauth.OAuthLauncher
@@ -84,16 +84,20 @@ class LoginViewModel(
     private fun signInServerUrl(): String =
         accountSwitcher.pendingAdd?.serverUrl ?: serverDataStore.getBaseUrl()
 
+    private var selectedPasswordCredential = false
+
     fun onEmailChanged(email: String) {
+        if (email != _uiState.value.email) selectedPasswordCredential = false
         _uiState.value = _uiState.value.copy(email = email, error = null)
     }
 
     fun onPasswordChanged(password: String) {
+        if (password != _uiState.value.password) selectedPasswordCredential = false
         _uiState.value = _uiState.value.copy(password = password, error = null)
     }
 
     fun login() {
-        login(offerCredentialSave = true)
+        login(offerCredentialSave = !selectedPasswordCredential)
     }
 
     private fun login(offerCredentialSave: Boolean) {
@@ -117,7 +121,7 @@ class LoginViewModel(
                                 PendingCredentialSave(
                                     ref = SavedLoginCredentialRef(
                                         serverUrl = serverUrl,
-                                        credentialId = buildCredentialId(state.email, serverUrl),
+                                        credentialId = state.email.trim(),
                                         username = state.email.trim(),
                                     ),
                                     password = state.password,
@@ -138,7 +142,7 @@ class LoginViewModel(
                                     PendingCredentialSave(
                                         ref = SavedLoginCredentialRef(
                                             serverUrl = serverUrl,
-                                            credentialId = buildCredentialId(state.email, serverUrl),
+                                            credentialId = state.email.trim(),
                                             username = state.email.trim(),
                                         ),
                                         password = state.password,
@@ -181,14 +185,16 @@ class LoginViewModel(
         }
     }
 
-    fun loginWithSavedCredential(ref: SavedLoginCredentialRef, password: String) {
-        if (_uiState.value.savedCredentials.none { it == ref }) return
+    fun onCredentialSelected(credential: PasswordCredential) {
+        selectedPasswordCredential = true
+        val ref = _uiState.value.savedCredentials.firstOrNull { it.credentialId == credential.id }
         _uiState.value = _uiState.value.copy(
-            email = ref.username,
-            password = password,
+            email = ref?.username ?: credential.id,
+            password = credential.password,
             error = null,
         )
-        login(offerCredentialSave = false)
+        // Review the selected account and server before submitting. Providers may return entries
+        // created outside this app, which have no local saved-credential reference.
     }
 
     fun onCredentialSaveHandled(saved: Boolean) {
@@ -216,7 +222,7 @@ class LoginViewModel(
         _uiState.value = _uiState.value.copy(twoFactorTempToken = null)
     }
 
-    /** Set once this screen launches its own OAuth round-trip; gates add-mode cookie consumption. */
+    /** Set once this screen launches its own OAuth round-trip; gates cookie consumption on resume. */
     private var oAuthLaunched = false
 
     fun launchOAuth(provider: String) {
@@ -232,20 +238,16 @@ class LoginViewModel(
     }
 
     fun checkOAuthResult() {
-        // In add mode, only consume a cookie minted by THIS screen's own launchOAuth round-trip:
-        // the cookie jar is process-global and nothing clears it on add-flow entry, so a stale
-        // refreshToken cookie for this host would otherwise be auto-consumed on first ON_RESUME
-        // and silently complete the add as the wrong user. The normal login screen keeps the
-        // unconditional consume — it must survive process death during the Custom Tab round-trip,
-        // which an add flow never does (its pending session is memory-only, so a killed add flow
-        // is stripped by the NavHost, not resumed).
-        if (accountSwitcher.pendingAdd != null && !oAuthLaunched) return
+        // Returning from Credential Manager also resumes this screen. Only an OAuth flow
+        // explicitly started here may consume the browser cookie and establish a session.
+        if (!oAuthLaunched) return
 
         val serverUrl = signInServerUrl()
         if (serverUrl.isBlank()) return
 
         val refreshToken = oAuthLauncher.extractTokenFromCookies(serverUrl) ?: return
 
+        oAuthLaunched = false
         // Clear the cookie immediately to avoid re-reading on next onResume
         oAuthLauncher.clearOAuthCookie(serverUrl)
 
@@ -270,11 +272,3 @@ class LoginViewModel(
         }
     }
 }
-
-/**
- * Credential Manager displays this ID as the username, so never append an internal server ID.
- * Keep the readable deployment URL to distinguish the same email on different servers, paths,
- * ports, and schemes. Existing saved references retain their original IDs for retrieval.
- */
-internal fun buildCredentialId(email: String, serverUrl: String): String =
-    "${email.trim()} · ${normalizeServerUrl(serverUrl)}"

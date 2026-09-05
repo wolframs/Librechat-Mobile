@@ -9,10 +9,12 @@ import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.model.LoginOutcome
 import com.garfiec.librechat.core.model.User
 import com.garfiec.librechat.core.model.config.StartupConfig
+import com.garfiec.librechat.feature.auth.credentials.PasswordCredential
 import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
 import com.garfiec.librechat.feature.auth.oauth.OAuthLauncher
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -181,7 +183,7 @@ class LoginViewModelTest {
     }
 
     @Test
-    fun `saved credential login completes without requesting another save`() = runTest {
+    fun `saved credential selection fills fields without submitting`() = runTest {
         val ref = SavedLoginCredentialRef(
             serverUrl = "https://chat.example.com",
             credentialId = "stored-id",
@@ -193,35 +195,81 @@ class LoginViewModelTest {
 
         viewModel = createViewModel()
         advanceUntilIdle()
-        viewModel.loginWithSavedCredential(ref, "password123")
+        viewModel.onCredentialSelected(PasswordCredential(ref.credentialId, "password123"))
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        assertThat(state.isLoggedIn).isTrue()
+        assertThat(state.isLoggedIn).isFalse()
         assertThat(state.pendingCredentialSave).isNull()
-        assertThat(state.password).isEmpty()
+        assertThat(state.password).isEqualTo("password123")
+        assertThat(state.email).isEqualTo("user@example.com")
+        coVerify(exactly = 0) { authRepository.login(any(), any()) }
     }
 
     @Test
-    fun `credential username is readable and normalizes equivalent server URLs`() {
-        val id = buildCredentialId(" user@example.com ", " HTTPS://Chat.Example.com:443/alpha/ ")
-        assertThat(id).isEqualTo("user@example.com · https://chat.example.com/alpha")
-        assertThat(buildCredentialId("user@example.com", "https://chat.example.com/alpha"))
-            .isEqualTo(id)
-        assertThat(buildCredentialId("user@example.com", "https://chat.example.com:8443/alpha"))
-            .isNotEqualTo(id)
-        assertThat(buildCredentialId("user@example.com", "http://chat.example.com/alpha"))
-            .isNotEqualTo(id)
+    fun `external password manager entry fills fields without a local reference`() = runTest {
+        viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.onCredentialSelected(
+            PasswordCredential("external@example.com", "selected-password"),
+        )
+        assertThat(viewModel.uiState.value.email).isEqualTo("external@example.com")
+        assertThat(viewModel.uiState.value.password).isEqualTo("selected-password")
+        assertThat(viewModel.uiState.value.isLoggedIn).isFalse()
+        coVerify(exactly = 0) { authRepository.login(any(), any()) }
     }
 
     @Test
-    fun `credential identity distinguishes deployments on different paths`() {
-        val first = buildCredentialId("user@example.com", "https://chat.example.com/alpha")
-        val second = buildCredentialId("user@example.com", "https://chat.example.com/beta")
+    fun `selected password manager credentials do not offer another save on login`() = runTest {
+        coEvery { authRepository.login(any(), any()) } returns
+            Result.Success(LoginOutcome.Success(User(email = "user@example.com")))
+        viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.onCredentialSelected(PasswordCredential("user@example.com", "secret"))
+        viewModel.login()
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.isLoggedIn).isTrue()
+        assertThat(viewModel.uiState.value.pendingCredentialSave).isNull()
+    }
 
-        assertThat(first).isNotEqualTo(second)
-        assertThat(first).contains("chat.example.com")
-        assertThat(second).contains("chat.example.com")
+    @Test
+    fun `editing a selected password offers to save the updated plain username`() = runTest {
+        coEvery { authRepository.login(any(), any()) } returns
+            Result.Success(LoginOutcome.Success(User(email = "user@example.com")))
+        viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.onCredentialSelected(PasswordCredential("user@example.com", "secret"))
+        viewModel.onPasswordChanged("updated")
+        viewModel.login()
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.pendingCredentialSave?.ref?.credentialId)
+            .isEqualTo("user@example.com")
+    }
+
+    @Test
+    fun `explicit OAuth launch consumes its result only once`() = runTest {
+        every { oAuthLauncher.extractTokenFromCookies(any()) } returns "oauth-result"
+        coEvery { authRepository.loginWithOAuthToken("oauth-result") } returns Result.Success(User(email = "user@example.com"))
+        viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.launchOAuth("google")
+        viewModel.checkOAuthResult()
+        advanceUntilIdle()
+        viewModel.checkOAuthResult()
+        advanceUntilIdle()
+        coVerify(exactly = 1) { authRepository.loginWithOAuthToken("oauth-result") }
+        assertThat(viewModel.uiState.value.isLoggedIn).isTrue()
+    }
+
+    @Test
+    fun `resuming without an OAuth launch does not consume stale cookies`() = runTest {
+        viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.checkOAuthResult()
+        advanceUntilIdle()
+        io.mockk.verify(exactly = 0) { oAuthLauncher.extractTokenFromCookies(any()) }
+        coVerify(exactly = 0) { authRepository.loginWithOAuthToken(any()) }
+        assertThat(viewModel.uiState.value.isLoggedIn).isFalse()
     }
 
     @Test

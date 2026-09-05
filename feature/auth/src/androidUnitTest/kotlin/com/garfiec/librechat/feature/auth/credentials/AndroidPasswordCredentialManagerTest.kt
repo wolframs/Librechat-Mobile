@@ -22,12 +22,13 @@ class AndroidPasswordCredentialManagerTest {
     }
 
     @Test
-    fun `retrieve skips the provider when no ids are registered`() = runTest {
+    fun `retrieve allows provider selection when no ids are registered`() = runTest {
         val gateway = FakeGateway()
         val manager = AndroidPasswordCredentialManager(gateway)
 
         assertThat(manager.getCredential(emptySet())).isNull()
-        assertThat(gateway.retrieveCalls).isEqualTo(0)
+        assertThat(gateway.retrieveCalls).isEqualTo(1)
+        assertThat(gateway.requestedIds).isEmpty()
     }
 
     @Test

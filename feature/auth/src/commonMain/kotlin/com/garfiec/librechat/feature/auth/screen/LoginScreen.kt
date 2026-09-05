@@ -157,22 +157,21 @@ fun LoginScreen(
                 )
             }
 
-            if (credentialManager != null && uiState.savedCredentials.isNotEmpty()) {
+            if (credentialManager != null) {
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedButton(
                     onClick = {
                         scope.launch {
                             isChoosingCredential = true
-                            val credential = credentialManager.getCredential(
-                                uiState.savedCredentials.mapTo(mutableSetOf()) { it.credentialId },
-                            )
-                            val ref = uiState.savedCredentials.firstOrNull {
-                                it.credentialId == credential?.id
+                            try {
+                                // Let the user select entries saved outside this installation too.
+                                val credential = credentialManager.getCredential(emptySet())
+                                if (credential != null) {
+                                    viewModel.onCredentialSelected(credential)
+                                }
+                            } finally {
+                                isChoosingCredential = false
                             }
-                            if (credential != null && ref != null) {
-                                viewModel.loginWithSavedCredential(ref, credential.password)
-                            }
-                            isChoosingCredential = false
                         }
                     },
                     modifier = Modifier.fillMaxWidth().testTag("login_saved_credential"),

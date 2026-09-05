@@ -121,11 +121,18 @@ Tailscale on the phone (server hostname resolution failed). Reconnecting restore
 DNS and reachability; the user subsequently reported the app working.
 iOS execution remains unverified on this Linux host.
 
-New password-manager save requests use `email · normalized server URL`, removing
-the internal server ID previously displayed as part of the username. Existing saved
-credential references retain their original IDs. All 72 auth tests and the legacy-ID
-debug APK build passed; this latest password-manager change has not yet been installed
-on the phone.
+New password-manager save requests use only the actual username. Existing saved
+credential references retain their original IDs and map back to the username.
+The picker accepts external entries and fills fields for review before submission.
+An unchanged selection does not offer another save on login; editing either field
+allows saving the updated credentials. OAuth cookie consumption is gated on an
+explicit OAuth launch, so returning from the password-manager sheet cannot consume
+a stale browser session. If the process dies during OAuth, restart that login flow.
+Credential Manager entries now use the provider's ordinary app/username identity;
+they are no longer distinguished by a server suffix in the username.
+All 75 auth tests and the legacy-ID debug build passed. The updated APK was installed
+in place on the Pixel 7, and the user confirmed the fixes before approving publication.
+
 Remaining device acceptance:
 
 1. Existing accounts, cached messages, drafts and paused queue survive the upgrade.

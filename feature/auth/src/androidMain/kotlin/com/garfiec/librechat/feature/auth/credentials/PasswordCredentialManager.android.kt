@@ -32,7 +32,6 @@ internal class AndroidPasswordCredentialManager(
 ) : PasswordCredentialManager {
 
     override suspend fun getCredential(allowedIds: Set<String>): PasswordCredential? {
-        if (allowedIds.isEmpty()) return null
         return try {
             gateway.getPassword(allowedIds)
         } catch (e: CancellationException) {
