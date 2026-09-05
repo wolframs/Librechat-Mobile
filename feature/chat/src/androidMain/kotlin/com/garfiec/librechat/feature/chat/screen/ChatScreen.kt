@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
@@ -28,13 +27,14 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,24 +67,28 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
+import com.garfiec.librechat.core.model.response.pickerMimeTypes
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
 import com.garfiec.librechat.feature.chat.components.CacheTtlRail
 import com.garfiec.librechat.feature.chat.components.ChatFloatingTopBar
 import com.garfiec.librechat.feature.chat.components.ChatInput
-import com.garfiec.librechat.feature.chat.components.ChatRoot
 import com.garfiec.librechat.feature.chat.components.ChatOptionsPage
+import com.garfiec.librechat.feature.chat.components.ChatRoot
 import com.garfiec.librechat.feature.chat.components.ChatToolsSheetContent
-import com.garfiec.librechat.feature.chat.components.rememberChatOptionsSheetController
+import com.garfiec.librechat.feature.chat.components.UploadRoutingSheet
+import com.garfiec.librechat.feature.chat.components.addToChatSelectionItem
 import com.garfiec.librechat.feature.chat.components.rememberChatAttachmentActions
+import com.garfiec.librechat.feature.chat.components.rememberChatOptionsSheetController
+import com.garfiec.librechat.feature.chat.prompts.components.VariableInputDialog
 import com.garfiec.librechat.feature.chat.viewmodel.ChatViewModel
 import com.garfiec.librechat.feature.chat.viewmodel.asString
 import com.garfiec.librechat.feature.chat.viewmodel.neutralizeStreamingChurn
-import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
+import kotlin.math.roundToInt
 
 /** Anchor states for the finger-following pull-up tools sheet. */
 private enum class PullUpAnchor { Hidden, Revealed }
@@ -100,6 +104,10 @@ private class PullUpGesture {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+// The Scaffold's content padding is deliberately unused: the thread draws under both bars (the
+// floating top bar applies its own statusBarsPadding, the composer its own nav-bar padding) and the
+// list reserves its insets from the measured bar heights instead. contentWindowInsets is still set
+// so the snackbar clears the navigation bar.
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 actual fun ChatScreen(
@@ -131,6 +139,7 @@ actual fun ChatScreen(
     val attachedFiles by viewModel.attachedFiles.collectAsStateWithLifecycle()
     val shareLinkUrl by viewModel.shareLinkUrl.collectAsStateWithLifecycle()
     val prefs by viewModel.chatPreferences.collectAsStateWithLifecycle()
+    val promptLibraryRevision by viewModel.promptLibraryRevision.collectAsStateWithLifecycle()
     val showImageDescriptions = prefs.showImageDescriptions
     val dismissKeyboardOnSend = prefs.dismissKeyboardOnSend
     val chatLayoutStyle = prefs.chatLayoutStyle
@@ -187,7 +196,28 @@ actual fun ChatScreen(
     // One launcher set, registered here and shared by both the composer "+" sheet (ChatInput) and
     // the pull-up sheet: a launcher stays usable from descendant compositions while the one that
     // registered it (this screen) is alive, so a second registration would be redundant.
-    val attachmentActions = rememberChatAttachmentActions(viewModel::onFilesSelected)
+    // Narrow the file picker to what this endpoint's `supportedMimeTypes` allows (web parity:
+    // useUploadOptions). Recomputed only when the config or endpoint changes — the translation
+    // compiles the server's regexes.
+    // The text route is validated against `fileConfig.text`, not against this allowlist, so the
+    // picker has to admit what it can extract too — otherwise a narrowed endpoint allowlist makes
+    // routing-to-text unreachable, with no file even pickable to route.
+    val filePickerMimeTypes = remember(
+        uiState.fileUploadConfig,
+        uiState.selectedEndpoint,
+        uiState.isFileContextAvailable,
+        uiState.gates.backendVersion,
+    ) {
+        uiState.fileUploadConfig?.pickerMimeTypes(
+            endpoint = uiState.selectedEndpoint,
+            includeTextRoute = uiState.isFileContextAvailable,
+            serverVersion = uiState.gates.backendVersion,
+        ).orEmpty()
+    }
+    val attachmentActions = rememberChatAttachmentActions(
+        onFilesSelected = viewModel::onFilesSelected,
+        filePickerMimeTypes = filePickerMimeTypes,
+    )
 
     ChatScreenEffects(
         uiState = uiState,
@@ -213,6 +243,8 @@ actual fun ChatScreen(
         onOpenMedia = viewModel::openMedia,
         onCloseMedia = viewModel::closeMedia,
         onDownloadAttachment = viewModel::downloadFileBytes,
+        promptLibraryRevision = promptLibraryRevision,
+        onRefreshPrompts = viewModel::refreshPromptsIfStale,
     ) {
     Scaffold(
         modifier = modifier
@@ -426,7 +458,16 @@ actual fun ChatScreen(
             )
 
             Column(
-                modifier = Modifier.fillMaxSize(),
+                // "Add to chat" on the selection toolbar (v0.8.7 quotes), contributed from above
+                // every message's SelectionContainer — which is where foundation collects a
+                // menu's components from. Gated: a pre-0.8.7 server ignores the request field and
+                // would silently drop the excerpts.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .addToChatSelectionItem(
+                        enabled = uiState.quoteCaptureAvailable,
+                        onAddToChat = viewModel::addPendingQuote,
+                    ),
             ) {
                 ChatContent(
                     listPullUpModifier = pullUpListModifier,
@@ -464,6 +505,15 @@ actual fun ChatScreen(
                 },
                 onStop = viewModel::stopGeneration,
                 onOpenTools = { optionsController.open() },
+                // The mid-stream send button: the ViewModel resolves steer-vs-queue from the
+                // user's preference and what this run can actually take, so the composer never
+                // has to. `onQueue` stays the picker's explicit "add to queue".
+                onDuringRunSend = {
+                    viewModel.sendDuringRun()
+                    if (dismissKeyboardOnSend) {
+                        keyboardController?.hide()
+                    }
+                },
                 onQueue = {
                     viewModel.queueMessage()
                     if (dismissKeyboardOnSend) {
@@ -471,10 +521,25 @@ actual fun ChatScreen(
                     }
                 },
                 canQueue = uiState.canQueueFollowUp,
+                // Explicit "steer this one", from the during-run picker or the send button when
+                // steering is the standing default.
+                onSteer = {
+                    viewModel.steerMessage()
+                    if (dismissKeyboardOnSend) {
+                        keyboardController?.hide()
+                    }
+                },
+                canSteer = uiState.canSteerNow,
+                duringRunAction = uiState.effectiveDuringRunAction,
+                duringRunSendTarget = uiState.duringRunSendTarget,
+                pendingSteers = uiState.pendingSteers,
+                pendingQuotes = uiState.pendingQuotes,
+                onRemoveQuote = viewModel::removePendingQuote,
+                onCancelSteer = viewModel::cancelSteer,
+                onSetDuringRunAction = viewModel::setDuringRunAction,
                 attachedFiles = attachedFiles,
                 onRemoveFile = viewModel::removeFile,
                 promptSuggestions = uiState.availablePrompts,
-                onPromptSelected = viewModel::handlePromptMention,
                 onSlashCommandSelected = viewModel::handleSlashCommand,
                 isRecording = uiState.isRecording,
                 isTranscribing = uiState.isTranscribing,
@@ -499,6 +564,7 @@ actual fun ChatScreen(
                 onCommitEdit = viewModel::commitQueuedEdit,
                 onCancelEdit = viewModel::cancelQueuedEdit,
                 isAwaitingUploadSend = uiState.isAwaitingUploadSend,
+                arePicksUnsettled = uiState.arePicksUnsettled,
                 onCancelPendingSend = viewModel::cancelPendingUploadSend,
                 queuedMessages = uiState.messageQueue,
                 onEditQueuedMessage = viewModel::editQueued,
@@ -529,7 +595,8 @@ actual fun ChatScreen(
             if (uiState.cacheTtlEnabled) {
                 CacheTtlRail(
                     anchor = uiState.cacheTtlAnchor,
-                    armed = uiState.armedCacheTtl,
+                    armed = uiState.armedCacheTtl.takeIf { uiState.extendedCacheTtlEnabled },
+                    enabled = uiState.extendedCacheTtlEnabled,
                     onClick = viewModel::toggleCacheTtlArm,
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -647,6 +714,7 @@ actual fun ChatScreen(
                         urlContextEnabled = uiState.urlContextProviderGate,
                         runCodeEnabled = uiState.runCodeEnabled,
                         fileSearchEnabled = uiState.fileSearchEnabled,
+                        memoryEnabled = uiState.isMemoryToolAvailable,
                         mcpServersEnabled = uiState.mcpServersEnabled,
                         gates = uiState.chatInputGates,
                         contextUsage = uiState.contextUsage,
@@ -659,6 +727,23 @@ actual fun ChatScreen(
                         onMcpExpandedChange = { pullUpMcpExpanded = it },
                     )
                 }
+            }
+
+            // Manual attachment routing. The pick can come from the pull-up surface, which stays
+            // revealed and drag-responsive underneath — retract it before the sheet shows, or the
+            // two surfaces fight for the same gestures.
+            val pendingRouting = uiState.composer.pendingUploadRouting
+            LaunchedEffect(pendingRouting != null) {
+                if (pendingRouting != null) pullUpState.animateTo(PullUpAnchor.Hidden)
+            }
+            if (pendingRouting != null) {
+                UploadRoutingSheet(
+                    files = pendingRouting.files,
+                    onRouteChange = viewModel::setPendingUploadRoute,
+                    onApplyToAll = viewModel::setAllPendingUploadRoutes,
+                    onConfirm = viewModel::confirmPendingUploadRouting,
+                    onDismiss = viewModel::cancelPendingUploadRouting,
+                )
             }
         }
     }
@@ -689,5 +774,16 @@ actual fun ChatScreen(
         onSetShowSecondaryModelSheet = { showSecondaryModelSheet = it },
         onNavigateToProviderKeys = onNavigateToProviderKeys,
     )
+
+    LaunchedEffect(Unit) { viewModel.consumePendingPromptInsertion() }
+
+    uiState.pendingVariablePrompt?.let { pending ->
+        VariableInputDialog(
+            promptTemplate = pending.template,
+            variables = pending.variables,
+            onInsert = viewModel::confirmVariablePrompt,
+            onDismiss = viewModel::dismissVariablePrompt,
+        )
+    }
     }
 }

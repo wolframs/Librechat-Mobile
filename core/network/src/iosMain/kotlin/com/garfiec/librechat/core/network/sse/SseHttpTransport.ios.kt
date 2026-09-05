@@ -1,11 +1,15 @@
 package com.garfiec.librechat.core.network.sse
 
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.result.AccessGatewayException
+import com.garfiec.librechat.core.network.client.AccessGatewaySignal
 import com.garfiec.librechat.core.network.client.BearerResult
 import com.garfiec.librechat.core.network.client.LibreChatHttpClient
 import com.garfiec.librechat.core.network.client.SwitchGate
 import com.garfiec.librechat.core.network.client.TokenManager
+import com.garfiec.librechat.core.network.client.customHeaderLines
 import com.garfiec.librechat.core.network.client.refreshBearerFor
+import com.garfiec.librechat.core.network.sse.nwparams.librechat_make_default_tls_tcp_parameters
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
@@ -38,13 +42,12 @@ import platform.Network.nw_connection_state_t
 import platform.Network.nw_connection_t
 import platform.Network.nw_content_context_t
 import platform.Network.nw_endpoint_create_host
-import platform.Network.nw_error_get_error_code
-import platform.Network.nw_error_get_error_domain
 import platform.Network.nw_error_domain_posix
 import platform.Network.nw_error_domain_tls
+import platform.Network.nw_error_get_error_code
+import platform.Network.nw_error_get_error_domain
 import platform.Network.nw_error_t
 import platform.Network.nw_parameters_t
-import com.garfiec.librechat.core.network.sse.nwparams.librechat_make_default_tls_tcp_parameters
 import platform.darwin.dispatch_data_create
 import platform.darwin.dispatch_data_create_map
 import platform.darwin.dispatch_data_get_size
@@ -105,12 +108,12 @@ actual class SseHttpTransport(
         // is the SwitchBarrierPlugin equivalent for the NWConnection path (which can't use Ktor
         // plugins): a switch mid-stream can't tear the URL and token apart — the stream keeps running
         // against the account and server it started on, whose tokens are retained.
-        val snapshot = switchGate.captureSnapshot()
+        val snapshot = switchGate.captureSnapshot(renewIfStale = true)
         var token = snapshot.bearer
         var triedRefresh = false
         while (true) {
             try {
-                emitAll(openConnection(streamPath, resume, snapshot.baseUrl, token))
+                emitAll(openConnection(streamPath, resume, snapshot.baseUrl, token, snapshot.customHeaders))
                 return@flow
             } catch (e: SseHttpStatusException) {
                 if (e.statusCode == 401 && !triedRefresh) {
@@ -148,6 +151,7 @@ actual class SseHttpTransport(
         resume: Boolean,
         snapshotBaseUrl: String,
         bearerToken: String?,
+        customHeaders: Map<String, String>,
     ): Flow<ByteArray> = callbackFlow {
         // Normalize base URL + stream path so there's exactly one slash between
         // them. The base URL comes from the snapshot captured before this connection
@@ -270,6 +274,14 @@ actual class SseHttpTransport(
                         for (event in events) {
                             when (event) {
                                 is HttpResponseParser.ParseEvent.HeadersComplete -> {
+                                    // Must stay above the status check: a rejection is a non-2xx, so
+                                    // below it the challenge is lost and it becomes a bare 302 that
+                                    // SseClient retries five times before blaming the network.
+                                    // Parser headers are lower-cased.
+                                    if (AccessGatewaySignal.isGatewayChallenge(event.headers["www-authenticate"])) {
+                                        handleError(AccessGatewayException())
+                                        return@nw_connection_receive
+                                    }
                                     if (event.statusCode !in SUCCESS_LOW..SUCCESS_HIGH) {
                                         handleError(SseHttpStatusException(event.statusCode))
                                         return@nw_connection_receive
@@ -310,6 +322,7 @@ actual class SseHttpTransport(
                         path = requestPath,
                         host = host,
                         bearerToken = bearerToken,
+                        customHeaders = customHeaders,
                     )
                     val requestBytes = request.encodeToByteArray()
                     val dispatchData = byteArrayToDispatchData(requestBytes, queue)
@@ -373,6 +386,7 @@ actual class SseHttpTransport(
         path: String,
         host: String,
         bearerToken: String?,
+        customHeaders: Map<String, String>,
     ): String = buildString {
         append("GET ").append(path).append(" HTTP/1.1\r\n")
         append("Host: ").append(host).append("\r\n")
@@ -383,6 +397,12 @@ actual class SseHttpTransport(
         append("User-Agent: ").append(LibreChatHttpClient.BROWSER_USER_AGENT).append("\r\n")
         append("Accept-Encoding: identity\r\n")
         append("Connection: close\r\n")
+        // The user's gateway headers (issue #287). No host-scoping check is needed here the way the
+        // Ktor plugin needs one: this connection is dialled at the snapshot's own base URL and never
+        // follows a redirect, so it cannot arrive anywhere but the server the headers belong to.
+        // Sanitised again inside customHeaderLines — the names reserved there are exactly the ones
+        // hand-written above, so a user value can never emit a second, ambiguous copy of one.
+        append(customHeaderLines(customHeaders))
         append("\r\n")
     }
 

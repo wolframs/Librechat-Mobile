@@ -1,5 +1,6 @@
 package com.garfiec.librechat.shared
 
+import com.garfiec.librechat.core.data.prefetch.PrefetchScheduler
 import com.garfiec.librechat.core.network.api.AgentToolsApi
 import com.garfiec.librechat.core.network.api.PermissionsApi
 import com.garfiec.librechat.core.network.api.SkillsApi
@@ -45,6 +46,7 @@ class IosKoinGraphTest {
             PermissionsApi::class,
             SkillsApi::class,
             SseClient::class,
+            PrefetchScheduler::class,
         ).forEach { c ->
             // hasType (not primaryType ==) so a future `singleOf(::Impl) bind Interface`
             // still matches on its secondary type.

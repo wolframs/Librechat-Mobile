@@ -5,6 +5,7 @@ import androidx.navigation3.runtime.NavKey
 import com.garfiec.librechat.feature.auth.navigation.AuthRoute
 import com.garfiec.librechat.feature.auth.navigation.Login
 import com.garfiec.librechat.feature.auth.navigation.ServerUrl
+import com.garfiec.librechat.feature.auth.navigation.isAddAccountFlowRoute
 import com.garfiec.librechat.feature.chat.navigation.Chat
 import com.garfiec.librechat.feature.chat.navigation.NewChat
 import com.garfiec.librechat.feature.settings.navigation.ProviderKeys
@@ -69,10 +70,18 @@ class Navigator(val backStack: NavBackStack<NavKey>) {
     }
 
     /**
-     * Clear the back stack and establish the logged-out flow. A remembered server skips directly
-     * to login while keeping the server picker underneath it as the Back / change-server target.
+     * Clear back stack and navigate to auth (session expiry / logout).
+     *
+     * No-ops when already in the auth flow, matching the dedupe its siblings above do. A dead session
+     * is reported by more than one caller (a cold start fans out several requests and each 401 settles
+     * independently), and a straggler landing after the user has moved on to Login/Register/2FA would
+     * otherwise reset them to [ServerUrl] and discard what they had typed.
      */
     fun navigateToAuth(hasServerUrl: Boolean = false) {
+        // An add-account flow is not "already at the destination": it belongs to the session that
+        // just ended, and the nav host cancels the pending add by watching those routes leave the
+        // stack — so skipping the reset there would strand the flow with a dead parent session.
+        if (isInAuthFlow && backStack.none { it.isAddAccountFlowRoute }) return
         backStack.clear()
         backStack.add(ServerUrl)
         if (hasServerUrl) backStack.add(Login)

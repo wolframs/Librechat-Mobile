@@ -19,6 +19,17 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE messageId = :messageId AND accountId = :accountId")
     suspend fun getByIdForAccount(messageId: String, accountId: String): MessageEntity?
 
+    /**
+     * Size of the cached-message store, for the prefetch status readout.
+     *
+     * One-shot rather than observed on purpose. There is no index on `accountId`, so this is a full
+     * table scan, and Room re-fires an observed query on every write to `messages` — which on the
+     * activity screen means a scan after each conversation a pass warms, on the one screen designed
+     * to be watched while a pass runs. Read on demand instead.
+     */
+    @Query("SELECT COUNT(*) FROM messages WHERE accountId = :accountId")
+    suspend fun countForAccount(accountId: String): Int
+
     @Query(
         "SELECT * FROM messages WHERE conversationId = :conversationId AND parentMessageId = :parentMessageId " +
             "AND accountId = :accountId ORDER BY createdAt ASC",
@@ -57,4 +68,12 @@ interface MessageDao {
     // Logout / account-remove scoped purge (the leak fix): delete only this account's rows.
     @Query("DELETE FROM messages WHERE accountId = :accountId")
     suspend fun deleteAllForAccount(accountId: String)
+
+    /**
+     * Prune: drops cached messages for conversations the prefetcher no longer keeps warm. The
+     * conversation rows themselves stay, so the list remains complete and reopening one simply
+     * re-fetches. Chunk the ids — SQLite binds at most ~999 variables per statement.
+     */
+    @Query("DELETE FROM messages WHERE accountId = :accountId AND conversationId IN (:conversationIds)")
+    suspend fun deleteForConversations(accountId: String, conversationIds: List<String>)
 }

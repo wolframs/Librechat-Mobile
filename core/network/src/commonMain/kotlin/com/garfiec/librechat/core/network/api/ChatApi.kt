@@ -2,9 +2,15 @@ package com.garfiec.librechat.core.network.api
 
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.model.request.ChatAbortRequest
+import com.garfiec.librechat.core.model.request.ChatResumeRequest
+import com.garfiec.librechat.core.model.request.SteerCancelRequest
+import com.garfiec.librechat.core.model.request.SteerRequest
 import com.garfiec.librechat.core.model.response.ChatAbortResponse
+import com.garfiec.librechat.core.model.response.ChatResumeResponse
 import com.garfiec.librechat.core.model.response.ChatStartResponse
 import com.garfiec.librechat.core.model.response.ChatStatusResponse
+import com.garfiec.librechat.core.model.response.SteerCancelResponse
+import com.garfiec.librechat.core.model.response.SteerResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.call.NoTransformationFoundException
 import io.ktor.client.call.body
@@ -65,25 +71,93 @@ class ChatApi constructor(
      * client is already collecting, so callers must keep that stream open and let the turn
      * finalize through the normal event flow.
      *
-     * A null [streamId] is sent as an empty abort key, which resolves no job server-side and
-     * falls through to the route's user-scoped fallback: it aborts the caller's most recent
-     * active job. That is what makes Stop work before the `created` event has assigned a
-     * conversation id.
+     * A null [streamId] is sent as `conversationId = "new"` — the placeholder that unlocks the
+     * route's user-scoped fallback, which aborts one of the caller's active jobs. That is what
+     * makes Stop work before the `created` event has assigned a conversation id.
+     *
+     * It must NOT be sent as an empty `abortKey` — see [ChatAbortRequest.abortKey]. `"new"` is
+     * equally correct against older servers: they skipped it when choosing a job id and then took
+     * the same fallback unconditionally.
      */
     suspend fun abortChat(streamId: String?, isTemporary: Boolean): ChatAbortResponse =
         client.post {
             url { path("api/agents/chat/abort") }
             setBody(
                 ChatAbortRequest(
-                    abortKey = streamId.orEmpty(),
+                    abortKey = streamId?.takeIf { it.isNotEmpty() },
+                    conversationId = streamId?.takeIf { it.isNotEmpty() } ?: NEW_CONVERSATION_PLACEHOLDER,
                     endpoint = "agents",
                     isTemporary = isTemporary,
                 ),
             )
         }.body()
 
+    /**
+     * POST /api/agents/chat/resume — resolves a run paused for human review (v0.8.8 HITL).
+     *
+     * Like [abortChat] this only acks: the resumed turn continues over the SSE stream already
+     * open for the conversation, so callers must keep collecting it rather than opening a new one.
+     *
+     * The body replays the paused turn's agent selection because the route re-derives the
+     * endpoint option and compares it against the fingerprint pinned at pause time — see
+     * [ChatResumeRequest]. Failure modes worth distinguishing upstream: 409 (stale actionId or the
+     * pause already resolved/expired), 403 (a different agent/config than the one that paused).
+     */
+    suspend fun resumeChat(request: ChatResumeRequest): ChatResumeResponse =
+        client.post {
+            url { path("api/agents/chat/resume") }
+            setBody(request)
+        }.body()
+
+    /**
+     * POST /api/agents/chat/steer — queues instruction text for injection into the live run
+     * (v0.8.8 mid-run steering).
+     *
+     * Accepted is 202 *queued*, not applied: the run injects at its next tool-batch boundary and
+     * announces it with `on_steer_applied` over the SSE stream the caller already holds.
+     *
+     * Every rejection carries a `code` (404 `NO_ACTIVE_RUN`, 409/429/501 for a run that is alive
+     * but unreachable). The caller re-homes the text into the follow-up queue regardless of which
+     * one it is, so the codes are diagnostic rather than a branch point. All surface as an
+     * `ApiException` whose `body` carries the code; nothing here interprets them.
+     */
+    suspend fun steerChat(request: SteerRequest): SteerResponse =
+        client.post {
+            url { path("api/agents/chat/steer") }
+            setBody(request)
+        }.body()
+
+    /**
+     * POST /api/agents/chat/steer/cancel — withdraws a steer that has not been injected yet.
+     *
+     * `{removed:false}` is a success, not a failure: the cancel simply lost its race.
+     */
+    suspend fun cancelSteer(request: SteerCancelRequest): SteerCancelResponse =
+        client.post {
+            url { path("api/agents/chat/steer/cancel") }
+            setBody(request)
+        }.body()
+
+    /**
+     * GET /api/agents/chat/status/:conversationId — is a run still alive for this conversation?
+     *
+     * Can answer **503 `SERVER_NOT_READY` with `Retry-After: 1`**, and does so regardless of the
+     * negotiated generation protocol. That is a transient race — the route re-reads the job up to
+     * three times to check the resume snapshot belongs to the same generation epoch, and reports
+     * not-ready while that has not settled or while the terminal owner is still persisting. It is
+     * NOT evidence the run ended, so a caller must retry it a bounded number of times before
+     * concluding anything; `ChatRepository.checkStreamStatus` owns that loop.
+     */
     suspend fun getChatStatus(conversationId: String): ChatStatusResponse =
         client.get {
             url { path("api/agents/chat/status/$conversationId") }
         }.body()
+
+    companion object {
+        /**
+         * The literal the generation routes accept in place of a conversation id that does not
+         * exist yet. Not a sentinel this app invented — the server matches on this exact string.
+         */
+        const val NEW_CONVERSATION_PLACEHOLDER = "new"
+    }
 }

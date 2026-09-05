@@ -16,6 +16,7 @@ import com.garfiec.librechat.core.network.api.FavoritesApi
 import com.garfiec.librechat.core.network.api.FilesApi
 import com.garfiec.librechat.core.network.api.FilesExtApi
 import com.garfiec.librechat.core.network.api.KeysApi
+import com.garfiec.librechat.core.network.api.MarketApi
 import com.garfiec.librechat.core.network.api.McpApi
 import com.garfiec.librechat.core.network.api.MemoriesApi
 import com.garfiec.librechat.core.network.api.MessagesApi
@@ -30,7 +31,10 @@ import com.garfiec.librechat.core.network.api.SpeechApi
 import com.garfiec.librechat.core.network.api.TagsApi
 import com.garfiec.librechat.core.network.api.UserApi
 import com.garfiec.librechat.core.network.client.AuthInterceptorPlugin
+import com.garfiec.librechat.core.network.client.GatewayDetectionPlugin
 import com.garfiec.librechat.core.network.client.LibreChatHttpClient
+import com.garfiec.librechat.core.network.client.ServerHeadersPlugin
+import com.garfiec.librechat.core.network.client.ServerHeadersProvider
 import com.garfiec.librechat.core.network.client.ServerUrlProvider
 import com.garfiec.librechat.core.network.client.ServerUrlReadyPlugin
 import com.garfiec.librechat.core.network.client.SwitchBarrierPlugin
@@ -79,6 +83,7 @@ val networkModule = module {
             serverUrlProvider = get(),
             tokenManager = get(),
             accountReadyGate = getOrNull(),
+            serverHeadersProvider = get(),
         )
     }
 
@@ -91,6 +96,8 @@ val networkModule = module {
             redactor = get(),
             accountReadyGate = getOrNull(),
             switchGate = get(),
+            serverHeadersProvider = get(),
+            requestActivityTracker = get(),
         )
     }
 
@@ -99,11 +106,19 @@ val networkModule = module {
         val serverUrlProvider = get<ServerUrlProvider>()
         val engineFactory = get<HttpClientEngineFactory<*>>()
         val switchGate = get<SwitchGate>()
+        val serverHeadersProvider = get<ServerHeadersProvider>()
         HttpClient(engineFactory) {
             install(AuthInterceptorPlugin) {
                 this.tokenManager = tokenManager
                 this.serverUrlProvider = serverUrlProvider
             }
+            install(ServerHeadersPlugin) {
+                this.serverHeadersProvider = serverHeadersProvider
+                this.serverUrlProvider = serverUrlProvider
+            }
+            // No HttpResponseValidator here, so without this the gateway's 302→200 sign-in page
+            // reaches the SSE parser as a valid response and the chat hangs with no error.
+            install(GatewayDetectionPlugin)
             install(SwitchBarrierPlugin) {
                 this.switchGate = switchGate
             }
@@ -122,11 +137,28 @@ val networkModule = module {
         val json = get<Json>()
         val serverUrlProvider = get<ServerUrlProvider>()
         val engineFactory = get<HttpClientEngineFactory<*>>()
+        val serverHeadersProvider = get<ServerHeadersProvider>()
         HttpClient(engineFactory) {
             install(ContentNegotiation) { json(json) }
             install(ServerUrlReadyPlugin) {
                 this.serverUrlProvider = serverUrlProvider
             }
+            // `/api/auth/refresh` is gated by the access gateway like every other route, and this
+            // client has neither a SwitchBarrier snapshot nor an AuthInterceptor to hang an append on.
+            // Without this the session dies at the first refresh: refresh is a POST, which Ktor does
+            // not redirect, so the gateway's bare 302 falls to `performRefresh`'s catch-all arm and
+            // classifies as Retryable — it never routes to re-auth and never recovers, it just
+            // silently stops working.
+            //
+            // ServerUrlReadyPlugin could not host this: it intercepts before HttpRequestPipeline.Before,
+            // where `context.url.host` is still empty and no host-scoping is possible.
+            install(ServerHeadersPlugin) {
+                this.serverHeadersProvider = serverHeadersProvider
+                this.serverUrlProvider = serverUrlProvider
+            }
+            // Detection reads the challenge off that 302 directly, so it does not depend on the
+            // redirect being followed — which on a POST it is not. See RefreshAttempt.GatewayBlocked.
+            install(GatewayDetectionPlugin)
             install(HttpTimeout) {
                 requestTimeoutMillis = 15_000
                 connectTimeoutMillis = 10_000
@@ -144,13 +176,21 @@ val networkModule = module {
     // SSE — SseHttpTransport is provided by networkPlatformModule because its
     // constructor signature differs between Android (takes the Ktor streaming
     // HttpClient) and iOS (takes NWConnection dependencies in Phase 2).
-    single { SseClient(json = get(), transport = get(), activeAccountProvider = get()) }
+    single {
+        SseClient(
+            json = get(),
+            transport = get(),
+            activeAccountProvider = get(),
+            requestActivityTracker = get(),
+        )
+    }
 
     // API services
     singleOf(::AgentsApi)
     singleOf(::AgentToolsApi)
     singleOf(::ApiKeysApi)
     singleOf(::AuthApi)
+    singleOf(::MarketApi)
     singleOf(::BalanceApi)
     singleOf(::BannerApi)
     singleOf(::ChatApi)

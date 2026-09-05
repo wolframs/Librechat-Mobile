@@ -3,6 +3,10 @@ package com.garfiec.librechat.core.network.sse
 import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.identity.currentAccountId
+import com.garfiec.librechat.core.common.network.RequestActivityTracker
+import com.garfiec.librechat.core.common.result.AccessGatewayException
+import com.garfiec.librechat.core.common.result.FailureKind
+import com.garfiec.librechat.core.common.result.message
 import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.logging.LogOrigin
 import com.garfiec.librechat.core.model.StreamEvent
@@ -15,6 +19,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlin.math.min
@@ -23,6 +29,7 @@ class SseClient(
     private val json: Json,
     private val transport: SseHttpTransport,
     private val activeAccountProvider: ActiveAccountProvider? = null,
+    private val requestActivityTracker: RequestActivityTracker? = null,
 ) {
     private val mapper = SseEventMapper(json)
     private val lineParser = SseLineParser()
@@ -146,16 +153,31 @@ class SseClient(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Diag.w(
-                    "SSE",
-                    origin = LogOrigin.NETWORK,
-                    throwable = e,
-                    attrs = mapOf("attempt" to attempt.toString()),
-                ) { "SSE connection error" }
-                attempt++
-                if (attempt > maxRetries) {
-                    emit(StreamEvent.Error(message = "Connection failed. Please try again."))
+                // Cause chain, never a type-exact `catch`: the transport reports by cancelling the
+                // byte channel, which Ktor re-throws wrapped, and which form arrives is a race.
+                val gateway = e.accessGatewayCause()
+                if (gateway != null) {
+                    Diag.w(
+                        "SSE",
+                        origin = LogOrigin.NETWORK,
+                        throwable = gateway,
+                        attrs = mapOf("attempt" to attempt.toString()),
+                    ) { "SSE blocked by access gateway" }
+                    // Terminal — every remaining attempt would be rejected by the same gateway.
+                    emit(StreamEvent.Error(message = FailureKind.AccessGateway.message()))
                     done = true
+                } else {
+                    Diag.w(
+                        "SSE",
+                        origin = LogOrigin.NETWORK,
+                        throwable = e,
+                        attrs = mapOf("attempt" to attempt.toString()),
+                    ) { "SSE connection error" }
+                    attempt++
+                    if (attempt > maxRetries) {
+                        emit(StreamEvent.Error(message = "Connection failed. Please try again."))
+                        done = true
+                    }
                 }
             }
 
@@ -193,4 +215,28 @@ class SseClient(
             emit(StreamEvent.Error(message = "Unexpected error: ${e.message}"))
         }
     }
+        // A stream counts as in-flight for its whole duration, not just its GET. Reported here
+        // rather than from RequestActivityPlugin because iOS streams over a custom NWConnection
+        // transport no Ktor plugin can observe. Must stay tied to collection, and the release must
+        // stay on onCompletion — it covers cancellation too, and a stranded count leaves the app
+        // looking permanently busy so background work never runs again this process.
+        .onStart { requestActivityTracker?.begin() }
+        .onCompletion { requestActivityTracker?.end() }
 }
+
+/**
+ * The [AccessGatewayException] at or beneath this throwable, or null. The failure reaches the stream
+ * loop either raw or wrapped by whatever cancelled the byte channel — see the call site. Bounded, so
+ * a looping cause chain cannot spin here.
+ */
+private fun Throwable.accessGatewayCause(): AccessGatewayException? {
+    var current: Throwable? = this
+    repeat(CAUSE_TRAVERSAL_LIMIT) {
+        val error = current ?: return null
+        if (error is AccessGatewayException) return error
+        current = error.cause?.takeIf { it !== error }
+    }
+    return null
+}
+
+private const val CAUSE_TRAVERSAL_LIMIT = 8

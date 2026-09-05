@@ -8,12 +8,15 @@ import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
 import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
+import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
 import com.garfiec.librechat.core.data.datastore.ThemeDataStore
 import com.garfiec.librechat.core.data.datastore.ThemeMode
+import com.garfiec.librechat.core.data.datastore.UploadRoutingMode
+import com.garfiec.librechat.core.data.prefetch.PrefetchDepth
 import com.garfiec.librechat.core.model.Memory
 import com.garfiec.librechat.core.model.User
 import com.garfiec.librechat.core.model.config.BuildInfo
@@ -24,26 +27,11 @@ import com.garfiec.librechat.feature.settings.model.SharedLinkDisplayData
 import com.garfiec.librechat.feature.settings.model.UserDisplayData
 import com.garfiec.librechat.feature.settings.screen.DeviceVoiceInfo
 
-data class SettingsCommand(
-    val name: String,
-    val description: String,
-    val enabled: Boolean = true,
-)
-
 /** One-shot diagnostic-log export payload handed from the ViewModel to the platform file saver. */
 @Immutable
 data class LogsExportPayload(
     val content: String,
     val fileName: String,
-)
-
-val DEFAULT_COMMANDS = listOf(
-    SettingsCommand("help", "Show available commands", true),
-    SettingsCommand("clear", "Clear current conversation", true),
-    SettingsCommand("new", "Start a new conversation", true),
-    SettingsCommand("model", "Switch the current model", true),
-    SettingsCommand("system", "Set a system message", true),
-    SettingsCommand("fork", "Fork the current conversation", true),
 )
 
 @Immutable
@@ -105,6 +93,19 @@ data class SettingsUiState(
     val autoScrollEnabled: Boolean = true,
     val showThinkingBlocks: Boolean = true,
     val contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,
+    /** What the composer's send does mid-run (v0.8.8 steering): inject into the running reply,
+     *  or queue for after it. Honoured only where the server supports steering. */
+    val duringRunAction: DuringRunAction = DuringRunAction.QUEUE,
+    val prefetchEnabled: Boolean = false,
+    val prefetchAttachmentsEnabled: Boolean = false,
+    val prefetchOnMeteredEnabled: Boolean = false,
+    val prefetchDepth: Int = PrefetchDepth.DEFAULT,
+    /** Whether this platform has an image cache worth warming; false hides the toggle. */
+    val prefetchAttachmentsSupported: Boolean = false,
+    /** Cached images and files, in bytes; null until read. Excludes the database — see
+     *  [com.garfiec.librechat.feature.settings.util.PlatformCacheCleaner.cacheSizeBytes]. */
+    val cacheSizeBytes: Long? = null,
+    val uploadRoutingMode: UploadRoutingMode = UploadRoutingMode.AUTO,
     val showImageDescriptions: Boolean = false,
     val dismissKeyboardOnSend: Boolean = false,
     // Data management
@@ -194,8 +195,6 @@ data class SettingsUiState(
     val forkMode: String = "targetLevel",
     val showForkSettingsDialog: Boolean = false,
     // Commands
-    val showCommandsScreen: Boolean = false,
-    val commands: List<SettingsCommand> = DEFAULT_COMMANDS,
     // Personalization
     val showPersonalizationDialog: Boolean = false,
     val personalizationEnabled: Boolean = true,
@@ -225,6 +224,27 @@ data class SettingsUiState(
     val serverMemoriesEnabled: Boolean = true,
     val remoteAgentsEnabled: Boolean = true,
     val remoteAgentsCreateEnabled: Boolean = true,
+    /**
+     * SHARED_LINKS/CREATE, which `PATCH /api/share/:shareId` now requires — updating a link
+     * re-publishes the conversation, so revoking CREATE stops updates as well as creates.
+     * Scoped to the update action only: DELETE is deliberately ungated server-side, so a role
+     * that may no longer re-publish may still revoke.
+     */
+    val sharedLinksUpdateEnabled: Boolean = true,
+    /**
+     * Whether re-publishing keeps the link's id. v0.8.8-rc1's `updateSharedLink` writes no new
+     * `shareId`; every earlier server mints one with `nanoid()` and orphans the URL already handed
+     * out. Only the confirmation copy depends on this — the action itself is useful either way —
+     * and it is fail-safe FALSE on an unresolved version, so an unknown server warns rather than
+     * promising a guarantee it may not honour.
+     */
+    val sharedLinkUpdateKeepsUrl: Boolean = false,
+    /**
+     * The last MCP server save was refused with `OAUTH_SECRET_REENTRY_REQUIRED` — the stored
+     * client secret was bound to the OAuth endpoints it was issued for and one of them changed,
+     * so the write keeps failing until the secret is supplied again.
+     */
+    val mcpOAuthSecretReentryRequired: Boolean = false,
 )
 
 internal fun User.toDisplayData() = UserDisplayData(

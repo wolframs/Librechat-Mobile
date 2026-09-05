@@ -27,8 +27,10 @@ import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
 import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
+import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
+import com.garfiec.librechat.core.data.datastore.UploadRoutingMode
 import com.garfiec.librechat.feature.settings.resources.*
 import com.garfiec.librechat.feature.settings.resources.Res
 import org.jetbrains.compose.resources.stringResource
@@ -40,6 +42,8 @@ internal fun ChatSettingsSection(
     autoScrollEnabled: Boolean,
     showThinkingBlocks: Boolean,
     contextBarPlacement: ContextBarPlacement,
+    duringRunAction: DuringRunAction,
+    uploadRoutingMode: UploadRoutingMode,
     showImageDescriptions: Boolean,
     dismissKeyboardOnSend: Boolean,
     chatLayoutStyle: String,
@@ -159,6 +163,18 @@ internal fun ChatSettingsSection(
                 )
 
                 SelectorRow(
+                    title = stringResource(Res.string.during_run_action_title),
+                    value = duringRunActionLabel(duringRunAction),
+                    onClick = { onOpenDialog(ChatSettingDialog.DURING_RUN_ACTION) },
+                )
+
+                SelectorRow(
+                    title = stringResource(Res.string.upload_routing_title),
+                    value = uploadRoutingModeLabel(uploadRoutingMode),
+                    onClick = { onOpenDialog(ChatSettingDialog.UPLOAD_ROUTING) },
+                )
+
+                SelectorRow(
                     title = stringResource(Res.string.starred_models_title),
                     value = starredModelsDisplayLabel(starredModelsDisplay),
                     onClick = { onOpenDialog(ChatSettingDialog.STARRED_MODELS) },
@@ -217,12 +233,14 @@ internal fun GroupLabel(text: String) {
     )
 }
 
+/** The module's shared title/description/switch row. */
 @Composable
-private fun ToggleRow(
+internal fun ToggleRow(
     title: String,
     description: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -232,17 +250,27 @@ private fun ToggleRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
+                },
             )
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = if (enabled) 1f else DISABLED_ALPHA,
+                ),
             )
         }
         Spacer(modifier = Modifier.width(16.dp))
         Switch(
             checked = checked,
             onCheckedChange = onChange,
+            enabled = enabled,
         )
     }
 }
+
+private const val DISABLED_ALPHA = 0.38f

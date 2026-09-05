@@ -6,6 +6,7 @@ import com.garfiec.librechat.core.model.request.DeleteFilesRequest
 import com.garfiec.librechat.core.model.response.FileDownloadURLResponse
 import com.garfiec.librechat.core.model.response.FilePreviewResponse
 import com.garfiec.librechat.core.model.response.FileUploadConfig
+import com.garfiec.librechat.core.model.response.uploadMimeType
 import com.garfiec.librechat.core.network.upload.StreamingUploadSource
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -23,8 +24,18 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.path
 import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
+
+/** Server cap per `POST /api/files/usage` call (`FILES_USAGE_MAX_IDS`). */
+const val FILES_USAGE_MAX_IDS: Int = 10
+
+@Serializable
+private data class FilesUsageRequest(
+    @SerialName("file_ids") val fileIds: List<String>,
+)
 
 class FilesApi constructor(
     private val client: HttpClient,
@@ -83,8 +94,14 @@ class FilesApi constructor(
         height: Int? = null,
         onProgress: ((Float) -> Unit)? = null,
     ): FileObject {
-        Logger.d(tag = "FilesApi") {
-            "uploadFile: filename=$filename, type=$type, size=${source.contentLength ?: "unknown"} bytes, fileId=$fileId, " +
+        // The one place the part's Content-Type is written, so the one place a platform spelling
+        // the server has never heard of can be rewritten. Android reports `.sh` as `text/x-sh`,
+        // which upstream lists nowhere and the upload gate answers 415 for; see `uploadMimeType`
+        // for why this is NOT the mirrored alias table.
+        val wireType = uploadMimeType(type) ?: type
+        Logger.d("FilesApi") {
+            val reported = if (wireType != type) " (platform reported $type)" else ""
+            "uploadFile: filename=$filename, type=$wireType$reported, size=${source.contentLength ?: "unknown"} bytes, fileId=$fileId, " +
                 "endpoint=$endpoint, model=$model, agentId=$agentId, messageFile=$messageFile, width=$width, height=$height"
         }
 
@@ -95,7 +112,7 @@ class FilesApi constructor(
                     ChannelProvider(source.contentLength, source.openChannel),
                     Headers.build {
                         append(HttpHeaders.ContentDisposition, "filename=\"${encodeFilename(filename)}\"")
-                        append(HttpHeaders.ContentType, type)
+                        append(HttpHeaders.ContentType, wireType)
                     },
                 )
                 append("file_id", fileId)
@@ -151,10 +168,47 @@ class FilesApi constructor(
         return response
     }
 
+    /**
+     * DELETE /api/files.
+     *
+     * Two shapes, both already satisfied by the callers:
+     * - Owner file manager: send `files` only (no `agent_id`/`tool_resource`) — deletes files the
+     *   user owns.
+     * - Agent-attached unlink: MUST carry `agent_id` and a valid `tool_resource` ∈
+     *   {execute_code, file_search, image_edit, context, ocr}. On the 0.8.8 line (#14149) the route
+     *   400s on a missing/invalid `tool_resource` and dropped the non-owner via-agent fallback.
+     *   `AgentFilesDelegate` routes deletes with the file's origin resource (or the slot's wire
+     *   value), all of which are in the allowed set, so this stays compliant.
+     */
     suspend fun deleteFiles(request: DeleteFilesRequest) {
         client.delete {
             url { path("api/files") }
             setBody(request)
+        }
+    }
+
+    /**
+     * Pushes back the upload-window TTL on [fileIds] (v0.8.8 line, #14220).
+     *
+     * An uploaded file is reaped if nothing claims it inside the upload window, and a message
+     * sitting in the client's follow-up queue can easily outlive that window — a long run, a
+     * human-review pause. Marking at queue time keeps the attachment alive until the drain
+     * actually sends it; send-time marking stays the backstop.
+     *
+     * Owner-scoped and best-effort: ids that do not resolve to a file this user owns are not an
+     * error. Server caps a single call at [FILES_USAGE_MAX_IDS]; longer lists 400 with
+     * `TOO_MANY_FILES`.
+     *
+     * The upload rate limiters exempt this path only on the 0.8.8 line that introduced it — on
+     * older servers every POST under `/api/files` except `/speech` is limited, so a call there
+     * spends upload quota on a 404. Callers must therefore version-gate; `FileRepositoryImpl`
+     * owns that gate.
+     */
+    suspend fun markFilesUsed(fileIds: List<String>) {
+        if (fileIds.isEmpty()) return
+        client.post {
+            url { path("api/files/usage") }
+            setBody(FilesUsageRequest(fileIds))
         }
     }
 

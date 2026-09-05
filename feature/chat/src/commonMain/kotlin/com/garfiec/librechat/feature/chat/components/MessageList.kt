@@ -6,6 +6,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -35,8 +36,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -48,17 +51,22 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.common.ChatLayoutConstants
 import com.garfiec.librechat.core.model.Attachment
-import com.garfiec.librechat.core.model.FeedbackRating
+import com.garfiec.librechat.core.model.MinimalFeedback
+import com.garfiec.librechat.core.model.PendingAction
+import com.garfiec.librechat.core.model.request.ToolApprovalResolution
 import com.garfiec.librechat.core.ui.theme.isSurfaceDark
 import com.garfiec.librechat.feature.chat.components.artifact.ArtifactType
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
+import com.garfiec.librechat.feature.chat.util.AskAnswerDraft
 import com.garfiec.librechat.feature.chat.util.MessageNode
 import com.garfiec.librechat.feature.chat.viewmodel.ActiveToolCall
 import com.garfiec.librechat.feature.chat.viewmodel.SearchFocusRequest
 import com.garfiec.librechat.feature.chat.viewmodel.SearchMatch
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
@@ -77,7 +85,14 @@ fun MessageList(
     modifier: Modifier = Modifier,
     activeToolCalls: List<ActiveToolCall> = emptyList(),
     streamingAttachments: List<Attachment> = emptyList(),
-    onFeedback: (messageId: String, rating: String?) -> Unit = { _, _ -> },
+    onFeedback: (messageId: String, feedback: MinimalFeedback?) -> Unit = { _, _ -> },
+    /**
+     * The response that just took over from the streaming bubble, from `ChatUiState`. Read from
+     * state rather than derived here from `isStreaming`: a UI-side derivation can only run in an
+     * effect, which commits AFTER the composition that first renders the finalized message — by
+     * then its activity groups have already chosen to collapse and nothing re-opens them.
+     */
+    justSettledMessageId: String? = null,
     onContinue: (messageId: String) -> Unit = {},
     onReadAloud: (messageId: String) -> Unit = {},
     onFork: (messageId: String) -> Unit = {},
@@ -117,28 +132,69 @@ fun MessageList(
     // measures the bar's actual height (status bar + chips). Defaults to 0 for callers without an
     // overlaid bar (e.g. comparison panes that sit under a separate header).
     topContentPadding: Dp = 0.dp,
+    /**
+     * The live human-review pause, or null. Rendered at the tail of the streaming section — the
+     * run is unfinished, so it belongs to the reply in progress, not after it. Only the callers
+     * that can resolve one pass it; the comparison panes leave it null.
+     */
+    pendingAction: PendingAction? = null,
+    isResolvingPendingAction: Boolean = false,
+    onSubmitToolDecisions: (List<ToolApprovalResolution>) -> Unit = {},
+    onSubmitPendingAnswer: (String) -> Unit = {},
+    onSubmitPendingAnswers: (Map<String, String>) -> Unit = {},
+    askAnswerDrafts: Map<String, AskAnswerDraft> = emptyMap(),
+    onAskAnswerDraftChange: (String, AskAnswerDraft) -> Unit = { _, _ -> },
 ) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
-    // Track whether the user's finger is currently touching the list.
-    // This is more reliable than isScrollInProgress which only covers flings.
+    // Stands the follower down while a finger rests on the list. Deliberately NOT a scroll-away
+    // signal on its own — see the detector below.
     var isTouching by remember { mutableStateOf(false) }
-    val currentStreamingContent by rememberUpdatedState(streamingContent)
-    val nearBottomThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
+    val nearBottomThresholdPx = with(LocalDensity.current) { NEAR_BOTTOM_BUFFER.toPx() }
     // Height (px) of the floating top bar occluding the list's top edge. The search fine-tune adds
     // this so a focused match settles below the bar rather than flush against (or under) it. Zero
     // for callers without an overlaid bar (e.g. comparison panes), leaving their behavior unchanged.
     val topContentPaddingPx = with(LocalDensity.current) { topContentPadding.toPx() }
     var lastNavigatedParentKey by remember { mutableStateOf<String?>(null) }
 
-    val streamingToolCallCount = if (isStreaming) activeToolCalls.size else 0
+    // A live `ask_user_question` pause is rendered by PendingActionCard, not as a tool card.
+    // Attribution is by the pause's own tool_call_id where the server sends one, so a sibling ask
+    // call that is genuinely still running keeps its card instead of being hidden by association.
+    val pausedAskToolCallId = pendingAction?.payload?.toolCallId
+    // Fallback attribution for payloads without a tool_call_id: the pause's own question text
+    // (a batched pause keeps `question` populated with its first item as a display fallback).
+    val pausedAskQuestion = pendingAction?.payload?.let { payload ->
+        payload.question?.question ?: payload.questions?.firstOrNull()?.question
+    }?.takeIf { it.isNotBlank() }
+    val renderedToolCalls = remember(activeToolCalls, pausedAskToolCallId, pausedAskQuestion) {
+        activeToolCalls.withoutUnansweredQuestions(pausedAskToolCallId, pausedAskQuestion)
+    }
+    val streamingToolCallCount = if (isStreaming) renderedToolCalls.size else 0
     val totalItemCount = displayMessages.size + streamingToolCallCount + if (isStreaming) 1 else 0
 
     // Track whether user has deliberately scrolled away from the bottom.
     // Reset when user scrolls back to bottom (via FAB or manual scroll).
     var userScrolledUp by remember { mutableStateOf(false) }
 
-    val isNearBottom by remember {
+    // True only while an auto-scroll of ours is running. Load-bearing: isScrollInProgress cannot
+    // tell our scroll from the user's, so without this the scroll-away detector below scores the
+    // follower's own mid-growth scroll as intent and latches, silently killing the follow.
+    var programmaticScroll by remember { mutableStateOf(false) }
+
+    // True while the focus sits on something inside the list — an answer field on a pause card.
+    // The keyboard handler below stands down for those; foundation brings a focused node into
+    // view on its own, and unlike this file it knows which node that is.
+    var listHasFocus by remember { mutableStateOf(false) }
+
+    // Read through updated state, not the captured parameter: the follower below runs for a whole
+    // run inside one LaunchedEffect, so a plain capture would keep reporting whatever was true on
+    // the frame the run started — which is always "no pause".
+    val isAwaitingHumanReview by rememberUpdatedState(pendingAction != null)
+
+    // Keyed on the threshold, which is derived from LocalDensity: a keyless remember holds the
+    // first composition's pixel value while the layout numbers it is compared against stay live,
+    // so the buffer is measured in stale units after a density or font-scale change.
+    val isNearBottom by remember(nearBottomThresholdPx) {
         derivedStateOf {
             val info = listState.layoutInfo
             val lastItem = info.visibleItemsInfo.lastOrNull()
@@ -146,16 +202,32 @@ fun MessageList(
             if (lastItem == null || itemCount == 0) {
                 true
             } else {
+                // Measured from the follower's OWN rest target, not from viewportEndOffset: that
+                // baseline sits a whole bottom reserve below where the list can actually rest
+                // (composer height plus the reading gap — 184dp at the floor, more once queued
+                // ghost rows stack). Measure from it and the effective slack becomes
+                // [NEAR_BOTTOM_BUFFER] PLUS that reserve, so the pin re-grabs the list after a
+                // scroll-up of a quarter screen.
+                val restOffset = info.viewportEndOffset - info.afterContentPadding
                 lastItem.index >= itemCount - 2 &&
-                    (lastItem.offset + lastItem.size - info.viewportEndOffset) < nearBottomThresholdPx
+                    (lastItem.offset + lastItem.size - restOffset) < nearBottomThresholdPx
             }
         }
     }
 
-    // Detect user scroll-away: when user touches/flings away from bottom, set the flag.
+    // Detect user scroll-away: when the user drags or flings away from the bottom, set the flag.
     // When they return to the bottom (manually or via FAB), clear it.
+    //
+    // Intent is a SCROLL, not a touch — do not add [isTouching] back to this term. A bare
+    // pointer-down moves nothing, but the follower stands down for as long as a finger is on the
+    // list, so the tail runs away on its own at streaming speed under a resting finger; that drift
+    // would score as scroll-away, and a long-press to select text would end the follow for the
+    // rest of the run. A drag holds the scroll session for its whole duration, mid-drag pauses
+    // included, so gesture latching loses nothing without the touch term.
     LaunchedEffect(Unit) {
-        snapshotFlow { (isTouching || listState.isScrollInProgress) to isNearBottom }
+        snapshotFlow {
+            (listState.isScrollInProgress && !programmaticScroll) to isNearBottom
+        }
             .collect { (userIsScrolling, nearBottom) ->
                 if (userIsScrolling && !nearBottom) {
                     userScrolledUp = true
@@ -168,7 +240,12 @@ fun MessageList(
     val showScrollToBottom by remember {
         derivedStateOf {
             val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            totalItemCount > 0 && lastVisibleItem < totalItemCount - 1
+            // The LIST's own count, not the hand-computed [totalItemCount] above: that one omits
+            // the trailing office-preview and human-review-pause items, so with one of those off
+            // screen the last visible index equals it and the FAB — the only cue that the thread
+            // scrolls further — is suppressed exactly when it is needed.
+            val rendered = listState.layoutInfo.totalItemsCount
+            rendered > 0 && lastVisibleItem < rendered - 1
         }
     }
 
@@ -179,18 +256,13 @@ fun MessageList(
     //
     // 2. STREAMING START — Jump to bottom when isStreaming flips true.
     //
-    // 3. STREAMING FOLLOW — A snapshotFlow observes streamingContent
-    //    length (via rememberUpdatedState) so every token guarantees an
-    //    emission. On each emission we check two conditions:
-    //      a) User is NOT actively scrolling (isScrollInProgress) so
-    //         programmatic scrolls never fight user gestures.
-    //      b) Pixel-based "near bottom" — the bottom edge of the last
-    //         visible item must be within 200dp of the viewport bottom.
-    //         This avoids yanking the user when they're reading the top
-    //         of a tall streaming bubble.
-    //    Scrolls are launched in an isolated coroutine so that if a
-    //    late user touch cancels the scroll via the scroll mutex, the
-    //    CancellationException doesn't kill the snapshotFlow collector.
+    // 3. STREAMING FOLLOW — ONE per-frame follower runs for the whole
+    //    run, easing a fraction of the remaining distance-to-bottom each
+    //    frame from live layout. It is deliberately NOT driven off
+    //    streamingContent. It yields to the user on a finger-down
+    //    (isTouching), once the scroll-away latch is set, or while the
+    //    run is paused for human review; see the loop itself for the
+    //    invariants it rests on.
     //
     // 4. POST-STREAMING — When streaming ends, a 300ms delay lets the
     //    Room observer replace the streaming bubble with the real AI
@@ -279,6 +351,28 @@ fun MessageList(
         }
     }
 
+    // A run pausing for human review changes NOTHING the other scroll effects key on:
+    // displayMessages.size, streamingContent and isStreaming are all unchanged. Without this the
+    // card is appended below the viewport and the user is left looking at a live cursor on a run
+    // that will never produce another token.
+    LaunchedEffect(pendingAction?.actionId) {
+        if (pendingAction?.actionId != null) {
+            userScrolledUp = false
+            val total = listState.layoutInfo.totalItemsCount
+            // Flagged like the follower's own scrolls: this one animates from above the tail, so
+            // every frame of it reads to the scroll-away detector as a user dragging away from
+            // the bottom — the one thing that would latch the follower off for the rest of the run.
+            if (total > 0) {
+                programmaticScroll = true
+                try {
+                    listState.animateScrollToItem(total - 1, scrollOffset = Int.MAX_VALUE)
+                } finally {
+                    programmaticScroll = false
+                }
+            }
+        }
+    }
+
     var wasStreaming by remember { mutableStateOf(false) }
     LaunchedEffect(isStreaming) {
         if (isStreaming) {
@@ -290,26 +384,71 @@ fun MessageList(
             if (total > 0) {
                 listState.scrollToItem(total - 1, scrollOffset = Int.MAX_VALUE)
             }
-            // Rule 3: streaming follow (see block comment above)
-            snapshotFlow {
-                currentStreamingContent.length
-            }.collect {
-                // Skip auto-scroll if user is actively touching the screen,
-                // if a fling is in progress, or if user has scrolled away.
-                if (!isTouching && !listState.isScrollInProgress && !userScrolledUp) {
+            // Rule 3: streaming follow (see block comment above). ONE continuous follower for the
+            // whole run, driven per frame — not a scroll per text flush, which at the buffer's
+            // STREAMING_UI_UPDATE_INTERVAL_MS means ~20 instant scrollToItem jumps a second.
+            try {
+                while (isActive) {
+                    withFrameNanos { }
+                    // A finger down, or a deliberate scroll away, hands control back to the user.
+                    // isScrollInProgress is NOT consulted: our own scroll below sets it, so gating
+                    // on it would stop the follower on its own first frame.
+                    //
+                    // A pause for human review hands it back too. The run stays open across the
+                    // pause, so isStreaming alone keeps this loop pinning the tail every frame
+                    // while the one thing it exists to follow — output — has stopped. The card is
+                    // brought into view once by its own effect above; after that the list is the
+                    // user's, to read a long question or reach a field, and a follower still
+                    // running would undo every scroll the instant their finger lifts.
+                    if (isTouching || userScrolledUp || isAwaitingHumanReview) {
+                        programmaticScroll = false
+                        continue
+                    }
+
                     val info = listState.layoutInfo
-                    val lastItem = info.visibleItemsInfo.lastOrNull()
                     val itemCount = info.totalItemsCount
-                    if (lastItem != null && itemCount > 0 && lastItem.index >= itemCount - 2) {
-                        val contentBottom = lastItem.offset + lastItem.size
-                        val distanceFromBottom = contentBottom - info.viewportEndOffset
-                        if (distanceFromBottom < nearBottomThresholdPx) {
-                            coroutineScope.launch {
-                                listState.scrollToItem(itemCount - 1, scrollOffset = Int.MAX_VALUE)
+                    val lastItem = info.visibleItemsInfo.lastOrNull()
+                    if (itemCount == 0 || lastItem == null) {
+                        programmaticScroll = false
+                        continue
+                    }
+
+                    // Held for as long as the follower is driving, not toggled per frame:
+                    // isScrollInProgress stays true for a moment after a scroll call returns, and a
+                    // per-frame false exposes that tail to the detector as a user scroll.
+                    programmaticScroll = true
+                    try {
+                        if (lastItem.index < itemCount - 1) {
+                            // The tail is off screen — a card was appended below the viewport (a
+                            // tool call, an office preview, a review pause), so there is no
+                            // on-screen distance to ease along; jump instead. Once per appended
+                            // item, not per flush.
+                            listState.scrollToItem(itemCount - 1, scrollOffset = Int.MAX_VALUE)
+                        } else {
+                            // Rest the tail against the bottom reserve, NOT viewportEndOffset: that
+                            // is the layout size minus *before*-content-padding, so it sits below
+                            // where the list can actually rest and inflates every step by the whole
+                            // reserve — the ease then never decelerates, it runs full speed into
+                            // the scroll clamp.
+                            val restOffset = info.viewportEndOffset - info.afterContentPadding
+                            val distance = (lastItem.offset + lastItem.size - restOffset).toFloat()
+                            if (distance > FOLLOW_SETTLE_PX) {
+                                val step = (distance * FOLLOW_FRACTION)
+                                    .coerceIn(FOLLOW_MIN_STEP_PX, distance)
+                                listState.scrollBy(step)
                             }
                         }
+                    } catch (e: CancellationException) {
+                        // A user gesture takes the scroll mutex at UserInput priority, cancelling
+                        // ours. That must not escape: this loop IS the follower, so letting it
+                        // through ends auto-scroll for the whole run with no way to re-arm it. Only
+                        // a cancellation of the effect itself may propagate.
+                        programmaticScroll = false
+                        if (!isActive) throw e
                     }
                 }
+            } finally {
+                programmaticScroll = false
             }
         } else if (wasStreaming) {
             // Streaming just ended. The final messages are now in displayMessages
@@ -335,6 +474,16 @@ fun MessageList(
     // shrinks and the user was near the bottom, we scroll down to
     // keep the latest messages visible above the input box.
     //
+    // It runs ONLY while nothing inside the list holds focus. This
+    // exists for the composer, which sits outside the list, so the
+    // list learns about the keyboard from nothing but its own
+    // shrinking viewport. A field INSIDE the list — an answer field
+    // on a pause card — needs no help: foundation scrolls a newly
+    // focused node into view by itself, and it knows where the focus
+    // is, which this does not. Both running means this one wins and
+    // jumps to the tail of the last item, scrolling the user off the
+    // very field they tapped.
+    //
     // This approach is more reliable than observing WindowInsets.ime
     // directly because:
     //  - It fires AFTER the layout has actually resized (no timing
@@ -349,7 +498,7 @@ fun MessageList(
         snapshotFlow {
             listState.layoutInfo.viewportEndOffset
         }.collect { viewportEnd ->
-            if (previousViewportEnd > 0 && viewportEnd < previousViewportEnd) {
+            if (previousViewportEnd > 0 && viewportEnd < previousViewportEnd && !listHasFocus) {
                 // Viewport shrank (e.g., keyboard opened). If user was
                 // near the bottom, scroll to keep them there.
                 val info = listState.layoutInfo
@@ -386,6 +535,7 @@ fun MessageList(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .onFocusChanged { listHasFocus = it.hasFocus }
                 .onGloballyPositioned { listCoordinates = it }
                 .pointerInput(Unit) {
                     awaitPointerEventScope {
@@ -397,7 +547,14 @@ fun MessageList(
                     }
                 },
             state = listState,
-            contentPadding = PaddingValues(top = topContentPadding + 8.dp, bottom = bottomContentPadding),
+            // The bottom reserve is the measured bar height PLUS a reading gap. The gap must stay
+            // here rather than in the follower's target: a follower-only gap is reclaimed by the
+            // scroll-to-bottom when the run settles, putting a jump at completion (the #169
+            // flicker class).
+            contentPadding = PaddingValues(
+                top = topContentPadding + 8.dp,
+                bottom = bottomContentPadding + MESSAGE_LIST_BOTTOM_GAP,
+            ),
         ) {
             itemsIndexed(
                 items = displayMessages,
@@ -412,13 +569,6 @@ fun MessageList(
                     "${chatLayoutStyle}_$role"
                 },
             ) { index, node ->
-                val feedbackRating = node.message.feedback?.rating
-                val currentFeedbackStr = when (feedbackRating) {
-                    FeedbackRating.THUMBS_UP -> "thumbsUp"
-                    FeedbackRating.THUMBS_DOWN -> "thumbsDown"
-                    null -> null
-                }
-
                 val isMatch = index in searchMatchMessageIndexSet
                 val isCurrent = currentSearchMatch != null && index == currentSearchMatch.messageIndex
                 // Which occurrence within this message is focused (-1 when this isn't the current match).
@@ -431,6 +581,8 @@ fun MessageList(
                 CompositionLocalProvider(
                     LocalImmediateMarkdown provides (index == displayMessages.lastIndex),
                     LocalSearchFocusNonce provides if (isCurrent) searchFocusRequest?.requestId ?: 0L else 0L,
+                    LocalSuppressGroupAutoCollapse provides (node.message.messageId == justSettledMessageId),
+                    LocalFeedbackEnabled provides !isStreaming,
                 ) {
                 MessageBubble(
                     message = node.message,
@@ -449,7 +601,7 @@ fun MessageList(
                     },
                     onCopy = { onCopyMessage(node.message.messageId) },
                     onFeedback = if (!node.message.isCreatedByUser) {
-                        { rating -> onFeedback(node.message.messageId, rating) }
+                        { feedback -> onFeedback(node.message.messageId, feedback) }
                     } else {
                         null
                     },
@@ -463,7 +615,7 @@ fun MessageList(
                     baseUrl = baseUrl,
                     fontSizeMultiplier = fontSizeMultiplier,
                     isReading = currentlyReadingMessageId == node.message.messageId,
-                    currentFeedback = currentFeedbackStr,
+                    currentFeedback = node.message.feedback?.rating,
                     isEditing = editingMessageId == node.message.messageId,
                     editText = if (editingMessageId == node.message.messageId) editingText else "",
                     onEditTextChange = onEditTextChange,
@@ -522,9 +674,9 @@ fun MessageList(
                     )
                 }
 
-                if (activeToolCalls.isNotEmpty()) {
+                if (renderedToolCalls.isNotEmpty()) {
                     items(
-                        items = activeToolCalls,
+                        items = renderedToolCalls,
                         key = { "tool_call_${it.id}" },
                         contentType = { "tool_call" },
                     ) { toolCall ->
@@ -552,6 +704,38 @@ fun MessageList(
                             attachments = officeAttachments,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                             isDarkTheme = isSurfaceDark(),
+                        )
+                    }
+                }
+
+                val orphanMemory = collectUnrenderedMemoryArtifacts(
+                    streamingAttachments,
+                    renderedToolCalls.map { it.id },
+                )
+                if (orphanMemory.isNotEmpty()) {
+                    item(key = "streaming_memory_artifacts") {
+                        MemoryArtifactsSection(
+                            artifacts = orphanMemory,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            stateKey = "streaming",
+                        )
+                    }
+                }
+
+                // Human-review pause (v0.8.8): the run is waiting on the user, so the resolve
+                // controls sit at the tail of the still-unfinished reply — the continuation
+                // streams back into the bubble above.
+                if (pendingAction != null) {
+                    item(key = "pending_action_${pendingAction.actionId}") {
+                        PendingActionCard(
+                            pendingAction = pendingAction,
+                            isResolving = isResolvingPendingAction,
+                            onSubmitToolDecisions = onSubmitToolDecisions,
+                            onSubmitAnswer = onSubmitPendingAnswer,
+                            onSubmitAnswers = onSubmitPendingAnswers,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            askAnswerDrafts = askAnswerDrafts,
+                            onAskAnswerDraftChange = onAskAnswerDraftChange,
                         )
                     }
                 }
@@ -594,6 +778,28 @@ fun MessageList(
 
 /** How long phase 2 waits for the focused occurrence to report before settling for the message top. */
 private const val SEARCH_FOCUS_REPORT_TIMEOUT_MS = 500L
+
+// ── Streaming follow tuning ───────────────────────────────────────────
+// Fraction of the remaining distance-to-bottom consumed per frame. Recomputed from live layout
+// every frame, so this is an exponential ease: 0.15 is a time constant near 100ms at 60fps.
+private const val FOLLOW_FRACTION = 0.15f
+
+/** Floor on the per-frame step, so the last sub-pixel gap closes instead of easing forever. */
+private const val FOLLOW_MIN_STEP_PX = 0.5f
+
+/** Distance below which the list counts as settled at the bottom and the follower idles. */
+private const val FOLLOW_SETTLE_PX = 0.5f
+
+/**
+ * Slack below the list's resting position within which the follower keeps its pin. A gesture that
+ * leaves it hands the list to the user for the rest of the run; settling back inside it re-arms the
+ * follow. Larger and a deliberate scroll-up gets yanked back to the tail; smaller and a slight
+ * gesture near the tail ends the follow when the user meant to stay pinned.
+ */
+private val NEAR_BOTTOM_BUFFER = 80.dp
+
+/** Reading gap held below the last line, on top of the caller-measured bar reserve. */
+private val MESSAGE_LIST_BOTTOM_GAP = 24.dp
 
 private val SearchFocusScrollSpec = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,

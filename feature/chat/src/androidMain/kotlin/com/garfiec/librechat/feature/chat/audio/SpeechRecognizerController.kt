@@ -75,12 +75,10 @@ class SpeechRecognizerController(private val appContext: Context) {
 
     private fun createAndListen() {
         recognizer?.destroy()
-        // Keep the platform check beside the guarded call as well as in the shared capability seam.
-        // That protects this boundary if its state is ever restored or changed independently.
-        val recognizer = if (
-            usingOnDevice &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-        ) {
+        // usingOnDevice is only ever set true behind sttSupportsLiveRecognition(), which IS the
+        // API 31+ check — but lint can't see through the expect/actual seam, so the version test is
+        // restated here to keep the createOnDeviceSpeechRecognizer call provably guarded.
+        val recognizer = if (usingOnDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             SpeechRecognizer.createOnDeviceSpeechRecognizer(appContext)
         } else {
             SpeechRecognizer.createSpeechRecognizer(appContext)

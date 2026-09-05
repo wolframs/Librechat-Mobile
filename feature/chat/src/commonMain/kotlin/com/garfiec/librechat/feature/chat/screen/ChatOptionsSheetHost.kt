@@ -9,6 +9,7 @@ import com.garfiec.librechat.feature.chat.components.ChatOptionsSheetController
 import com.garfiec.librechat.feature.chat.components.ChatToolsPageParams
 import com.garfiec.librechat.feature.chat.components.ModelParametersPageParams
 import com.garfiec.librechat.feature.chat.components.ModelSelectorPageParams
+import com.garfiec.librechat.feature.chat.components.localizedStreamError
 import com.garfiec.librechat.feature.chat.viewmodel.ChatUiState
 import com.garfiec.librechat.feature.chat.viewmodel.ChatViewModel
 
@@ -54,6 +55,8 @@ internal fun ChatOptionsSheetHost(
         }
     }
 
+    val error = uiState.error?.let { localizedStreamError(it) }
+
     ChatOptionsBottomSheet(
         page = page,
         onPageChange = controller::open,
@@ -74,6 +77,7 @@ internal fun ChatOptionsSheetHost(
             urlContextEnabled = uiState.urlContextProviderGate,
             runCodeEnabled = uiState.runCodeEnabled,
             fileSearchEnabled = uiState.fileSearchEnabled,
+            memoryEnabled = uiState.isMemoryToolAvailable,
             mcpServersEnabled = uiState.mcpServersEnabled,
             gates = uiState.chatInputGates,
             contextUsage = uiState.contextUsage,
@@ -108,7 +112,7 @@ internal fun ChatOptionsSheetHost(
             onSetApiKey = { name -> onNavigateToProviderKeys(name) },
             onSurfaced = viewModel::prepareModelSelector,
             // Inline because the Scaffold snackbar draws behind the sheet scrim.
-            errorMessage = uiState.error,
+            errorMessage = error,
             onErrorDismiss = viewModel::dismissError,
             serverUrl = uiState.serverUrl,
             favoriteAgentIds = uiState.favoriteAgentIds,
@@ -122,6 +126,7 @@ internal fun ChatOptionsSheetHost(
         // parameters, so there is nothing else to point this at (pre-existing; porting web's
         // per-addedConvo parameters would be the real fix).
         parameters = ModelParametersPageParams(
+            endpointConfig = uiState.endpointConfigs[uiState.selectedEndpoint],
             parameters = uiState.modelParameters,
             onParametersChange = viewModel::updateModelParameters,
             selectedEndpoint = uiState.selectedEndpoint,

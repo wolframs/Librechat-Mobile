@@ -70,6 +70,7 @@ fun EntryProviderScope<NavKey>.settingsEntries(
             onNavigateToArchive = onNavigateToArchive,
             onNavigateToSharedLinks = { onNavigate(SharedLinks) },
             onNavigateToArtifactShortcuts = { onNavigate(ArtifactShortcuts) },
+            onNavigateToPrefetchActivity = { onNavigate(PrefetchActivity) },
             onNavigateToPresets = { onNavigate(PresetManager) },
             onNavigateToApiKeys = { onNavigate(ApiKeys) },
             onNavigateToFavorites = { onNavigate(Favorites) },
@@ -106,6 +107,7 @@ fun EntryProviderScope<NavKey>.settingsEntries(
             onNavigateToArchive = onNavigateToArchive,
             onNavigateToSharedLinks = { onNavigate(SharedLinks) },
             onNavigateToArtifactShortcuts = { onNavigate(ArtifactShortcuts) },
+            onNavigateToPrefetchActivity = { onNavigate(PrefetchActivity) },
         )
     }
     entry<SharedLinks> {
@@ -122,7 +124,9 @@ fun EntryProviderScope<NavKey>.settingsEntries(
             hasNextPage = uiState.value.sharedLinksHasNextPage,
             serverUrl = uiState.value.serverUrl,
             onLoadMore = viewModel::loadMoreSharedLinks,
-            onToggleVisibility = viewModel::toggleSharedLinkVisibility,
+            canUpdate = uiState.value.sharedLinksUpdateEnabled,
+            updateKeepsUrl = uiState.value.sharedLinkUpdateKeepsUrl,
+            onUpdateLink = viewModel::updateSharedLink,
             onDelete = viewModel::deleteSharedLink,
             onNavigateBack = onBack,
         )
@@ -152,6 +156,7 @@ fun EntryProviderScope<NavKey>.settingsEntries(
     favoritesEntry(onBack = onBack)
     roleSkillsAdminEntry(onBack = onBack)
     artifactShortcutsEntry(onBack = onBack)
+    prefetchActivityEntry(onBack = onBack)
 }
 
 val settingsSerializersModule = SerializersModule {
@@ -171,5 +176,6 @@ val settingsSerializersModule = SerializersModule {
         subclass(Favorites::class, Favorites.serializer())
         subclass(RoleSkillsAdmin::class, RoleSkillsAdmin.serializer())
         subclass(ArtifactShortcuts::class, ArtifactShortcuts.serializer())
+        subclass(PrefetchActivity::class, PrefetchActivity.serializer())
     }
 }

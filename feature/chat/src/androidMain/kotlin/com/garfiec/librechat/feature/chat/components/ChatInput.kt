@@ -3,7 +3,6 @@ package com.garfiec.librechat.feature.chat.components
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -15,14 +14,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -39,17 +35,19 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
+import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.model.usage.ContextUsage
 import com.garfiec.librechat.core.model.usage.TokenUsage
 import com.garfiec.librechat.feature.chat.model.McpServerDisplayData
 import com.garfiec.librechat.feature.chat.model.PromptMentionDisplayData
-import com.garfiec.librechat.feature.chat.viewmodel.ChatInputGates
-import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
+import com.garfiec.librechat.feature.chat.viewmodel.ChatInputGates
+import com.garfiec.librechat.feature.chat.viewmodel.DuringRunSendTarget
+import com.garfiec.librechat.feature.chat.viewmodel.PendingSteerChip
+import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
@@ -67,12 +65,23 @@ fun ChatInput(
     modifier: Modifier = Modifier,
     onQueue: () -> Unit = {},
     canQueue: Boolean = false,
+    onDuringRunSend: () -> Unit = {},
+    onSteer: () -> Unit = {},
+    canSteer: Boolean = false,
+    duringRunAction: DuringRunAction = DuringRunAction.QUEUE,
+    duringRunSendTarget: DuringRunSendTarget = DuringRunSendTarget.QUEUE,
+    pendingSteers: List<PendingSteerChip> = emptyList(),
+    onCancelSteer: (steerId: String) -> Unit = {},
+    pendingQuotes: List<String> = emptyList(),
+    onRemoveQuote: (index: Int) -> Unit = {},
+    onSetDuringRunAction: (DuringRunAction) -> Unit = {},
     queuedPausedCount: Int = 0,
     onSendQueuedMessages: () -> Unit = {},
     isEditingQueued: Boolean = false,
     onCommitEdit: () -> Unit = {},
     onCancelEdit: () -> Unit = {},
     isAwaitingUploadSend: Boolean = false,
+    arePicksUnsettled: Boolean = false,
     onCancelPendingSend: () -> Unit = {},
     queuedMessages: List<QueuedMessage> = emptyList(),
     onEditQueuedMessage: (localId: String) -> Unit = {},
@@ -82,7 +91,6 @@ fun ChatInput(
     attachedFiles: List<AttachedFile> = emptyList(),
     onRemoveFile: (AttachedFile) -> Unit = {},
     promptSuggestions: List<PromptMentionDisplayData> = emptyList(),
-    onPromptSelected: (PromptMentionDisplayData) -> Unit = {},
     onSlashCommandSelected: (PromptMentionDisplayData) -> Unit = {},
     isRecording: Boolean = false,
     isTranscribing: Boolean = false,
@@ -127,30 +135,6 @@ fun ChatInput(
         }
     }
 
-    // Detect @mention query from input text
-    val mentionQuery by remember(inputText) {
-        derivedStateOf { parseMentionQuery(inputText) }
-    }
-
-    val filteredPrompts by remember(mentionQuery, promptSuggestions) {
-        derivedStateOf {
-            val query = mentionQuery
-            if (query != null) filterMatchingPrompts(query, promptSuggestions) else emptyList()
-        }
-    }
-
-    // Detect slash command query: "/" at position 0
-    val slashQuery by remember(inputText) {
-        derivedStateOf { parseSlashQuery(inputText) }
-    }
-
-    val filteredSlashCommands by remember(slashQuery, promptSuggestions) {
-        derivedStateOf {
-            val query = slashQuery
-            if (query != null) filterMatchingSlashCommands(query, promptSuggestions) else emptyList()
-        }
-    }
-
     val state = ChatInputState(
         inputText = inputText,
         isStreaming = isStreaming,
@@ -165,20 +149,33 @@ fun ChatInput(
         attachedFiles = attachedFiles,
         gates = gates,
         canQueue = canQueue,
+        canSteer = canSteer,
+        duringRunAction = duringRunAction,
+        duringRunSendTarget = duringRunSendTarget,
+        pendingSteers = pendingSteers,
+        pendingQuotes = pendingQuotes,
         isEditingQueued = isEditingQueued,
         isAwaitingUploadSend = isAwaitingUploadSend,
+        arePicksUnsettled = arePicksUnsettled,
         contextUsage = contextUsage,
         tokenUsage = tokenUsage,
         contextUsageEnabled = contextUsageEnabled,
         contextBarPlacement = contextBarPlacement,
+        promptSuggestions = promptSuggestions,
     )
 
     CommonChatInputCore(
         state = state,
         onSend = onSend,
         onStop = onStop,
+        onSelectPrompt = onSlashCommandSelected,
         onToggleTool = onToggleTool,
         onQueue = onQueue,
+        onDuringRunSend = onDuringRunSend,
+        onSteer = onSteer,
+        onCancelSteer = onCancelSteer,
+        onRemoveQuote = onRemoveQuote,
+        onSetDuringRunAction = onSetDuringRunAction,
         queuedPausedCount = queuedPausedCount,
         onSendQueuedMessages = onSendQueuedMessages,
         onCommitEdit = onCommitEdit,
@@ -303,41 +300,6 @@ fun ChatInput(
                     },
                 )
 
-                // @mention dropdown
-                DropdownMenu(
-                    expanded = filteredPrompts.isNotEmpty() && filteredSlashCommands.isEmpty(),
-                    onDismissRequest = { /* Dismissed by typing or selecting */ },
-                ) {
-                    filteredPrompts.forEach { group ->
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(
-                                        text = group.name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                    val oneliner = group.oneliner
-                                    if (!oneliner.isNullOrBlank()) {
-                                        Text(
-                                            text = oneliner,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-                            },
-                            onClick = { onPromptSelected(group) },
-                        )
-                    }
-                }
-
-                // Slash command dropdown
-                SlashCommandMenu(
-                    filteredCommands = filteredSlashCommands,
-                    onCommandSelect = onSlashCommandSelected,
-                )
             }
         },
         trailingSpacer = {

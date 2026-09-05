@@ -10,9 +10,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 object ChatPayloadBuilder {
 
+    @OptIn(ExperimentalUuidApi::class)
     fun build(
         text: String,
         conversationId: String?,
@@ -35,6 +38,7 @@ object ChatPayloadBuilder {
         ephemeralAgent: EphemeralAgent? = null,
         isTemporary: Boolean = false,
         cacheTtl: String? = null,
+        quotes: List<String>? = null,
     ): ChatRequest {
         val resolvedParentMessageId = parentMessageId ?: NO_PARENT
 
@@ -55,6 +59,7 @@ object ChatPayloadBuilder {
             isRegenerate = isRegenerate,
             isContinued = isContinued,
             webSearch = if (webSearch) true else null,
+            quotes = quotes?.takeIf { it.isNotEmpty() },
             files = files?.takeIf { it.isNotEmpty() },
             addedConvo = addedConvo,
             ephemeralAgent = ephemeralAgent,
@@ -64,6 +69,11 @@ object ChatPayloadBuilder {
             // agent {{current_date}}/{{current_datetime}} to the user's wall clock, not its own.
             // Additive — always sent; older servers ignore the unknown key.
             timezone = TimeZone.currentSystemDefault().id,
+            // 0.8.8 #14344: idempotency key claimed by the server before job creation so a
+            // replayed generation POST dedups to the original run instead of double-billing.
+            // Minted here (once per send) and encoded once by `toBody`, so it stays byte-stable
+            // across any transport-level retry of the same POST. Additive; ignored if unclaimed.
+            clientRequestId = Uuid.random().toString(),
         )
     }
 

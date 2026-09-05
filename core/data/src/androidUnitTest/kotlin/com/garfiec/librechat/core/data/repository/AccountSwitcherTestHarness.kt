@@ -9,6 +9,7 @@ import com.garfiec.librechat.core.data.datastore.AccountRoster
 import com.garfiec.librechat.core.data.datastore.AccountScopedPrefsPurger
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.network.client.RefreshResult
+import com.garfiec.librechat.core.network.client.SessionEndReason
 import com.garfiec.librechat.core.network.client.SwitchGate
 import com.garfiec.librechat.core.network.client.TokenManager
 import io.mockk.mockk
@@ -28,13 +29,14 @@ internal class RecordingTokenManager : TokenManager {
     val selections = mutableListOf<String>()
     val removedAccounts = mutableListOf<String>()
     val expiredEmissions = mutableListOf<String?>()
+    val expiredReasons = mutableListOf<SessionEndReason>()
 
     override val isAuthenticated: Boolean = true
     override suspend fun getAccessToken(): String? = null
     override suspend fun setTokens(accessToken: String, refreshToken: String) {
         stagedAccess = accessToken
     }
-    override suspend fun refreshAccessToken(): RefreshResult = RefreshResult.HardExpired
+    override suspend fun refreshAccessToken(usedAccessToken: String?): RefreshResult = RefreshResult.HardExpired
     override suspend fun clearTokens() {}
     override suspend fun getAccessTokenFor(accountId: String): String? = null
     override suspend fun getStagedAccessToken(): String? = stagedAccess
@@ -47,7 +49,11 @@ internal class RecordingTokenManager : TokenManager {
     override suspend fun removeAccount(accountId: String) {
         removedAccounts += accountId
     }
-    override suspend fun refreshAccessTokenFor(accountId: String, baseUrl: String): RefreshResult = RefreshResult.HardExpired
+    override suspend fun refreshAccessTokenFor(
+        accountId: String,
+        baseUrl: String,
+        usedAccessToken: String?,
+    ): RefreshResult = RefreshResult.HardExpired
     override suspend fun onAccountResolved(accountId: String) {
         resolvedAccount = accountId
         stagedAccess = null
@@ -55,10 +61,11 @@ internal class RecordingTokenManager : TokenManager {
     override suspend fun onAccountCleared() {
         clearedActive = true
     }
-    override fun emitSessionExpired(expiredAccountId: String?) {
+    override fun emitSessionExpired(expiredAccountId: String?, reason: SessionEndReason) {
         expiredEmissions += expiredAccountId
+        expiredReasons += reason
     }
-    override val sessionExpiredFlow: SharedFlow<Unit> = MutableSharedFlow()
+    override val sessionExpiredFlow: SharedFlow<SessionEndReason> = MutableSharedFlow()
 }
 
 internal class RecordingSwitchCacheCleaner : SwitchCacheCleaner {

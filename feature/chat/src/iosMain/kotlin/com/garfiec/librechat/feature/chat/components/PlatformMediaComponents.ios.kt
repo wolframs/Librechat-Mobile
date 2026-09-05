@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
@@ -46,13 +47,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.viewinterop.UIKitView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.UIKitView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.ui.platform.currentTopmostViewController
+import com.garfiec.librechat.feature.chat.components.web.loadVendoredHtml
+import com.garfiec.librechat.feature.chat.components.web.rememberWebAssetBaseUrl
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import kotlinx.cinterop.BetaInteropApi
@@ -461,6 +464,12 @@ private fun KatexWebView(
 
     var contentHeight by remember { mutableStateOf(initialHeight) }
 
+    val assetBase = rememberWebAssetBaseUrl() ?: return
+
+    // The height measurement below recomposes this view, so an unguarded `update` would
+    // reload on a recomposition its own navigation triggered.
+    var loadedHtml by remember { mutableStateOf("") }
+
     UIKitView(
         modifier = modifier
             .height(contentHeight),
@@ -486,11 +495,15 @@ private fun KatexWebView(
                     }
                 }
             }
-            webView.loadHTMLString(html, baseURL = NSURL.URLWithString("https://cdn.jsdelivr.net"))
+            webView.loadVendoredHtml(html, assetBase)
+            loadedHtml = html
             webView
         },
         update = { webView ->
-            webView.loadHTMLString(html, baseURL = NSURL.URLWithString("https://cdn.jsdelivr.net"))
+            if (html != loadedHtml) {
+                webView.loadVendoredHtml(html, assetBase)
+                loadedHtml = html
+            }
         },
     )
 }
@@ -515,7 +528,8 @@ private fun buildKatexHtml(latex: String, displayMode: Boolean, textColor: Strin
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' file:; style-src 'self' 'unsafe-inline' file:; font-src 'self' file: data:; img-src data:;">
+            <link rel="stylesheet" href="katex/katex.min.css">
             <style>
                 body {
                     margin: 0; padding: 0;
@@ -534,7 +548,7 @@ private fun buildKatexHtml(latex: String, displayMode: Boolean, textColor: Strin
         </head>
         <body>
             <div id="output"></div>
-            <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
+            <script src="katex/katex.min.js"></script>
             <script>
                 try {
                     katex.render("$escapedLatex", document.getElementById('output'), {
@@ -575,38 +589,40 @@ actual fun MermaidDiagram(
             .background(MaterialTheme.colorScheme.surfaceContainerHighest),
     ) {
         // Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(Res.string.label_mermaid),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            TextButton(onClick = { showCode = !showCode }) {
-                Icon(
-                    imageVector = if (showCode) Icons.Default.Image else Icons.Default.Code,
-                    contentDescription = stringResource(if (showCode) Res.string.cd_show_diagram else Res.string.cd_view_code),
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(modifier = Modifier.width(4.dp))
+        DisableSelection {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = stringResource(if (showCode) Res.string.label_diagram else Res.string.label_code),
+                    text = stringResource(Res.string.label_mermaid),
                     style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-            IconButton(onClick = { showFullscreen = true }) {
-                Icon(
-                    imageVector = Icons.Default.Fullscreen,
-                    contentDescription = stringResource(Res.string.cd_fullscreen),
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Spacer(modifier = Modifier.weight(1f))
+                TextButton(onClick = { showCode = !showCode }) {
+                    Icon(
+                        imageVector = if (showCode) Icons.Default.Image else Icons.Default.Code,
+                        contentDescription = stringResource(if (showCode) Res.string.cd_show_diagram else Res.string.cd_view_code),
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = stringResource(if (showCode) Res.string.label_diagram else Res.string.label_code),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                IconButton(onClick = { showFullscreen = true }) {
+                    Icon(
+                        imageVector = Icons.Default.Fullscreen,
+                        contentDescription = stringResource(Res.string.cd_fullscreen),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -679,17 +695,25 @@ private fun MermaidWKWebView(
     val theme = if (isDarkTheme) "dark" else "default"
     val html = remember(escapedCode, theme) { buildMermaidHtml(escapedCode, theme) }
 
+    val assetBase = rememberWebAssetBaseUrl() ?: return
+
+    var loadedHtml by remember { mutableStateOf("") }
+
     UIKitView(
         modifier = modifier,
         factory = {
             val config = WKWebViewConfiguration()
             val webView = WKWebView(frame = cValue { }, configuration = config)
             webView.setOpaque(false)
-            webView.loadHTMLString(html, baseURL = NSURL.URLWithString("https://cdn.jsdelivr.net"))
+            webView.loadVendoredHtml(html, assetBase)
+            loadedHtml = html
             webView
         },
         update = { webView ->
-            webView.loadHTMLString(html, baseURL = NSURL.URLWithString("https://cdn.jsdelivr.net"))
+            if (html != loadedHtml) {
+                webView.loadVendoredHtml(html, assetBase)
+                loadedHtml = html
+            }
         },
     )
 }
@@ -700,6 +724,7 @@ private fun buildMermaidHtml(escapedCode: String, theme: String): String {
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' file:; style-src 'unsafe-inline'; img-src data:;">
             <style>
                 body {
                     margin: 0; padding: 8px;
@@ -713,7 +738,7 @@ private fun buildMermaidHtml(escapedCode: String, theme: String): String {
         </head>
         <body>
             <div class="mermaid" id="diagram"></div>
-            <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+            <script src="mermaid/mermaid.min.js"></script>
             <script>
                 mermaid.initialize({ startOnLoad: false, theme: '$theme', securityLevel: 'strict', flowchart: { useMaxWidth: true } });
                 try {

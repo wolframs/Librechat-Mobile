@@ -77,6 +77,7 @@ data class ChatToolsPageParams(
     val urlContextEnabled: Boolean = false,
     val runCodeEnabled: Boolean = true,
     val fileSearchEnabled: Boolean = true,
+    val memoryEnabled: Boolean = false,
     val mcpServersEnabled: Boolean = true,
     val gates: ChatInputGates = ChatInputGates(),
     val contextUsage: ContextUsage? = null,
@@ -119,6 +120,7 @@ data class ModelSelectorPageParams(
 data class ModelParametersPageParams(
     val parameters: ModelParameters,
     val onParametersChange: (ModelParameters) -> Unit,
+    val endpointConfig: com.garfiec.librechat.core.model.EndpointConfig? = null,
     val selectedEndpoint: String = "",
     val extendedEffortSupported: Boolean = false,
     /** Underlying provider when the endpoint is "agents"; routes to that provider's param set. */
@@ -231,6 +233,7 @@ fun ChatOptionsBottomSheet(
                         urlContextEnabled = tools.urlContextEnabled,
                         runCodeEnabled = tools.runCodeEnabled,
                         fileSearchEnabled = tools.fileSearchEnabled,
+                        memoryEnabled = tools.memoryEnabled,
                         mcpServersEnabled = tools.mcpServersEnabled,
                         gates = tools.gates,
                         contextUsage = tools.contextUsage,
@@ -277,6 +280,7 @@ fun ChatOptionsBottomSheet(
                             parameters = parameters.parameters,
                             onParametersChange = parameters.onParametersChange,
                             selectedEndpoint = parameters.selectedEndpoint,
+                            endpointConfig = parameters.endpointConfig,
                             extendedEffortSupported = parameters.extendedEffortSupported,
                             selectedProvider = parameters.selectedProvider,
                             selectedModel = parameters.selectedModel,

@@ -68,6 +68,71 @@
     <string name="section_language">Langue</string>
     <string name="section_layout">Disposition</string>
     <string name="section_mcp_servers">Serveurs MCP</string>
+    <string name="section_prefetch">Background prefetch</string>
+    <string name="prefetch_enabled">Prefetch conversations</string>
+    <string name="prefetch_enabled_desc">Load recent and pinned conversations ahead of time so they open instantly. Runs while the app is idle, and periodically while charging.</string>
+    <string name="prefetch_on_metered">Use mobile data</string>
+    <string name="prefetch_on_metered_desc">Allow prefetching on metered connections. Off by default to avoid unexpected data usage.</string>
+    <string name="prefetch_depth">Depth</string>
+    <string name="prefetch_depth_value">%1$d conversations</string>
+    <string name="prefetch_depth_desc">How many recent conversations to keep cached. Pinned conversations are always included, however old.</string>
+    <string name="prefetch_attachments">Prefetch images</string>
+    <string name="prefetch_attachments_desc">Also download images and attachments. Uses considerably more data.</string>
+    <string name="prefetch_activity">Activity</string>
+    <string name="prefetch_activity_title">Prefetch activity</string>
+    <string name="prefetch_summary_status">Status</string>
+    <string name="prefetch_summary_last_run">Last run</string>
+    <string name="prefetch_summary_last_run_never">Never</string>
+    <string name="prefetch_summary_scheduled_run">Last background run</string>
+    <string name="prefetch_run_outcome_disabled">prefetch was off</string>
+    <string name="prefetch_run_outcome_no_session">not signed in</string>
+    <string name="prefetch_run_outcome_constraints">conditions not met</string>
+    <string name="prefetch_run_outcome_budget">ran out of time</string>
+    <string name="prefetch_run_outcome_stopped">server not answering</string>
+    <string name="prefetch_run_outcome_interrupted">interrupted</string>
+    <string name="prefetch_summary_warmed">Warmed</string>
+    <string name="prefetch_summary_warmed_value">%1$d of %2$d</string>
+    <string name="prefetch_status_off">Off</string>
+    <string name="prefetch_status_working">Working…</string>
+    <string name="prefetch_status_warming">Warming conversations (%1$d of %2$d)</string>
+    <string name="prefetch_status_rate_limited">Waiting — the server asked us to slow down</string>
+    <string name="prefetch_status_stopped">Stopped — repeated request failures</string>
+    <string name="prefetch_status_up_to_date">Up to date</string>
+    <string name="prefetch_status_waiting">Idle — %1$d waiting</string>
+    <string name="prefetch_status_paused_network">Paused — waiting for Wi-Fi</string>
+    <string name="prefetch_status_paused_offline">Paused — no connection</string>
+    <string name="prefetch_condition_enabled">Prefetch enabled</string>
+    <string name="prefetch_condition_enabled_unmet">Switched off</string>
+    <string name="prefetch_condition_network_offline">No connection</string>
+    <string name="prefetch_status_paused_power">Paused — battery saver is on</string>
+    <string name="prefetch_status_paused_busy">Paused — app is busy</string>
+    <string name="prefetch_status_paused_background">Paused — app is in the background</string>
+    <string name="prefetch_conditions_header">Conditions</string>
+    <string name="prefetch_condition_app_available">App ready</string>
+    <string name="prefetch_condition_network">Network</string>
+    <string name="prefetch_condition_network_met">Connection allowed</string>
+    <string name="prefetch_condition_network_unmet">On mobile data</string>
+    <string name="prefetch_condition_power">Battery</string>
+    <string name="prefetch_condition_power_met">Not restricted</string>
+    <string name="prefetch_condition_power_unmet">Battery saver is on</string>
+    <string name="prefetch_condition_idle">App idle</string>
+    <string name="prefetch_condition_idle_met">No requests in flight</string>
+    <string name="prefetch_condition_idle_unmet">A request is in flight</string>
+    <string name="prefetch_condition_server">Server</string>
+    <string name="prefetch_condition_server_met">Responding</string>
+    <string name="prefetch_condition_server_unmet">Stopped after repeated failures</string>
+    <string name="prefetch_warm_now">Warm now</string>
+    <string name="prefetch_warm_now_desc">Run a pass immediately instead of waiting for the next idle moment.</string>
+    <string name="prefetch_warmed_header">Cached conversations</string>
+    <string name="prefetch_warmed_empty">Nothing has been prefetched yet.</string>
+    <string name="prefetch_pending_header">Waiting to be cached</string>
+    <string name="prefetch_pending_empty">Everything eligible is up to date.</string>
+    <string name="prefetch_row_never_warmed">Not cached yet</string>
+    <string name="prefetch_row_pinned">Pinned</string>
+    <string name="prefetch_cache_header">Cache</string>
+    <string name="prefetch_cache_messages">Cached messages</string>
+    <string name="prefetch_cache_messages_value">%1$d messages</string>
+    <string name="prefetch_cache_images">Images and files</string>
     <string name="section_memories">Mémoires</string>
     <string name="section_personalization">Personnalisation</string>
     <string name="section_presets">Préréglages</string>
@@ -78,7 +143,6 @@
     <string name="title_account">Compte</string>
     <string name="title_api_keys">Clés API</string>
     <string name="title_chat">Discussion</string>
-    <string name="title_commands">Commandes</string>
     <string name="title_data">Données</string>
     <string name="title_general">Général</string>
     <string name="title_memories">Mémoires</string>
@@ -112,8 +176,6 @@
     <string name="status_enabled">Activé</string>
     <string name="status_disabled">Désactivé</string>
     <string name="fork_behavior">Comportement de bifurcation</string>
-    <string name="commands">Commandes</string>
-    <string name="commands_enabled_count">%1$d activée(s)</string>
     <string name="api_keys">Clés API</string>
     <string name="api_keys_subtitle">Gérer les clés API pour l'accès programmatique</string>
     <string name="presets">Préréglages</string>
@@ -249,6 +311,7 @@
     <string name="archived_conversations">Conversations archivées</string>
     <string name="export_all_data">Exporter toutes les données</string>
     <string name="shared_links">Liens partagés</string>
+    <string name="clear_cache_with_size">Clear Cache (%1$s)</string>
     <string name="clear_cache">Vider le cache</string>
     <string name="revoke_all_api_keys">Révoquer toutes les clés API</string>
     <string name="revoking">Révocation…</string>
@@ -369,9 +432,6 @@
     <string name="response_style_label">Comment l'IA doit-elle répondre ?</string>
     <string name="response_style_hint">Ton, format ou style préféré pour les réponses</string>
 
-    <!-- Commands screen -->
-    <string name="no_commands_available">Aucune commande disponible</string>
-
     <!-- Avatar upload dialog -->
     <string name="dialog_title_update_avatar">Mettre à jour l'avatar</string>
     <string name="avatar_choose_hint">Appuyez sur l'icône de l'appareil photo pour choisir une image</string>
@@ -478,4 +538,14 @@
     <string name="role_skills_share">Partager des compétences</string>
     <string name="role_skills_share_public">Partager des compétences publiquement</string>
     <string name="role_skills_save">Enregistrer</string>
+    <!-- Post-login editor for the active server's gateway headers (issue #287) -->
+    <string name="section_server_connection">Connexion au serveur</string>
+    <string name="server_headers_scope">Envoyés à %1$s</string>
+    <string name="server_headers_save">Enregistrer les en-têtes</string>
+    <string name="server_headers_saved">En-têtes enregistrés</string>
+    <string name="server_connection_subtitle">En-têtes de requête pour les passerelles d'accès</string>
+    <string name="server_headers_discard_title">Abandonner les modifications ?</string>
+    <string name="server_headers_discard_message">Vos modifications d'en-têtes non enregistrées seront perdues.</string>
+    <string name="server_headers_discard_confirm">Abandonner</string>
+    <string name="server_headers_keep_editing">Continuer l'édition</string>
 </resources>

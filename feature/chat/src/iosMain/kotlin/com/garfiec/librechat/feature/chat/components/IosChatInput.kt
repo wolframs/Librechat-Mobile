@@ -24,13 +24,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
+import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.model.usage.ContextUsage
 import com.garfiec.librechat.core.model.usage.TokenUsage
 import com.garfiec.librechat.feature.chat.model.McpServerDisplayData
+import com.garfiec.librechat.feature.chat.model.PromptMentionDisplayData
 import com.garfiec.librechat.feature.chat.resources.Res
 import com.garfiec.librechat.feature.chat.resources.cd_attach_file
 import com.garfiec.librechat.feature.chat.resources.cd_paste_image
 import com.garfiec.librechat.feature.chat.viewmodel.ChatInputGates
+import com.garfiec.librechat.feature.chat.viewmodel.DuringRunSendTarget
+import com.garfiec.librechat.feature.chat.viewmodel.PendingSteerChip
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import org.jetbrains.compose.resources.stringResource
 
@@ -49,12 +53,23 @@ fun IosChatInput(
     modifier: Modifier = Modifier,
     onQueue: () -> Unit = {},
     canQueue: Boolean = false,
+    onDuringRunSend: () -> Unit = {},
+    onSteer: () -> Unit = {},
+    canSteer: Boolean = false,
+    duringRunAction: DuringRunAction = DuringRunAction.QUEUE,
+    duringRunSendTarget: DuringRunSendTarget = DuringRunSendTarget.QUEUE,
+    pendingSteers: List<PendingSteerChip> = emptyList(),
+    onCancelSteer: (steerId: String) -> Unit = {},
+    pendingQuotes: List<String> = emptyList(),
+    onRemoveQuote: (index: Int) -> Unit = {},
+    onSetDuringRunAction: (DuringRunAction) -> Unit = {},
     queuedPausedCount: Int = 0,
     onSendQueuedMessages: () -> Unit = {},
     isEditingQueued: Boolean = false,
     onCommitEdit: () -> Unit = {},
     onCancelEdit: () -> Unit = {},
     isAwaitingUploadSend: Boolean = false,
+    arePicksUnsettled: Boolean = false,
     onCancelPendingSend: () -> Unit = {},
     queuedMessages: List<QueuedMessage> = emptyList(),
     onEditQueuedMessage: (localId: String) -> Unit = {},
@@ -81,6 +96,8 @@ fun IosChatInput(
     tokenUsage: TokenUsage? = null,
     contextUsageEnabled: Boolean = false,
     contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,
+    promptSuggestions: List<PromptMentionDisplayData> = emptyList(),
+    onSlashCommandSelected: (PromptMentionDisplayData) -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -98,20 +115,33 @@ fun IosChatInput(
         attachedFiles = attachedFiles,
         gates = gates,
         canQueue = canQueue,
+        canSteer = canSteer,
+        duringRunAction = duringRunAction,
+        duringRunSendTarget = duringRunSendTarget,
+        pendingSteers = pendingSteers,
+        pendingQuotes = pendingQuotes,
         isEditingQueued = isEditingQueued,
         isAwaitingUploadSend = isAwaitingUploadSend,
+        arePicksUnsettled = arePicksUnsettled,
         contextUsage = contextUsage,
         tokenUsage = tokenUsage,
         contextUsageEnabled = contextUsageEnabled,
         contextBarPlacement = contextBarPlacement,
+        promptSuggestions = promptSuggestions,
     )
 
     CommonChatInputCore(
         state = state,
         onSend = onSend,
         onStop = onStop,
+        onSelectPrompt = onSlashCommandSelected,
         onToggleTool = onToggleTool,
         onQueue = onQueue,
+        onDuringRunSend = onDuringRunSend,
+        onSteer = onSteer,
+        onCancelSteer = onCancelSteer,
+        onRemoveQuote = onRemoveQuote,
+        onSetDuringRunAction = onSetDuringRunAction,
         queuedPausedCount = queuedPausedCount,
         onSendQueuedMessages = onSendQueuedMessages,
         onCommitEdit = onCommitEdit,

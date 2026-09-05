@@ -47,7 +47,7 @@
     <string name="cd_more_options">Дополнительно</string>
     <string name="cd_scroll_to_bottom">Прокрутить вниз</string>
     <string name="cd_select_model">Выбрать модель</string>
-    <string name="cd_librechat">LibreChat</string>
+    <string name="cd_librechat">Switchboard</string>
     <string name="cd_comparison_enabled">Сравнение включено</string>
 
     <!-- Content descriptions - Messages -->
@@ -64,7 +64,6 @@
     <string name="cd_generating_response">Генерация ответа</string>
 
     <!-- Content descriptions - Images -->
-    <string name="cd_fullscreen_image">Изображение во весь экран</string>
     <string name="cd_close">Закрыть</string>
     <string name="cd_save_to_device">Сохранить на устройство</string>
     <string name="cd_share_image">Поделиться изображением</string>
@@ -236,7 +235,6 @@
     <string name="preset_model">Модель: %1$s</string>
 
     <!-- Feedback dialog -->
-    <string name="dialog_title_feedback">Оставить отзыв</string>
     <string name="feedback_question">В чём была проблема с этим ответом?</string>
     <string name="hint_optional_comment">Необязательный комментарий…</string>
 
@@ -260,6 +258,7 @@
     <string name="cd_previous_version">Предыдущая версия</string>
     <string name="cd_next_version">Следующая версия</string>
     <string name="artifact_version">v%1$d/%2$d</string>
+    <string name="artifact_incomplete">Не завершено</string>
     <!-- Prompts -->
     <string name="prompts_library">Библиотека промптов</string>
     <string name="use_in_chat">Использовать в чате</string>

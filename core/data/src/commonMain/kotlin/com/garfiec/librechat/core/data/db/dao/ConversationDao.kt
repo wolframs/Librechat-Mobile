@@ -9,6 +9,26 @@ import com.garfiec.librechat.core.data.db.entity.ConversationEntity
 import com.garfiec.librechat.core.data.db.preserveLocalCacheFieldsFrom
 import kotlinx.coroutines.flow.Flow
 
+/** The three columns the prefetcher's selection and freshness rules need. */
+data class PrefetchCandidate(
+    val conversationId: String,
+    val updatedAt: Long,
+    val pinned: Boolean,
+)
+
+/**
+ * A candidate plus the title, for the settings readout — which has to name the conversations it
+ * lists, where the engine only ever needs their ids.
+ */
+data class PrefetchCandidateDetail(
+    val conversationId: String,
+    val title: String,
+    val updatedAt: Long,
+    val pinned: Boolean,
+) {
+    fun toCandidate(): PrefetchCandidate = PrefetchCandidate(conversationId, updatedAt, pinned)
+}
+
 @Dao
 interface ConversationDao {
 
@@ -43,6 +63,40 @@ interface ConversationDao {
         accountId: String,
         tagJsonToken: String,
     ): List<ConversationEntity>
+    // --- Background prefetch. Projections rather than entities: the prefetcher needs three columns
+    // and reading the entity would decode the `tags` JSON of every row for nothing. ---
+
+    @Query(
+        "SELECT conversationId, updatedAt, pinned FROM conversations " +
+            "WHERE accountId = :accountId AND isArchived = 0 ORDER BY updatedAt DESC LIMIT :limit",
+    )
+    suspend fun recentForPrefetch(accountId: String, limit: Int): List<PrefetchCandidate>
+
+    @Query(
+        "SELECT conversationId, updatedAt, pinned FROM conversations " +
+            "WHERE accountId = :accountId AND isArchived = 0 AND pinned = 1",
+    )
+    suspend fun pinnedForPrefetch(accountId: String): List<PrefetchCandidate>
+
+    /** Prune candidates. Archived rows are included: they are the least likely to be reopened. */
+    @Query("SELECT conversationId FROM conversations WHERE accountId = :accountId AND updatedAt < :cutoff")
+    suspend fun conversationIdsOlderThan(accountId: String, cutoff: Long): List<String>
+
+    // Observed variants for the prefetch status readout. Their WHERE/ORDER clauses must stay
+    // identical to recentForPrefetch/pinnedForPrefetch above: any divergence makes the readout
+    // describe a different set than the engine works on, silently.
+
+    @Query(
+        "SELECT conversationId, title, updatedAt, pinned FROM conversations " +
+            "WHERE accountId = :accountId AND isArchived = 0 ORDER BY updatedAt DESC LIMIT :limit",
+    )
+    fun observeRecentForPrefetch(accountId: String, limit: Int): Flow<List<PrefetchCandidateDetail>>
+
+    @Query(
+        "SELECT conversationId, title, updatedAt, pinned FROM conversations " +
+            "WHERE accountId = :accountId AND isArchived = 0 AND pinned = 1",
+    )
+    fun observePinnedForPrefetch(accountId: String): Flow<List<PrefetchCandidateDetail>>
 
     @Upsert
     suspend fun upsert(conversation: ConversationEntity)

@@ -10,8 +10,20 @@ import com.garfiec.librechat.core.model.request.CreateActionRequest
 import com.garfiec.librechat.core.model.request.CreateAgentRequest
 import com.garfiec.librechat.core.model.request.RevertAgentRequest
 import com.garfiec.librechat.core.model.request.UpdateAgentRequest
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.JsonElement
 
 interface AgentRepository {
+
+    /**
+     * Bumped every time the agent cache is invalidated — i.e. after any agent mutation made through
+     * this repository.
+     *
+     * Consumers that memoize per-agent data must re-read on a change. Without it an agent edited in
+     * the agent editor keeps serving its pre-edit values to a chat screen that is still alive, and
+     * nothing anywhere reports the staleness.
+     */
+    val revision: StateFlow<Long>
 
     // Agent CRUD
     suspend fun getAgents(category: String? = null): Result<List<Agent>>
@@ -22,6 +34,29 @@ interface AgentRepository {
         category: String? = null,
     ): Result<PaginatedAgents>
     suspend fun getAgent(id: String): Result<Agent>
+
+    /**
+     * The LIST route's own EDIT answer (`isEditable`) for one agent, or null when this account has
+     * no list answer for it.
+     *
+     * The field is stamped by `getListAgents` alone; neither `GET /api/agents/:id` nor `/expanded`
+     * reports it, so a screen holding a single agent cannot read it off that agent. Remembered as
+     * list rows arrive and dropped whenever an agent mutation invalidates the cache.
+     *
+     * **Null means unknown, not permitted** ([Agent.isEditable]): use it only to NARROW a verdict
+     * reached some other way.
+     */
+    suspend fun listedEditVerdict(id: String): Boolean?
+
+    /**
+     * The agent's LLM `provider`, straight from `GET /api/agents/:id` (returned at VIEW permission).
+     *
+     * Deliberately not expressed as `getAgent(id).provider`: the agent *list* projection omits
+     * `provider` entirely (`getListAgentsByAccess` upstream), and [getAgent] serves from that list's
+     * cache whenever it's warm — so it answers `null` for an agent whose provider the server knows
+     * perfectly well. Callers that route on the provider need the single-agent read, uncached.
+     */
+    suspend fun getAgentProvider(id: String): Result<String?>
 
     /**
      * Fetches complete agent data for editing via the /expanded endpoint.
@@ -36,6 +71,15 @@ interface AgentRepository {
     suspend fun deleteAgent(id: String): Result<Unit>
     suspend fun duplicateAgent(id: String): Result<Agent>
     suspend fun revertAgent(id: String, request: RevertAgentRequest): Result<Agent>
+
+    /**
+     * Agent edit history, fetched on demand (v0.8.8 line, #13977).
+     *
+     * Snapshots stay raw JSON: each is the agent as its schema was at that save point, so
+     * narrowing to today's [Agent] shape would quietly drop whatever the editor wants to show
+     * from an older revision.
+     */
+    suspend fun getAgentVersions(id: String): Result<List<JsonElement>>
     suspend fun getAgentCategories(): Result<List<AgentCategory>>
 
     // Avatar

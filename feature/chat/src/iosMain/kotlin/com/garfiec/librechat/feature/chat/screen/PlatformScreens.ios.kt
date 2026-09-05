@@ -46,17 +46,22 @@ import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.feature.chat.components.CacheTtlRail
 import com.garfiec.librechat.feature.chat.components.ChatFloatingTopBar
-import com.garfiec.librechat.feature.chat.components.rememberChatOptionsSheetController
+import com.garfiec.librechat.feature.chat.components.ChatRoot
 import com.garfiec.librechat.feature.chat.components.IosChatInput
 import com.garfiec.librechat.feature.chat.components.LandingContent
-import com.garfiec.librechat.feature.chat.components.ChatRoot
 import com.garfiec.librechat.feature.chat.components.MessageList
+import com.garfiec.librechat.feature.chat.components.MessagesUnavailable
 import com.garfiec.librechat.feature.chat.components.PresetPicker
 import com.garfiec.librechat.feature.chat.components.SavePresetDialog
+import com.garfiec.librechat.feature.chat.components.UploadRoutingSheet
+import com.garfiec.librechat.feature.chat.components.localizedStreamError
+import com.garfiec.librechat.feature.chat.components.rememberChatOptionsSheetController
+import com.garfiec.librechat.feature.chat.prompts.components.VariableInputDialog
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import com.garfiec.librechat.feature.chat.util.clipboardHasImage
 import com.garfiec.librechat.feature.chat.util.collapseParallelToPrimary
+import com.garfiec.librechat.feature.chat.util.copyToClipboard
 import com.garfiec.librechat.feature.chat.util.openCamera
 import com.garfiec.librechat.feature.chat.util.openDocumentPicker
 import com.garfiec.librechat.feature.chat.util.openPhotoPicker
@@ -103,6 +108,7 @@ actual fun ChatScreen(
     val uiState by chromeFlow.collectAsStateWithLifecycle(initialChrome)
     val attachedFiles by viewModel.attachedFiles.collectAsStateWithLifecycle()
     val prefs by viewModel.chatPreferences.collectAsStateWithLifecycle()
+    val promptLibraryRevision by viewModel.promptLibraryRevision.collectAsStateWithLifecycle()
 
     val useKatex = prefs.latexRenderer == LatexRenderer.KATEX
     val fontSizeMultiplier = when (uiState.chatFontSize) {
@@ -176,11 +182,11 @@ actual fun ChatScreen(
     }
 
     // Show errors in snackbar (matches Android behavior)
-    LaunchedEffect(uiState.error) {
-        val error = uiState.error
-        if (error != null) {
+    val errorMessage = uiState.error?.let { localizedStreamError(it) }
+    LaunchedEffect(errorMessage) {
+        if (errorMessage != null) {
             snackbarHostState.showSnackbar(
-                message = error,
+                message = errorMessage,
                 actionLabel = "Dismiss",
                 duration = SnackbarDuration.Long,
             )
@@ -211,6 +217,8 @@ actual fun ChatScreen(
         onOpenMedia = viewModel::openMedia,
         onCloseMedia = viewModel::closeMedia,
         onDownloadAttachment = viewModel::downloadFileBytes,
+        promptLibraryRevision = promptLibraryRevision,
+        onRefreshPrompts = viewModel::refreshPromptsIfStale,
     ) {
     Scaffold(
         modifier = modifier.imePadding(),
@@ -267,8 +275,22 @@ actual fun ChatScreen(
                 },
                 onStop = viewModel::stopGeneration,
                 onOpenTools = { optionsController.open() },
+                // The mid-stream send button routes through the ViewModel, which resolves
+                // steer-vs-queue; `onQueue` stays the picker's explicit "add to queue".
+                onDuringRunSend = { viewModel.sendDuringRun() },
                 onQueue = { viewModel.queueMessage() },
                 canQueue = uiState.canQueueFollowUp,
+                promptSuggestions = uiState.availablePrompts,
+                onSlashCommandSelected = viewModel::handleSlashCommand,
+                onSteer = { viewModel.steerMessage() },
+                canSteer = uiState.canSteerNow,
+                duringRunAction = uiState.effectiveDuringRunAction,
+                duringRunSendTarget = uiState.duringRunSendTarget,
+                pendingSteers = uiState.pendingSteers,
+                pendingQuotes = uiState.pendingQuotes,
+                onRemoveQuote = viewModel::removePendingQuote,
+                onCancelSteer = viewModel::cancelSteer,
+                onSetDuringRunAction = viewModel::setDuringRunAction,
                 enabledTools = uiState.effectiveEnabledTools,
                 pinnedToolKeys = uiState.pinnedToolChips,
                 onToggleTool = viewModel::toggleTool,
@@ -303,6 +325,7 @@ actual fun ChatScreen(
                 onCommitEdit = viewModel::commitQueuedEdit,
                 onCancelEdit = viewModel::cancelQueuedEdit,
                 isAwaitingUploadSend = uiState.isAwaitingUploadSend,
+                arePicksUnsettled = uiState.arePicksUnsettled,
                 onCancelPendingSend = viewModel::cancelPendingUploadSend,
                 onSendQueuedMessages = viewModel::sendQueuedNow,
                 queuedMessages = uiState.messageQueue,
@@ -334,7 +357,8 @@ actual fun ChatScreen(
             if (uiState.cacheTtlEnabled) {
                 CacheTtlRail(
                     anchor = uiState.cacheTtlAnchor,
-                    armed = uiState.armedCacheTtl,
+                    armed = uiState.armedCacheTtl.takeIf { uiState.extendedCacheTtlEnabled },
+                    enabled = uiState.extendedCacheTtlEnabled,
                     onClick = viewModel::toggleCacheTtlArm,
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -357,6 +381,17 @@ actual fun ChatScreen(
         onNavigateToProviderKeys = onNavigateToProviderKeys,
         onShowSavePresetDialog = { showSavePresetDialog = true },
     )
+
+    // Manual attachment routing. iOS has no pull-up surface to retract, so this is the whole wiring.
+    uiState.composer.pendingUploadRouting?.let { pendingRouting ->
+        UploadRoutingSheet(
+            files = pendingRouting.files,
+            onRouteChange = viewModel::setPendingUploadRoute,
+            onApplyToAll = viewModel::setAllPendingUploadRoutes,
+            onConfirm = viewModel::confirmPendingUploadRouting,
+            onDismiss = viewModel::cancelPendingUploadRouting,
+        )
+    }
 
     // Model selector bottom sheet
     if (uiState.showModelSheet) {
@@ -394,6 +429,17 @@ actual fun ChatScreen(
             onDeletePreset = { preset ->
                 preset.presetId?.let { viewModel.deletePreset(it) }
             },
+        )
+    }
+
+    LaunchedEffect(Unit) { viewModel.consumePendingPromptInsertion() }
+
+    uiState.pendingVariablePrompt?.let { pending ->
+        VariableInputDialog(
+            promptTemplate = pending.template,
+            variables = pending.variables,
+            onInsert = viewModel::confirmVariablePrompt,
+            onDismiss = viewModel::dismissVariablePrompt,
         )
     }
 
@@ -537,6 +583,14 @@ private fun IosChatBody(
                 CircularProgressIndicator(modifier = Modifier.size(36.dp))
             }
         }
+        // `hasMessages` folds in isStreaming, which is load-bearing: a handed-off new chat is
+        // legitimately empty until the first message lands, and must not render as a failure.
+        uiState.messagesLoadFailed && !hasMessages -> {
+            MessagesUnavailable(
+                onRetry = viewModel::refreshMessages,
+                modifier = topPaddedFill,
+            )
+        }
         uiState.comparisonState.isEnabled -> {
             ComparisonPanes(
                 uiState = uiState,
@@ -550,7 +604,9 @@ private fun IosChatBody(
                 showBubbles = showBubbles,
                 useKatex = useKatex,
                 bottomContentPadding = bottomContentPadding,
-                onCopyMessage = { messageId -> viewModel.getMessageText(messageId) },
+                onCopyMessage = { messageId ->
+                    copyToClipboard(viewModel.getMessageClipboardText(messageId), "Message")
+                },
                 onShowSecondaryModelSheet = onShowSecondaryModelSheet,
                 onComparisonTabChange = onComparisonTabChange,
                 modifier = topPaddedFill,
@@ -563,13 +619,16 @@ private fun IosChatBody(
             MessageList(
                 displayMessages = singleDisplayMessages,
                 isStreaming = uiState.isStreaming,
+                justSettledMessageId = uiState.justSettledMessageId,
                 streamingContent = uiState.streamingContent,
                 activeToolCalls = uiState.activeToolCalls,
                 streamingAttachments = uiState.streamingAttachments,
                 onSiblingNavigation = viewModel::switchBranch,
                 onEditMessage = viewModel::startEditing,
                 onRegenerateMessage = { messageId -> viewModel.regenerateMessage(messageId) },
-                onCopyMessage = { messageId -> viewModel.getMessageText(messageId) },
+                onCopyMessage = { messageId ->
+                    copyToClipboard(viewModel.getMessageClipboardText(messageId), "Message")
+                },
                 onFeedback = viewModel::submitFeedback,
                 onContinue = { viewModel.continueGeneration() },
                 onReadAloud = viewModel::readAloud,
@@ -601,6 +660,13 @@ private fun IosChatBody(
                 onSearchScrollHandle = viewModel::onSearchScrollHandled,
                 bottomContentPadding = bottomContentPadding,
                 topContentPadding = topContentPadding,
+                pendingAction = uiState.renderablePendingAction,
+                isResolvingPendingAction = uiState.isResolvingPendingAction,
+                onSubmitToolDecisions = viewModel::resolveToolApproval,
+                onSubmitPendingAnswer = viewModel::answerPendingQuestion,
+                onSubmitPendingAnswers = viewModel::answerPendingQuestions,
+                askAnswerDrafts = uiState.askAnswerDrafts,
+                onAskAnswerDraftChange = viewModel::updateAskAnswerDraft,
                 modifier = Modifier.fillMaxSize(),
             )
         }

@@ -51,6 +51,16 @@ data class ChatRequest(
     val key: String? = null,
     val extra: JsonObject? = null,
     @SerialName("web_search") val webSearch: Boolean? = null,
+    /**
+     * Verbatim excerpts the user referenced via "Add to chat" (v0.8.7, upstream #13868). The
+     * server merges them into the user message as Markdown blockquotes for the model and
+     * persists them on the message, echoing `message.quotes` for display. Fresh sends drain
+     * the staged pending quotes; regenerate and edit-assistant replay the parent user
+     * message's persisted quotes (web `overrideQuotes` parity — the server rebuilds the user
+     * message from this field); continue and edit-user send none. Never sent to assistants
+     * endpoints, which bypass the BaseClient merge.
+     */
+    val quotes: List<String>? = null,
     val files: List<FileReference>? = null,
     val addedConvo: AddedConversation? = null,
     val ephemeralAgent: EphemeralAgent? = null,
@@ -65,4 +75,11 @@ data class ChatRequest(
      *  `{{current_datetime}}` resolve to the user's wall clock instead of the server's.
      *  Always sent (additive; older servers ignore the unknown key). */
     val timezone: String? = null,
+    /** Idempotency key minted once per send (upstream #14344, 0.8.8 line). The server claims it
+     *  before job creation, so a replayed generation POST (transport retry, reconnect race)
+     *  attaches to the original run instead of double-billing a second generation. Distinct from
+     *  [messageId] — this keys the *request*, not the user message. Must stay byte-stable across
+     *  retries of the same send (minted in `ChatPayloadBuilder.build`, encoded once). Additive;
+     *  a server that hasn't claimed it simply ignores the field. */
+    val clientRequestId: String? = null,
 )

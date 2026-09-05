@@ -51,6 +51,12 @@ sealed interface StreamEvent {
         val previewError: String? = null,
         /** Web-search sources when this is a `web_search` attachment (no file). */
         val webSearch: WebSearchData? = null,
+        /** Retrieval citations when this is a `file_search` attachment (no file). */
+        val fileSearch: FileSearchData? = null,
+        /** The memory write when this is a `memory` attachment (no file). */
+        val memory: MemoryArtifactData? = null,
+        /** MCP UI resources when this is a `ui_resources` attachment (no file). */
+        val uiResources: UiResources? = null,
     ) : StreamEvent
 
     data class Final(
@@ -75,6 +81,12 @@ sealed interface StreamEvent {
          * server-side; there is nothing to reconcile against on a later load.
          */
         val earlyAbort: Boolean = false,
+        /**
+         * Steers the run accepted but never injected, handed back exactly once so the client can
+         * re-home them as follow-ups instead of dropping the user's words. The server clears its
+         * own copy when it writes this, so a frame that carries them and is ignored loses them.
+         */
+        val pendingSteers: List<PendingSteer> = emptyList(),
     ) : StreamEvent {
         val hasParseErrors: Boolean get() = parseErrors.isNotEmpty()
     }
@@ -83,8 +95,55 @@ sealed interface StreamEvent {
         val aggregatedContent: List<MessageContentPart>,
     ) : StreamEvent
 
+    /**
+     * The run stopped and is waiting on the user: a tool batch needs approval, or the agent
+     * asked a clarifying question. Carried live by the `on_pending_action` SSE event and, for a
+     * client that reconnects into an already-paused run, by `resumeState.pendingAction` on the
+     * sync frame.
+     *
+     * A paused run is still *active* server-side — no `final` frame is coming until the user
+     * decides — so the stream stays open and the chat surface must render resolve controls
+     * rather than a live cursor. Resolving posts to `/api/agents/chat/resume`; the continuation
+     * arrives on this same stream.
+     */
+    data class PendingActionRequested(
+        val pendingAction: PendingAction,
+    ) : StreamEvent
+
+    /**
+     * A queued steer reached a tool-batch boundary and went into the run (v0.8.8
+     * `on_steer_applied`). The steer is now a `steer` content part of the reply being produced,
+     * so the client's own pending chip for [steerId] has served its purpose and should go.
+     *
+     * Ordering is not guaranteed against the steer's own HTTP 202: this event can arrive first,
+     * naming a [steerId] the client has not yet learned. A consumer must therefore record the id
+     * as applied rather than only removing a chip that may not exist yet.
+     */
+    data class SteerApplied(
+        val steerId: String,
+        /** Absolute index of the injected part within the reply's content. */
+        val index: Int? = null,
+        /** The steer's text as injected, for a client that never saw its own 202. */
+        val text: String? = null,
+        val responseMessageId: String? = null,
+        val conversationId: String? = null,
+    ) : StreamEvent
+
+    /**
+     * The server's still-queued steers, replayed on the resume `sync` frame
+     * (`resumeState.pendingSteers`) so a client that reconnected mid-run — or opened the
+     * conversation on another device — sees the same pending chips as the one that sent them.
+     *
+     * This is a full snapshot of what is still queued, not a delta: steers injected while the
+     * client was away are absent because they are already part of the reply's content.
+     */
+    data class PendingSteersSynced(
+        val pendingSteers: List<PendingSteer>,
+    ) : StreamEvent
+
     data class Error(
         val message: String,
+        /** See [StreamErrorCodes]. Null for an ordinary, untyped stream error. */
         val code: String? = null,
         val isNetworkError: Boolean = false,
     ) : StreamEvent
@@ -103,6 +162,12 @@ sealed interface StreamEvent {
         val conversationId: String,
         val messageId: String,
         val parentMessageId: String,
+        /**
+         * The generation epoch from the start POST's envelope (v0.8.8-rc1), echoed back on
+         * `POST /chat/resume` to fence a stale resume. Null from the SSE `created` frame and on
+         * older servers — the resume is then sent unfenced, which stays legal.
+         */
+        val generationCreatedAt: Long? = null,
     ) : StreamEvent
 
     /**
@@ -177,4 +242,21 @@ sealed interface StreamEvent {
         /** The phase's content pre-mapped to a flat event, or null for lifecycle phases. */
         val inner: StreamEvent? = null,
     ) : StreamEvent
+}
+
+/**
+ * Codes this client assigns to a [StreamEvent.Error] for terminal conditions the wire cannot type.
+ *
+ * These are not server codes. The generation routes carry typed codes on their HTTP responses but
+ * not on their SSE error frames, so a condition that must be told apart from a genuine failure is
+ * recognized at the mapper and named here.
+ */
+object StreamErrorCodes {
+    /**
+     * The turn ended in a server-side reconciliation rather than a failure: the generation was
+     * replaced or had already terminalized, the durable assistant reply exists, and a refetch
+     * loads it. Recognized in `SseEventMapper` — see `GENERATION_RECONCILE_MESSAGE` there for why
+     * the message text is the only signal available to a protocol-v1 client.
+     */
+    const val GENERATION_RECONCILE = "generation_reconcile"
 }

@@ -64,7 +64,8 @@ class ChatRequestBuilder(
         val webSearchEnabled = state.modelParameters.webSearch
 
         val hasAnything =
-            mcpServers != null || fileSearchEnabled || executeCodeEnabled || webSearchEnabled
+            mcpServers != null || fileSearchEnabled || executeCodeEnabled || webSearchEnabled ||
+                (ToolConstants.MEMORY in state.enabledTools && state.isMemoryToolAvailable)
         if (!hasAnything) return null
 
         return EphemeralAgent(
@@ -72,6 +73,10 @@ class ChatRequestBuilder(
             webSearch = if (webSearchEnabled) true else null,
             fileSearch = if (fileSearchEnabled) true else null,
             executeCode = if (executeCodeEnabled) true else null,
+            // Re-check availability rather than trusting the toggle alone: the flag can survive a
+            // config/permission change that has since withdrawn memory, and the server would then
+            // silently drop the tools from a run the user believes is remembering.
+            memory = if (ToolConstants.MEMORY in state.enabledTools && state.isMemoryToolAvailable) true else null,
         )
     }
 
@@ -96,6 +101,7 @@ class ChatRequestBuilder(
             model = state.selectedModel,
             extendedEffortSupported = state.extendedEffortSupported,
             params = state.modelParameters,
+            endpointConfig = state.endpointConfigs[state.selectedEndpoint],
         ).takeIf { it.isNotEmpty() }
     }
 }

@@ -55,7 +55,7 @@ jobs:
           token: ${{ secrets.RELEASE_PAT }}
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
@@ -64,7 +64,7 @@ jobs:
         # Pinned to a commit SHA (not a moving tag) so a compromise of the action's
         # repo can't inject code into this secret-bearing job. Dependabot keeps it
         # current — see .github/dependabot.yml.
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       # Fail in seconds if the signing secrets are missing/blank, before doing any
       # work — rather than deep inside the Gradle signing task after a full build.
@@ -141,7 +141,7 @@ jobs:
           VERSION: ${{ steps.bump.outputs.version_name }}
         run: |
           src="app/build/outputs/apk/release/app-release.apk"
-          out="librechat-v${VERSION}.apk"
+          out="switchboard-v${VERSION}.apk"
           cp "$src" "$out"
           sha256sum "$out" > "${out}.sha256"
           echo "apk=$out" >> "$GITHUB_OUTPUT"
@@ -191,7 +191,7 @@ jobs:
 
           # The iOS job uploads this deterministic asset name to the same draft; reference it
           # statically here even though this step runs before that job finishes.
-          IPA="librechat-v${VERSION}.ipa"
+          IPA="switchboard-v${VERSION}.ipa"
 
           # Badge row (rendered side-by-side). The Target Backend badge replaces the old
           # plain-text "Target backend: LibreChat v…" line. The Downloads badges track
@@ -216,7 +216,7 @@ jobs:
         # Pinned to a commit SHA (not a moving tag): this step runs with a
         # contents:write token, so a hijacked tag could push tags/releases on our
         # behalf. Dependabot bumps the pin — see .github/dependabot.yml.
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ steps.bump.outputs.tag }}
           name: ${{ steps.bump.outputs.tag }}
@@ -263,14 +263,14 @@ jobs:
           xcode-version: latest-stable
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
 
       - name: Setup Gradle
         # SHA-pinned to match the release job's supply-chain policy (Dependabot bumps it).
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - name: Cache Kotlin/Native toolchain
         uses: actions/cache@v6
@@ -308,12 +308,24 @@ jobs:
             CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER="" \
             DEVELOPMENT_TEAM="" ONLY_ACTIVE_ARCH=NO
 
-          # Repackage the archived .app into an unsigned IPA (Payload/ + zip).
+          # Repackage the archived .app into an unsigned IPA (Payload/ + zip). The bundle is
+          # globbed rather than named, but the step is only half rename-safe: -scheme and
+          # -archivePath above stay hardcoded to the Xcode target. Payload/ must hold exactly
+          # one bundle — a share extension or watch app added to this scheme would otherwise
+          # ship an IPA sideloaders reject. The ${apps[@]+...} guard is load-bearing: macOS
+          # runners ship bash 3.2, where expanding an empty array under `set -u` aborts before
+          # the ::error:: annotation is emitted, hiding the zero-bundle case it exists to report.
           cd "$RUNNER_TEMP/iosApp.xcarchive/Products/Applications"
-          mkdir -p Payload && mv iosApp.app Payload/
-          OUT="$RUNNER_TEMP/librechat-v${VERSION}.ipa"
+          shopt -s nullglob
+          apps=(./*.app)
+          if [ "${#apps[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 .app in the archive, found ${#apps[@]}: ${apps[@]+${apps[*]}}"
+            exit 1
+          fi
+          mkdir -p Payload && mv "${apps[0]}" Payload/
+          OUT="$RUNNER_TEMP/switchboard-v${VERSION}.ipa"
           zip -qry "$OUT" Payload
-          ( cd "$RUNNER_TEMP" && shasum -a 256 "librechat-v${VERSION}.ipa" > "librechat-v${VERSION}.ipa.sha256" )
+          ( cd "$RUNNER_TEMP" && shasum -a 256 "switchboard-v${VERSION}.ipa" > "switchboard-v${VERSION}.ipa.sha256" )
           echo "ipa=$OUT" >> "$GITHUB_OUTPUT"
           echo "sha=$OUT.sha256" >> "$GITHUB_OUTPUT"
 

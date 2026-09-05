@@ -5,10 +5,14 @@ import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.logging.LogOrigin
 import com.garfiec.librechat.core.model.Conversation
 import com.garfiec.librechat.core.model.Message
+import com.garfiec.librechat.core.model.PendingAction
+import com.garfiec.librechat.core.model.PendingSteer
+import com.garfiec.librechat.core.model.StreamErrorCodes
 import com.garfiec.librechat.core.model.StreamEvent
 import com.garfiec.librechat.core.model.SubagentPhase
 import com.garfiec.librechat.core.model.content.MessageContentPart
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -93,9 +97,10 @@ class SseEventMapper(private val json: Json) {
      *
      * Almost every frame yields one event. The exception is the resume `sync`
      * frame, which is a composite: a state snapshot ([StreamEvent.Sync] built from
-     * `resumeState.aggregatedContent`) followed by `pendingEvents` — raw LangGraph
-     * events that occurred after the snapshot and are delivered here exactly once
-     * (the live continuation does not replay them). The pending events are mapped
+     * `resumeState.aggregatedContent`), then the live human-review pause if the run
+     * reconnected into one (`resumeState.pendingAction`), then `pendingEvents` — raw
+     * LangGraph events that occurred after the snapshot and are delivered here exactly
+     * once (the live continuation does not replay them). The pending events are mapped
      * through the same [mapJsonObject] the live stream uses, so downstream they are
      * indistinguishable from live events. List order is significant: the snapshot
      * must be applied before the buffered deltas that build on it.
@@ -114,11 +119,11 @@ class SseEventMapper(private val json: Json) {
             // Resume sync frame: snapshot + buffered events. `pendingEvents` lives
             // at the frame top level (alongside `sync`/`resumeState`), not inside it.
             if (root["sync"]?.jsonPrimitive?.booleanOrNull == true) {
-                val sync = mapSyncEvent(root)
+                val sync = mapSyncEvents(root)
                 val pending = root["pendingEvents"]?.jsonArray.orEmpty()
                     .filterIsInstance<JsonObject>()
                     .mapNotNull(::mapJsonObject)
-                return listOfNotNull(sync) + pending
+                return sync + pending
             }
             listOfNotNull(mapJsonObject(root))
         } catch (e: Exception) {
@@ -150,7 +155,10 @@ class SseEventMapper(private val json: Json) {
         // 3. Check for "error" field (may be a string or an object)
         val errorText = root["error"]?.toStringValue()
         if (errorText != null) {
-            return StreamEvent.Error(message = errorText)
+            return StreamEvent.Error(
+                message = errorText,
+                code = if (errorText == GENERATION_RECONCILE_MESSAGE) StreamErrorCodes.GENERATION_RECONCILE else null,
+            )
         }
 
         // 4. Check for LangGraph nested event (has "event" key)
@@ -171,7 +179,7 @@ class SseEventMapper(private val json: Json) {
         val conversation = root["conversation"]?.let {
             try { json.decodeFromJsonElement(Conversation.serializer(), it) } catch (e: Exception) {
                 val msg = "Failed to parse final conversation: ${e.message}"
-                Logger.w(e, tag = "SSE") { msg }
+                Logger.w("SSE", e) { msg }
                 parseErrors.add(msg)
                 null
             }
@@ -179,7 +187,7 @@ class SseEventMapper(private val json: Json) {
         val requestMessage = root["requestMessage"]?.let {
             try { json.decodeFromJsonElement(Message.serializer(), it) } catch (e: Exception) {
                 val msg = "Failed to parse final requestMessage: ${e.message}"
-                Logger.w(e, tag = "SSE") { msg }
+                Logger.w("SSE", e) { msg }
                 parseErrors.add(msg)
                 null
             }
@@ -187,7 +195,7 @@ class SseEventMapper(private val json: Json) {
         val responseMessage = root["responseMessage"]?.let {
             try { json.decodeFromJsonElement(Message.serializer(), it) } catch (e: Exception) {
                 val msg = "Failed to parse final responseMessage: ${e.message}"
-                Logger.w(e, tag = "SSE") { msg }
+                Logger.w("SSE", e) { msg }
                 parseErrors.add(msg)
                 null
             }
@@ -196,7 +204,7 @@ class SseEventMapper(private val json: Json) {
         val legacyMessage = root["message"]?.let {
             try { json.decodeFromJsonElement(Message.serializer(), it) } catch (e: Exception) {
                 val msg = "Failed to parse final legacy message: ${e.message}"
-                Logger.w(e, tag = "SSE") { msg }
+                Logger.w("SSE", e) { msg }
                 parseErrors.add(msg)
                 null
             }
@@ -228,6 +236,9 @@ class SseEventMapper(private val json: Json) {
             // malformed flag must not take down an otherwise-usable final event.
             aborted = (root["aborted"] as? JsonPrimitive)?.booleanOrNull == true,
             earlyAbort = (root["earlyAbort"] as? JsonPrimitive)?.booleanOrNull == true,
+            // Steers the run never injected. Claim-on-read — the server drops its copy as it
+            // writes this frame — so they must be lifted off here or the text is gone.
+            pendingSteers = parsePendingSteers(root["pendingSteers"]),
         )
     }
 
@@ -252,8 +263,19 @@ class SseEventMapper(private val json: Json) {
         )
     }
 
-    private fun mapSyncEvent(root: JsonObject): StreamEvent? {
-        val resumeState = root["resumeState"]?.jsonObject ?: return null
+    /**
+     * Expands a resume `sync` frame's `resumeState` into the events it stands for: the content
+     * snapshot, the pending action if the run reconnected into a live human-review pause, and
+     * the steers still queued for injection.
+     *
+     * All three are independent. A run can pause before emitting any content (an
+     * `ask_user_question` on the first turn), so the pending action must NOT be gated on
+     * `aggregatedContent` being present; conversely a normal reconnect carries content and no
+     * pause. Order matters where they coexist: the snapshot rebuilds the reply, then the pause
+     * marks it as awaiting the user, then the steer snapshot repopulates the chips.
+     */
+    private fun mapSyncEvents(root: JsonObject): List<StreamEvent> {
+        val resumeState = root["resumeState"]?.jsonObject ?: return emptyList()
 
         // We intentionally do NOT replay `resumeState.runSteps`. The web client
         // replays them as on_run_step events to seed its event-sourced step-index
@@ -261,21 +283,71 @@ class SseEventMapper(private val json: Json) {
         // `aggregatedContent` already carries every tool_call part (in-progress
         // with a null output, completed with its output merged in) in order — so
         // it is the authoritative snapshot. runSteps would only duplicate it.
-        val aggregatedContent = resumeState["aggregatedContent"]?.jsonArray ?: return null
-
-        val contentParts = aggregatedContent.mapNotNull { element ->
-            try {
-                json.decodeFromJsonElement(
-                    MessageContentPart.serializer(),
-                    element,
-                )
-            } catch (e: Exception) {
-                Logger.w(e, tag = "SSE") { "Failed to parse sync aggregatedContent part" }
-                null
+        val snapshot = resumeState["aggregatedContent"]?.jsonArray?.let { aggregatedContent ->
+            val contentParts = aggregatedContent.mapNotNull { element ->
+                try {
+                    json.decodeFromJsonElement(
+                        MessageContentPart.serializer(),
+                        element,
+                    )
+                } catch (e: Exception) {
+                    Logger.w("SSE", e) { "Failed to parse sync aggregatedContent part" }
+                    null
+                }
             }
+            StreamEvent.Sync(aggregatedContent = contentParts)
         }
 
-        return StreamEvent.Sync(aggregatedContent = contentParts)
+        val pendingAction = resumeState["pendingAction"]?.let(::parsePendingAction)
+
+        // Steers still waiting to be injected, as an authoritative snapshot of the server-side
+        // queue. Emitted UNCONDITIONALLY, including when the key is absent.
+        //
+        // The server OMITS the key rather than sending `[]` when its queue is empty — see
+        // `pendingSteers: pendingSteers.length > 0 ? pendingSteers : undefined` in upstream's
+        // GenerationJobManager, and the matching `resumeState.pendingSteers = … : undefined` on
+        // the resume path. So absence means "nothing queued", not "no news": reading it as
+        // `?.let { … }` emits nothing at all in the drained case. A reconnect is the only chance
+        // the client gets to drop records for steers that were injected while it was away, and
+        // skipping it there leaves them live forever, to be re-sent by a later run's end.
+        val pendingSteers = StreamEvent.PendingSteersSynced(
+            parsePendingSteers(resumeState["pendingSteers"]),
+        )
+
+        return listOfNotNull(snapshot, pendingAction, pendingSteers)
+    }
+
+    /** Decodes a `TPendingSteer[]` payload, dropping entries that carry no id to cancel by. */
+    private fun parsePendingSteers(element: JsonElement?): List<PendingSteer> {
+        val array = element as? JsonArray ?: return emptyList()
+        return array.mapNotNull { item ->
+            val steer = try {
+                json.decodeFromJsonElement(PendingSteer.serializer(), item)
+            } catch (e: Exception) {
+                Logger.w("SSE", e) { "Failed to parse pending steer" }
+                null
+            }
+            steer?.takeIf { !it.steerId.isNullOrBlank() }
+        }
+    }
+
+    /**
+     * Parses a client-safe `PendingAction` projection into its stream event. Shared by the live
+     * `on_pending_action` frame and the sync frame's `resumeState.pendingAction`, which carry the
+     * identical record — a client that was attached when the run paused and one that reconnected
+     * into the pause must reach the same state.
+     */
+    private fun parsePendingAction(element: JsonElement): StreamEvent? {
+        val pendingAction = try {
+            json.decodeFromJsonElement(PendingAction.serializer(), element)
+        } catch (e: Exception) {
+            Logger.w("SSE", e) { "Failed to parse pending action" }
+            return null
+        }
+        // An action with no id can't be resolved (the resume route 400s without one), so a
+        // card for it would be a dead end — better to leave the run rendering as streaming.
+        if (pendingAction.actionId.isNullOrBlank()) return null
+        return StreamEvent.PendingActionRequested(pendingAction)
     }
 
     // --- LangGraph events ---
@@ -330,8 +402,35 @@ class SseEventMapper(private val json: Json) {
             "title" -> mapTitleEvent(data)
             "on_token_usage" -> mapTokenUsage(data)
             "on_context_usage" -> mapContextUsage(data)
+            // v0.8.8 HITL: the run paused for tool approval / an ask-user question. `data` is the
+            // client-safe PendingAction projection — the same record the sync frame carries.
+            "on_pending_action" -> parsePendingAction(data)
+            // v0.8.8 steering: a queued steer was injected into the live run.
+            "on_steer_applied" -> mapSteerApplied(data)
             else -> null // Forward-compat: unknown agent-library events drop silently.
         }
+    }
+
+    /**
+     * Maps `on_steer_applied`. The injected text lives on the nested `part` (a `steer` content
+     * part, the same shape that is persisted into the reply), not at the top level.
+     *
+     * A frame with no `steerId` is dropped: the id is the only thing that ties this event back
+     * to the chip it retires, and an event that cannot retire one is worse than none — it would
+     * leave a pending chip up for a steer that has already gone in.
+     */
+    private fun mapSteerApplied(data: JsonObject): StreamEvent? {
+        val part = data["part"]?.jsonObject
+        val steerId = data["steerId"]?.jsonPrimitive?.contentOrNull
+            ?: part?.get("steerId")?.jsonPrimitive?.contentOrNull
+        if (steerId.isNullOrBlank()) return null
+        return StreamEvent.SteerApplied(
+            steerId = steerId,
+            index = data["index"]?.jsonPrimitive?.intOrNull,
+            text = part?.get("steer")?.jsonPrimitive?.contentOrNull,
+            responseMessageId = data["responseMessageId"]?.jsonPrimitive?.contentOrNull,
+            conversationId = data["conversationId"]?.jsonPrimitive?.contentOrNull,
+        )
     }
 
     private fun mapSummarizeComplete(
@@ -520,7 +619,7 @@ class SseEventMapper(private val json: Json) {
         val usage = try {
             json.decodeFromJsonElement(com.garfiec.librechat.core.model.usage.TokenUsage.serializer(), data)
         } catch (e: Exception) {
-            Logger.w(e, tag = "SSE") { "Failed to parse on_token_usage" }
+            Logger.w("SSE", e) { "Failed to parse on_token_usage" }
             return null
         }
         return StreamEvent.TokenUsageUpdate(usage)
@@ -531,7 +630,7 @@ class SseEventMapper(private val json: Json) {
         val usage = try {
             json.decodeFromJsonElement(com.garfiec.librechat.core.model.usage.ContextUsage.serializer(), data)
         } catch (e: Exception) {
-            Logger.w(e, tag = "SSE") { "Failed to parse on_context_usage" }
+            Logger.w("SSE", e) { "Failed to parse on_context_usage" }
             return null
         }
         return StreamEvent.ContextUsageUpdate(usage)
@@ -544,18 +643,37 @@ class SseEventMapper(private val json: Json) {
         val fileId = data["file_id"]?.jsonPrimitive?.contentOrNull ?: ""
         val filename = data["filename"]?.jsonPrimitive?.contentOrNull ?: ""
         val type = data["type"]?.jsonPrimitive?.contentOrNull ?: ""
-        // Web-search results ride in as an attachment with no file — `type == "web_search"`
-        // and the sources nested under the `web_search` key. Parse it before the file guard
-        // so these aren't dropped as "empty" attachments.
+        // Four attachment types ride in with no file at all, carrying a structured payload nested
+        // under a key equal to the attachment's own type (upstream `TAttachmentMetadata`). All of
+        // them are parsed before the file guard below, which would otherwise drop them as "empty".
         val webSearch = data["web_search"]?.let { element ->
             try {
                 json.decodeFromJsonElement(com.garfiec.librechat.core.model.WebSearchData.serializer(), element)
             } catch (e: Exception) {
-                Logger.w(e, tag = "SSE") { "Failed to parse web_search attachment data" }
+                Logger.w("SSE", e) { "Failed to parse web_search attachment data" }
                 null
             }
         }
-        if (fileId.isBlank() && filename.isBlank() && webSearch == null) return null
+        val fileSearch = data["file_search"]?.let { element ->
+            try {
+                json.decodeFromJsonElement(com.garfiec.librechat.core.model.FileSearchData.serializer(), element)
+            } catch (e: Exception) {
+                Logger.w("SSE", e) { "Failed to parse file_search attachment data" }
+                null
+            }
+        }
+        val memory = data["memory"]?.let { element ->
+            try {
+                json.decodeFromJsonElement(com.garfiec.librechat.core.model.MemoryArtifactData.serializer(), element)
+            } catch (e: Exception) {
+                Logger.w("SSE", e) { "Failed to parse memory attachment data" }
+                null
+            }
+        }
+        // Raw JSON on purpose — a typed decode would discard the whole attachment. See `UiResources`.
+        val uiResources = data["ui_resources"]
+        val hasPayload = webSearch != null || fileSearch != null || memory != null || uiResources != null
+        if (fileId.isBlank() && filename.isBlank() && !hasPayload) return null
         return StreamEvent.AttachmentCreated(
             fileId = fileId,
             filename = filename,
@@ -571,6 +689,9 @@ class SseEventMapper(private val json: Json) {
             textFormat = data["textFormat"]?.jsonPrimitive?.contentOrNull,
             previewError = data["previewError"]?.jsonPrimitive?.contentOrNull,
             webSearch = webSearch,
+            fileSearch = fileSearch,
+            memory = memory,
+            uiResources = uiResources,
         )
     }
 
@@ -632,5 +753,28 @@ class SseEventMapper(private val json: Json) {
                 }
             }
         }
+    }
+
+    companion object {
+        /**
+         * MIRRORED SERVER CONSTANT — registered in `scripts/mirrors.json` as
+         * `generation-reconcile-message`. Verbatim from `api/server/routes/agents/index.js`'s
+         * `onDone`. Re-verify on every upstream bump; see the failure mode below.
+         *
+         * A run that was replaced or terminalized between the status snapshot and the attach ends
+         * with a `{final:true, reconcile:true, …}` frame, which the route **rewrites to an
+         * ordinary `event: error`** for protocol-v1 clients like this one. `final: true` there is
+         * a `writeEvent` *option* consumed by telemetry, never a body field, so the payload
+         * carries only this sentence and `generationProtocolVersion` — and the genuine-error frame
+         * on the same route carries `generationProtocolVersion` too. The literal message is
+         * therefore the ONLY thing on the wire that separates a benign reconciliation, whose
+         * assistant reply is already saved server-side, from a real stream failure.
+         *
+         * Failure mode if upstream rewords it: the reply still loads (the reload runs on every
+         * terminal stream error), but it loads under an alarming error banner. Silent — nothing
+         * fails to decode.
+         */
+        const val GENERATION_RECONCILE_MESSAGE =
+            "Generation state changed; reconnect to load the saved response."
     }
 }

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.garfiec.librechat.core.common.extensions.serverHostLabel
 import com.garfiec.librechat.core.common.identity.deriveServerId
+import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.SavedLoginCredentialRef
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
@@ -34,6 +35,10 @@ data class LoginUiState(
     val socialLogins: List<String> = emptyList(),
     val savedCredentials: List<SavedLoginCredentialRef> = emptyList(),
     val pendingCredentialSave: PendingCredentialSave? = null,
+    // ALLOW_EMAIL_LOGIN (upstream #14180): when the server disables email/password login it now
+    // enforces it with a 403 on POST /api/auth/login. Fail-open to true so the form shows until
+    // config confirms otherwise. Drives hiding the email/password form.
+    val emailLoginEnabled: Boolean = true,
 )
 
 class LoginViewModel(
@@ -61,6 +66,7 @@ class LoginViewModel(
                         registrationEnabled = config.registrationEnabled,
                         socialLoginEnabled = config.socialLoginEnabled,
                         socialLogins = config.socialLogins.orEmpty(),
+                        emailLoginEnabled = config.emailLoginEnabled,
                     )
                 }
             }
@@ -152,9 +158,23 @@ class LoginViewModel(
                 }
                 is Result.Error -> {
                     credentialSaveHandoff.clear()
+                    // A 403 from /api/auth/login means the server enforces ALLOW_EMAIL_LOGIN=false
+                    // (#14180). Surface a clear reason and hide the form so the user reaches for a
+                    // provider instead of retrying credentials that will never be accepted.
+                    // checkBan runs BEFORE validateEmailLogin on this route and also answers 403,
+                    // so a banned account (or the non-browser-UA soft ban) must keep the server's
+                    // own message and leave the form visible — isBanned is the discriminator.
+                    val apiException = result.exception as? ApiException
+                    val isEmailLoginDisabled =
+                        apiException?.statusCode == 403 && !apiException.isBanned
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = result.message ?: "Login failed",
+                        error = if (isEmailLoginDisabled) {
+                            "Email and password sign-in is disabled on this server."
+                        } else {
+                            result.message ?: "Login failed"
+                        },
+                        emailLoginEnabled = if (isEmailLoginDisabled) false else _uiState.value.emailLoginEnabled,
                     )
                 }
                 is Result.Loading -> { /* no-op */ }

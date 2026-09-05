@@ -6,17 +6,41 @@ import com.garfiec.librechat.core.model.PromptGroup
 import com.garfiec.librechat.core.model.request.AddPromptToGroupRequest
 import com.garfiec.librechat.core.model.request.CreatePromptRequest
 import com.garfiec.librechat.core.model.request.UpdatePromptGroupRequest
-import com.garfiec.librechat.core.model.request.UpdatePromptTagRequest
 import com.garfiec.librechat.core.model.response.PromptGroupListResponse
+import kotlinx.coroutines.flow.StateFlow
 
 interface PromptRepository {
+
+    /**
+     * Bumped after any prompt mutation this repository accepted — create, group update, delete,
+     * a new version added to a group, or a production-tag change.
+     *
+     * Prompts are network-direct with no Room cache, so a screen that fetched them once has no
+     * observable to re-read from and nothing else reports the staleness: the composer's `/` picker
+     * keeps offering a deleted prompt and inserting a superseded body. Every prompt mutation in the
+     * app goes through the methods below, so a mutation added there must bump here too. Mirrors
+     * [AgentRepository.revision]; the consumer side is in `feature/chat/CLAUDE.md`.
+     */
+    val revision: StateFlow<Long>
+
     suspend fun getGroups(pageSize: Int = 10, cursor: String? = null): Result<PromptGroupListResponse>
+
+    /** Every visible prompt group in one call, for surfaces that must not truncate (the `/` picker). */
+    suspend fun getAllGroups(): Result<List<PromptGroup>>
     suspend fun getGroup(groupId: String): Result<PromptGroup>
     suspend fun create(request: CreatePromptRequest): Result<PromptGroup>
     suspend fun update(groupId: String, request: UpdatePromptGroupRequest): Result<PromptGroup>
     suspend fun delete(groupId: String): Result<Unit>
+
+    /**
+     * Adds a version to a group, answering the version created. A new version is not live until
+     * [updatePromptProductionTag] promotes it.
+     */
     suspend fun addPromptToGroup(groupId: String, request: AddPromptToGroupRequest): Result<Prompt>
-    suspend fun updatePromptProductionTag(promptId: String, request: UpdatePromptTagRequest): Result<Prompt>
+
+    /** Promotes a version to its group's production prompt — the body every surface reads. */
+    suspend fun updatePromptProductionTag(promptId: String): Result<Unit>
+
     suspend fun getPromptsByGroupId(groupId: String): Result<List<Prompt>>
 
     /**

@@ -8,6 +8,7 @@ import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
 import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
+import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
@@ -15,6 +16,8 @@ import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
 import com.garfiec.librechat.core.data.datastore.ThemeDataStore
 import com.garfiec.librechat.core.data.datastore.ThemeMode
+import com.garfiec.librechat.core.data.datastore.UploadRoutingMode
+import com.garfiec.librechat.core.data.prefetch.PrefetchDepth
 import com.garfiec.librechat.core.ui.theme.supportsDynamicColor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
@@ -73,6 +76,12 @@ private data class AdditionalPreferences(
     val chatHeaderContent: ChatHeaderContent = ChatHeaderContent.TITLE,
     val chatHeaderAlignment: ChatHeaderAlignment = ChatHeaderAlignment.LEFT,
     val contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,
+    val duringRunAction: DuringRunAction = DuringRunAction.QUEUE,
+    val prefetchEnabled: Boolean = false,
+    val prefetchAttachmentsEnabled: Boolean = false,
+    val prefetchOnMeteredEnabled: Boolean = false,
+    val prefetchDepth: Int = PrefetchDepth.DEFAULT,
+    val uploadRoutingMode: UploadRoutingMode = UploadRoutingMode.AUTO,
 )
 
 /**
@@ -181,6 +190,12 @@ class SettingsPreferencesController(
     private val contextBarPlacementPref: StateFlow<ContextBarPlacement> = settingsDataStore.contextBarPlacement
         .stateIn(scope, SharingStarted.Eagerly, ContextBarPlacement.OPTIONS_SHEET)
 
+    private val duringRunActionPref: StateFlow<DuringRunAction> = settingsDataStore.duringRunAction
+        .stateIn(scope, SharingStarted.Eagerly, DuringRunAction.QUEUE)
+
+    private val uploadRoutingModePref: StateFlow<UploadRoutingMode> = settingsDataStore.uploadRoutingMode
+        .stateIn(scope, SharingStarted.Eagerly, UploadRoutingMode.AUTO)
+
     private val baseAdditionalPreferences = combine(
         tabletSidebarGestureEnabled,
         settingsDataStore.autoSendAfterStt,
@@ -213,10 +228,22 @@ class SettingsPreferencesController(
         additional.copy(chatHeaderAlignment = headerAlignment)
     }.combine(contextBarPlacementPref) { additional, contextBarPlacement ->
         additional.copy(contextBarPlacement = contextBarPlacement)
+    }.combine(duringRunActionPref) { additional, duringRunAction ->
+        additional.copy(duringRunAction = duringRunAction)
+    }.combine(uploadRoutingModePref) { additional, uploadRoutingMode ->
+        additional.copy(uploadRoutingMode = uploadRoutingMode)
     }.combine(settingsDataStore.sttOnDevice) { additional, sttOnDevice ->
         additional.copy(sttOnDevice = sttOnDevice)
     }.combine(settingsDataStore.sttEndOfSpeech) { additional, sttEndOfSpeech ->
         additional.copy(sttEndOfSpeech = sttEndOfSpeech)
+    }.combine(settingsDataStore.prefetchEnabled) { additional, prefetch ->
+        additional.copy(prefetchEnabled = prefetch)
+    }.combine(settingsDataStore.prefetchAttachmentsEnabled) { additional, prefetchAttachments ->
+        additional.copy(prefetchAttachmentsEnabled = prefetchAttachments)
+    }.combine(settingsDataStore.prefetchOnMeteredEnabled) { additional, prefetchOnMetered ->
+        additional.copy(prefetchOnMeteredEnabled = prefetchOnMetered)
+    }.combine(settingsDataStore.prefetchDepth) { additional, depth ->
+        additional.copy(prefetchDepth = depth)
     }.stateIn(scope, SharingStarted.Eagerly, AdditionalPreferences(true, false, "", "", true))
 
     /** The single public UI state that merges DataStore preferences with imperative state. */
@@ -266,6 +293,12 @@ class SettingsPreferencesController(
             chatHeaderContent = additional.chatHeaderContent,
             chatHeaderAlignment = additional.chatHeaderAlignment,
             contextBarPlacement = additional.contextBarPlacement,
+            duringRunAction = additional.duringRunAction,
+            prefetchEnabled = additional.prefetchEnabled,
+            prefetchAttachmentsEnabled = additional.prefetchAttachmentsEnabled,
+            prefetchOnMeteredEnabled = additional.prefetchOnMeteredEnabled,
+            prefetchDepth = additional.prefetchDepth,
+            uploadRoutingMode = additional.uploadRoutingMode,
         )
     }.stateIn(scope, SharingStarted.Eagerly, SettingsUiState())
 
@@ -307,12 +340,36 @@ class SettingsPreferencesController(
         scope.launch { settingsDataStore.setAutoScrollEnabled(enabled) }
     }
 
+    fun setPrefetchEnabled(enabled: Boolean) {
+        scope.launch { settingsDataStore.setPrefetchEnabled(enabled) }
+    }
+
+    fun setPrefetchAttachmentsEnabled(enabled: Boolean) {
+        scope.launch { settingsDataStore.setPrefetchAttachmentsEnabled(enabled) }
+    }
+
+    fun setPrefetchDepth(depth: Int) {
+        scope.launch { settingsDataStore.setPrefetchDepth(depth) }
+    }
+
+    fun setPrefetchOnMeteredEnabled(enabled: Boolean) {
+        scope.launch { settingsDataStore.setPrefetchOnMeteredEnabled(enabled) }
+    }
+
     fun setShowThinkingBlocks(show: Boolean) {
         scope.launch { settingsDataStore.setShowThinkingBlocks(show) }
     }
 
     fun setContextBarPlacement(placement: ContextBarPlacement) {
         scope.launch { settingsDataStore.setContextBarPlacement(placement) }
+    }
+
+    fun setDuringRunAction(action: DuringRunAction) {
+        scope.launch { settingsDataStore.setDuringRunAction(action) }
+    }
+
+    fun setUploadRoutingMode(mode: UploadRoutingMode) {
+        scope.launch { settingsDataStore.setUploadRoutingMode(mode) }
     }
 
     fun setShowImageDescriptions(show: Boolean) {

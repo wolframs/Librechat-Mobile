@@ -10,6 +10,9 @@ import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.datastore.ThemeDataStore
 import com.garfiec.librechat.core.data.datastore.ThemeMode
+import com.garfiec.librechat.core.data.datastore.UploadRoutingMode
+import com.garfiec.librechat.core.data.prefetch.AttachmentWarmer
+import com.garfiec.librechat.core.data.prefetch.PrefetchDepth
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.data.repository.BalanceRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
@@ -63,6 +66,7 @@ class SettingsViewModelTest {
     private val serverDataStore = mockk<ServerDataStore>(relaxed = true)
     private val settingsDataStore = mockk<SettingsDataStore>(relaxed = true)
     private val selectedLanguageFlow = MutableStateFlow(SettingsDataStore.DEFAULT_LANGUAGE)
+    private val uploadRoutingModeFlow = MutableStateFlow(UploadRoutingMode.AUTO)
     private val mcpRepository = mockk<McpRepository>(relaxed = true)
     private val memoryRepository = mockk<MemoryRepository>(relaxed = true)
     private val speechRepository = mockk<SpeechRepository>(relaxed = true)
@@ -112,11 +116,19 @@ class SettingsViewModelTest {
         every { settingsDataStore.sttLanguage } returns MutableStateFlow("")
         every { settingsDataStore.sttOnDevice } returns MutableStateFlow(true)
         every { settingsDataStore.sttEndOfSpeech } returns MutableStateFlow(false)
+        // The preferences state is one combine chain, so a source that never emits stalls all of it —
+        // an unstubbed flow here shows up as an unrelated setting silently keeping its default.
+        every { settingsDataStore.prefetchEnabled } returns MutableStateFlow(false)
+        every { settingsDataStore.prefetchAttachmentsEnabled } returns MutableStateFlow(false)
+        every { settingsDataStore.prefetchOnMeteredEnabled } returns MutableStateFlow(false)
+        every { settingsDataStore.prefetchDepth } returns MutableStateFlow(PrefetchDepth.DEFAULT)
         every { settingsDataStore.chatLayoutStyle } returns MutableStateFlow(ChatLayoutConstants.THREAD)
         every { settingsDataStore.showAvatars } returns MutableStateFlow(true)
         every { settingsDataStore.showBubbles } returns MutableStateFlow(false)
         every { settingsDataStore.latexRenderer } returns MutableStateFlow(LatexRenderer.KATEX)
         every { settingsDataStore.selectedLanguage } returns selectedLanguageFlow
+        every { settingsDataStore.uploadRoutingMode } returns uploadRoutingModeFlow
+        coEvery { settingsDataStore.setUploadRoutingMode(any()) } answers { uploadRoutingModeFlow.value = firstArg() }
         coEvery { settingsDataStore.setSelectedLanguage(any()) } answers { selectedLanguageFlow.value = firstArg() }
 
         // Setup default API responses
@@ -163,6 +175,10 @@ class SettingsViewModelTest {
             override val versionName = "0.1.0"
             override val versionCode = 1L
             override val gitSha = "testsha0"
+        },
+        attachmentWarmer = object : AttachmentWarmer {
+            override val isSupported = true
+            override suspend fun warm(url: String) = Unit
         },
         ioDispatcher = testDispatcher,
     )
@@ -401,18 +417,6 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `toggleCommand updates command enabled state`() = runTest {
-        viewModel = createViewModel()
-        advanceUntilIdle()
-
-        viewModel.toggleCommand("help", false)
-        advanceUntilIdle()
-
-        val helpCmd = viewModel.uiState.value.commands.find { it.name == "help" }
-        assertThat(helpCmd?.enabled).isFalse()
-    }
-
-    @Test
     fun `retry reloads user profile`() = runTest {
         coEvery { userRepository.getUser() } returns Result.Success(testUser)
 
@@ -458,5 +462,18 @@ class SettingsViewModelTest {
         assertThat(payload?.content).isEqualTo(buffer)
         assertThat(payload?.fileName).endsWith(".jsonl")
         assertThat(viewModel.uiState.value.isLogsExporting).isFalse()
+    }
+
+    @Test
+    fun `setUploadRoutingMode persists and surfaces the new mode`() = runTest {
+        viewModel = createViewModel()
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.uploadRoutingMode).isEqualTo(UploadRoutingMode.AUTO)
+
+        viewModel.setUploadRoutingMode(UploadRoutingMode.MANUAL)
+        advanceUntilIdle()
+
+        coVerify { settingsDataStore.setUploadRoutingMode(UploadRoutingMode.MANUAL) }
+        assertThat(viewModel.uiState.value.uploadRoutingMode).isEqualTo(UploadRoutingMode.MANUAL)
     }
 }

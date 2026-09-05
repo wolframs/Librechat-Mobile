@@ -26,6 +26,7 @@ val authModule = module {
     viewModel { params ->
         ServerUrlViewModel(
             serverDataStore = get(),
+            serverRepository = get(),
             configRepository = get(),
             accountSwitcher = get(),
             settingsDataStore = get(),

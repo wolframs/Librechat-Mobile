@@ -1,10 +1,19 @@
-# LibreChat Mobile
+# Switchboard: LibreChat Mobile Client
 
-[![LibreChat](https://img.shields.io/badge/LibreChat-v0.8.4_–_v0.8.7-blue)](https://github.com/danny-avila/LibreChat/releases/tag/v0.8.7)
+[![LibreChat](https://img.shields.io/badge/LibreChat-v0.8.4_–_v0.8.8--rc1-blue)](https://github.com/danny-avila/LibreChat/releases/tag/v0.8.8-rc1)
 
 A third-party native mobile client for [LibreChat](https://www.librechat.ai/) (Android & iOS). Not affiliated with the official LibreChat project — this is an independent app that connects to any self-hosted LibreChat server, no backend modifications required.
 
-> **Backend compatibility:** Tested against LibreChat **v0.8.4 – v0.8.7**. Older releases may work but are not guaranteed; newer releases are supported on a best-effort basis until the next sync.
+> **Backend compatibility:** Tested against LibreChat **v0.8.4 – v0.8.8-rc1**. Older releases may work but are not guaranteed; newer releases are supported on a best-effort basis until the next sync.
+
+## Why use this instead of the web app?
+
+- **Smoother and faster** — a real native app instead of a website in a wrapper, so scrolling, typing, and watching responses stream in all feel snappier.
+- **Feels like a mobile app, not a shrunk-down website** — familiar gestures like swipe to switch accounts and swipe back, comfortable tap targets, and a layout that adapts to tablets and foldables.
+- **Plays nicely with your phone** — share text, images, and files into the app from anywhere *(Android)*, pin your favorite models or generated content to your home screen, open chat links straight into the right screen, and save or share images through your phone's normal menus.
+- **Works without a connection** — your chat list and any conversations you've opened are saved on your phone, so you can keep reading with spotty or no signal.
+- **Multiple accounts, one app** — sign in to different accounts on different LibreChat servers and switch between them instantly, no re-entering passwords.
+- **Dictation stays on your phone** — voice typing runs on-device instead of through a server.
 
 ## Features
 
@@ -60,16 +69,16 @@ Release-candidate builds (versions like `2026.07.1-rc1`) are published as GitHub
 
 ### Manual install
 
-Download the latest `librechat-vYYYY.MM.P.apk` from [Releases](https://github.com/garfiec/Librechat-Mobile/releases) and open it on your device (you may need to allow installs from your browser/file manager).
+Download the latest `switchboard-vYYYY.MM.P.apk` from [Releases](https://github.com/garfiec/Librechat-Mobile/releases) and open it on your device (you may need to allow installs from your browser/file manager).
 
 ### Verifying the signing key
 
 All releases are signed with the same key, so updates install in place. Verify a downloaded APK matches the published certificate:
 
 ```bash
-apksigner verify --print-certs librechat-vYYYY.MM.P.apk
+apksigner verify --print-certs switchboard-vYYYY.MM.P.apk
 # or check the .sha256 checksum attached to each release:
-sha256sum -c librechat-vYYYY.MM.P.apk.sha256
+sha256sum -c switchboard-vYYYY.MM.P.apk.sha256
 ```
 
 > Signing certificate SHA-256: `66:8A:71:96:6A:07:06:14:D1:44:95:5D:83:E7:23:6A:3C:ED:77:F8:64:08:57:C3:FA:84:B0:3C:CD:E4:0E:59`
@@ -81,7 +90,7 @@ If the signing key ever changed, Android would refuse the update — so this key
 Every release APK carries a [SLSA build-provenance attestation](https://github.com/garfiec/Librechat-Mobile/attestations), signed by GitHub Actions via Sigstore. Unlike the `.sha256` — which whoever attaches a release could regenerate — the attestation proves the binary was produced by this repo's release workflow at a specific commit, and **cannot be forged outside GitHub's CI**. With the [GitHub CLI](https://cli.github.com):
 
 ```bash
-gh attestation verify librechat-vYYYY.MM.P.apk \
+gh attestation verify switchboard-vYYYY.MM.P.apk \
   --repo garfiec/Librechat-Mobile \
   --signer-workflow garfiec/Librechat-Mobile/.github/workflows/release.yml
 ```
@@ -118,8 +127,8 @@ Without this setting, the server's violation system may accumulate ban points ag
 | Android Studio or IntelliJ IDEA | Latest stable (recommended IDE for all code editing) |
 | Xcode | 15+ (iOS only, Apple Silicon Mac required — IDE not needed, CLI only) |
 | iOS Deployment Target | 16.0+ |
-| Gradle | 9.4.1 (via wrapper) |
-| Kotlin | 2.3.20 |
+| Gradle | 9.5.1 (via wrapper) |
+| Kotlin | 2.4.10 |
 
 ## Building from Source
 
@@ -168,7 +177,7 @@ See [iosApp/README.md](iosApp/README.md) for full build and launch instructions.
 - Ktor Client (OkHttp on Android, Darwin on iOS)
 - Kotlinx Serialization
 - Room (cache), DataStore (preferences), EncryptedSharedPreferences / Keychain (tokens)
-- Kotlin 2.3.20, compileSdk 36, minSdk 26
+- Kotlin 2.4.10, compileSdk 36, minSdk 26
 
 ## Contributing
 

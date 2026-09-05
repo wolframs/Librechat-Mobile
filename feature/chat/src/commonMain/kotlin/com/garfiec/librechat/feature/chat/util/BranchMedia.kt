@@ -3,6 +3,8 @@ package com.garfiec.librechat.feature.chat.util
 import com.garfiec.librechat.core.model.Attachment
 import com.garfiec.librechat.core.model.ContentType
 import com.garfiec.librechat.core.model.Message
+import com.garfiec.librechat.core.model.media.resolveFileReferenceUrl
+import com.garfiec.librechat.core.model.media.resolveImageFilePartUrl
 import com.garfiec.librechat.core.ui.media.MediaItem
 import com.garfiec.librechat.feature.chat.components.isImageGenToolCall
 import com.garfiec.librechat.feature.chat.components.parseImageGenResult
@@ -42,9 +44,10 @@ internal fun extractBranchMedia(
     activeToolCalls.forEach { toolCall ->
         if (isImageGenToolCall(toolCall.name.lowercase())) {
             val result = parseStreamingImageGenResult(toolCall, baseUrl, streamingAttachments)
-            val url = result.imageUrl
-            if (!url.isNullOrBlank()) {
-                items += MediaItem(url, contentDescription = result.prompt.orEmpty())
+            result.imageUrls.forEach { url ->
+                if (url.isNotBlank()) {
+                    items += MediaItem(url, contentDescription = result.prompt.orEmpty())
+                }
             }
         }
     }
@@ -92,9 +95,10 @@ internal fun collectMessageMedia(message: Message, baseUrl: String): List<MediaI
                 val name = (toolCall?.name ?: toolCall?.function?.name).orEmpty().lowercase()
                 if (isImageGenToolCall(name)) {
                     val result = parseImageGenResult(toolCall, baseUrl, attachments)
-                    val url = result.imageUrl
-                    if (!url.isNullOrBlank()) {
-                        items += MediaItem(url, contentDescription = result.prompt.orEmpty())
+                    result.imageUrls.forEach { url ->
+                        if (url.isNotBlank()) {
+                            items += MediaItem(url, contentDescription = result.prompt.orEmpty())
+                        }
                     }
                 }
             }

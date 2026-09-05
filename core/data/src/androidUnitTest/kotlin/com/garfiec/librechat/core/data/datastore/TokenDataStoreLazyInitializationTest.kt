@@ -21,6 +21,7 @@ class TokenDataStoreLazyInitializationTest {
         val store = TokenDataStore(
             context = context,
             refreshClient = lazy { error("refresh client is not used during warm-up") },
+            ioDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler),
             encryptedPrefsFactory = {
                 createCalls += 1
                 prefs

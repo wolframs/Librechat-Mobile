@@ -62,7 +62,9 @@ class StreamingManagerUnexpectedEofTest {
             treeDelegate = mockk(relaxed = true),
             emitUserKeyError = {},
             reloadConversation = reloadConversation,
-            restoreUnsentInput = {},
+            restoreUnsentInput = { _, _ -> },
+            pendingActionDelegate = mockk(relaxed = true),
+            steeringDelegate = mockk(relaxed = true),
             isNewConversation = { false },
             isHandedOffNewChat = { false },
         ) to state

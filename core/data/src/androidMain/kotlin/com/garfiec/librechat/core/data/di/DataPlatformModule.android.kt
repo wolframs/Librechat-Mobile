@@ -6,10 +6,15 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.Room
 import com.garfiec.librechat.core.common.di.KoinQualifiers
+import com.garfiec.librechat.core.data.datastore.CommonTokenDataStore
 import com.garfiec.librechat.core.data.datastore.TokenDataStore
 import com.garfiec.librechat.core.data.db.LibreChatDatabase
 import com.garfiec.librechat.core.data.db.migration.MIGRATION_3_4
 import com.garfiec.librechat.core.data.db.migration.MIGRATION_4_5
+import com.garfiec.librechat.core.data.prefetch.AttachmentWarmer
+import com.garfiec.librechat.core.data.prefetch.CoilAttachmentWarmer
+import com.garfiec.librechat.core.data.prefetch.PrefetchScheduler
+import com.garfiec.librechat.core.data.prefetch.WorkManagerPrefetchScheduler
 import com.garfiec.librechat.core.data.repository.AndroidSwitchCacheCleaner
 import com.garfiec.librechat.core.data.repository.CommonSessionCacheCleaner
 import com.garfiec.librechat.core.data.repository.SessionCacheCleaner
@@ -29,6 +34,11 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 
 actual val dataPlatformModule: Module = module {
 
+    // Bound per platform rather than defaulted in dataModule: Koin starts with allowOverride(false),
+    // so a common default plus a platform override would throw at launch.
+    single<AttachmentWarmer> { CoilAttachmentWarmer(androidContext()) }
+    single<PrefetchScheduler> { WorkManagerPrefetchScheduler(androidContext()) }
+
     // --- Database ---
     single {
         Room.databaseBuilder(androidContext(), LibreChatDatabase::class.java, "librechat.db")
@@ -44,13 +54,17 @@ actual val dataPlatformModule: Module = module {
         TokenDataStore(
             context = androidContext(),
             refreshClient = lazy(LazyThreadSafetyMode.NONE) { get<HttpClient>(KoinQualifiers.Refresh) },
+            ioDispatcher = get(KoinQualifiers.IO),
         )
-    } binds arrayOf(TokenManager::class, SecureTokenStorage::class)
+        // Bound as CommonTokenDataStore too: TokenCacheWarmer needs warmTokenCache(), which is
+        // deliberately not part of the TokenManager contract.
+    } binds arrayOf(TokenManager::class, SecureTokenStorage::class, CommonTokenDataStore::class)
 
     // --- Session Cache Cleaner ---
     single<SessionCacheCleaner> {
+        val context = androidContext()
         CommonSessionCacheCleaner(
-            cacheRoot = androidContext().cacheDir.absolutePath,
+            cacheRoot = { context.cacheDir.absolutePath },
         )
     }
 

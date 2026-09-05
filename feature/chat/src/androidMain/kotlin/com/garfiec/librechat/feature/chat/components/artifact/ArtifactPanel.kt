@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,11 +30,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.data.repository.ArtifactShortcutRepository
+import com.garfiec.librechat.feature.chat.components.web.rememberWebAssetBaseUrl
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
+import org.koin.compose.koinInject
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
-import org.koin.compose.koinInject
 
 /**
  * Android preview surface — a `WebView` hosting the artifact's rendered HTML.
@@ -50,6 +51,7 @@ actual fun ArtifactPreviewSurface(
 ) {
     val bgColor = MaterialTheme.colorScheme.surface.toArgb()
     var isLoading by remember { mutableStateOf(true) }
+    val assetBase = rememberWebAssetBaseUrl() ?: return
 
     val html = remember(content, type, isDarkTheme) {
         ArtifactWebContent.buildHtml(content, type, isDarkTheme, inline = false)
@@ -122,14 +124,14 @@ actual fun ArtifactPreviewSurface(
                             Logger.w { "SSL error in artifact WebView: ${error?.primaryError}" }
                         }
                     }
-                    loadDataWithBaseURL("https://cdn.jsdelivr.net", html, "text/html", "UTF-8", null)
+                    loadDataWithBaseURL(assetBase, html, "text/html", "UTF-8", null)
                     loadedHtml = html
                 }
             },
             update = { webView ->
                 webView.setBackgroundColor(bgColor)
                 if (html != loadedHtml) {
-                    webView.loadDataWithBaseURL("https://cdn.jsdelivr.net", html, "text/html", "UTF-8", null)
+                    webView.loadDataWithBaseURL(assetBase, html, "text/html", "UTF-8", null)
                     loadedHtml = html
                 }
             },

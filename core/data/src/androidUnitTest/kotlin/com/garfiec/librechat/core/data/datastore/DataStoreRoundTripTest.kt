@@ -142,6 +142,7 @@ class DataStoreRoundTripTest {
         assertThat(store.selectedLanguage.first()).isEqualTo("system")
         assertThat(store.sttOnDevice.first()).isTrue()
         assertThat(store.sttEndOfSpeech.first()).isFalse()
+        assertThat(store.uploadRoutingMode.first()).isEqualTo(UploadRoutingMode.AUTO)
     }
 
     @Test
@@ -182,6 +183,27 @@ class DataStoreRoundTripTest {
     }
 
     @Test
+    fun uploadRoutingMode_roundTripsAndDefaultsToAuto() {
+        assertThat(UploadRoutingMode.fromString(null)).isEqualTo(UploadRoutingMode.AUTO)
+        assertThat(UploadRoutingMode.fromString("garbage")).isEqualTo(UploadRoutingMode.AUTO)
+        for (mode in UploadRoutingMode.entries) {
+            assertThat(UploadRoutingMode.fromString(mode.toStorageString())).isEqualTo(mode)
+        }
+    }
+
+    @Test
+    fun settingsDataStore_roundTrip_uploadRoutingMode() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-upload-routing")
+        val store = settingsStore(ds)
+
+        store.setUploadRoutingMode(UploadRoutingMode.MANUAL)
+        assertThat(store.uploadRoutingMode.first()).isEqualTo(UploadRoutingMode.MANUAL)
+
+        store.setUploadRoutingMode(UploadRoutingMode.AUTO)
+        assertThat(store.uploadRoutingMode.first()).isEqualTo(UploadRoutingMode.AUTO)
+    }
+
+    @Test
     fun settingsDataStore_roundTrip_strings() = runTest(testDispatcher) {
         val ds = createDataStore("settings-strings")
         val store = settingsStore(ds)
@@ -207,15 +229,19 @@ class DataStoreRoundTripTest {
         val job = launch { store.lastUsedModel.collect { emissions.add(it) } }
         advanceUntilIdle()
         // While the account is Warming the flow is suppressed (no null emission that a seeder would
-        // mistake for "no last-used saved").
+        // mistake for "no last-used saved"). Asserting an ABSENCE legitimately needs a snapshot, so
+        // the collector stays for this half.
         assertThat(emissions).isEmpty()
+        job.cancel()
 
         provider.set(AccountId("srv:acctX"))
         store.setLastUsedModel("openAI", "gpt-4o")
-        advanceUntilIdle()
-        assertThat(emissions.last()).isEqualTo("gpt-4o")
 
-        job.cancel()
+        // Await with first(), NOT a collector plus advanceUntilIdle(): this DataStore takes no
+        // `scope`, so it reads the file on Dispatchers.IO — real threads on the real clock — while
+        // advanceUntilIdle() only drains the virtual scheduler. Snapshotting a collector after it
+        // races real disk I/O and flakes as "List is empty" under load.
+        assertThat(store.lastUsedModel.first()).isEqualTo("gpt-4o")
     }
 
     // --- SettingsDataStore: model usage ranking (home-screen shortcuts) ---

@@ -12,7 +12,15 @@ import com.garfiec.librechat.core.data.datastore.RoleCacheDataStore
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.datastore.ThemeDataStore
+import com.garfiec.librechat.core.data.datastore.TokenCacheWarmer
 import com.garfiec.librechat.core.data.db.LibreChatDatabase
+import com.garfiec.librechat.core.data.prefetch.PrefetchBackgroundRunner
+import com.garfiec.librechat.core.data.prefetch.PrefetchController
+import com.garfiec.librechat.core.data.prefetch.PrefetchEngine
+import com.garfiec.librechat.core.data.prefetch.PrefetchGate
+import com.garfiec.librechat.core.data.prefetch.PrefetchPolicy
+import com.garfiec.librechat.core.data.prefetch.PrefetchScheduleCoordinator
+import com.garfiec.librechat.core.data.prefetch.PrefetchStatusReporter
 import com.garfiec.librechat.core.data.repository.AccountClaimReconciler
 import com.garfiec.librechat.core.data.repository.AccountDataPurger
 import com.garfiec.librechat.core.data.repository.AccountSessionEstablisher
@@ -47,6 +55,8 @@ import com.garfiec.librechat.core.data.repository.FileRepository
 import com.garfiec.librechat.core.data.repository.FileRepositoryImpl
 import com.garfiec.librechat.core.data.repository.KeyRepository
 import com.garfiec.librechat.core.data.repository.KeyRepositoryImpl
+import com.garfiec.librechat.core.data.repository.MarketRepository
+import com.garfiec.librechat.core.data.repository.MarketRepositoryImpl
 import com.garfiec.librechat.core.data.repository.McpRepository
 import com.garfiec.librechat.core.data.repository.McpRepositoryImpl
 import com.garfiec.librechat.core.data.repository.MemoryRepository
@@ -61,10 +71,13 @@ import com.garfiec.librechat.core.data.repository.ProjectRepository
 import com.garfiec.librechat.core.data.repository.ProjectRepositoryImpl
 import com.garfiec.librechat.core.data.repository.PromptRepository
 import com.garfiec.librechat.core.data.repository.PromptRepositoryImpl
+import com.garfiec.librechat.core.data.repository.ResumePinStore
 import com.garfiec.librechat.core.data.repository.RoleRepository
 import com.garfiec.librechat.core.data.repository.RoleRepositoryImpl
 import com.garfiec.librechat.core.data.repository.SearchRepository
 import com.garfiec.librechat.core.data.repository.SearchRepositoryImpl
+import com.garfiec.librechat.core.data.repository.ServerRepository
+import com.garfiec.librechat.core.data.repository.ServerRepositoryImpl
 import com.garfiec.librechat.core.data.repository.ShareRepository
 import com.garfiec.librechat.core.data.repository.ShareRepositoryImpl
 import com.garfiec.librechat.core.data.repository.SkillsRepository
@@ -73,6 +86,8 @@ import com.garfiec.librechat.core.data.repository.SpeechRepository
 import com.garfiec.librechat.core.data.repository.SpeechRepositoryImpl
 import com.garfiec.librechat.core.data.repository.TagRepository
 import com.garfiec.librechat.core.data.repository.TagRepositoryImpl
+import com.garfiec.librechat.core.data.repository.ToolFavoritesRepository
+import com.garfiec.librechat.core.data.repository.ToolFavoritesRepositoryImpl
 import com.garfiec.librechat.core.data.repository.UserRepository
 import com.garfiec.librechat.core.data.repository.UserRepositoryImpl
 import com.garfiec.librechat.core.data.util.AccountLabelBackfillSessionTask
@@ -84,6 +99,7 @@ import com.garfiec.librechat.core.data.util.SessionTask
 import com.garfiec.librechat.core.data.util.SessionTaskRunner
 import com.garfiec.librechat.core.data.util.SyncFavoritesSessionTask
 import com.garfiec.librechat.core.network.client.AccountReadyGate
+import com.garfiec.librechat.core.network.client.ServerHeadersProvider
 import com.garfiec.librechat.core.network.client.ServerUrlProvider
 import kotlinx.coroutines.CoroutineScope
 import org.koin.core.module.Module
@@ -107,6 +123,8 @@ val dataModule = module {
     single { get<LibreChatDatabase>().draftDao() }
     single { get<LibreChatDatabase>().accountClaimDao() }
     single { get<LibreChatDatabase>().artifactShortcutDao() }
+    single { get<LibreChatDatabase>().serverDao() }
+    single { get<LibreChatDatabase>().prefetchWatermarkDao() }
 
     // --- Account identity (row-tenancy) ---
 
@@ -114,6 +132,16 @@ val dataModule = module {
     single<ActiveAccountProvider> { InMemoryActiveAccountProvider() }
     // Persisted account roster (list + single active pointer). Pure storage.
     single { AccountRoster(dataStore = get(), json = get()) }
+    // Eager: its whole job is to pull the keystore work and the token decrypt off the thread startKoin
+    // runs on, so a lazy binding nobody resolves would never start it. Its position relative to
+    // AccountRegistry is not an invariant — both do their work in a launch, and the store's
+    // read-through fallback covers whoever gets there first.
+    single(createdAtStart = true) {
+        TokenCacheWarmer(
+            store = get(),
+            appScope = get<CoroutineScope>(KoinQualifiers.ApplicationScope),
+        )
+    }
     // Eager: at cold start it must migrate + reconcile + seed the provider (driving the URL from the
     // active roster entry) even before any consumer asks for it. Bound as the AccountReadyGate the
     // HTTP clients + first-frame routing await.
@@ -158,6 +186,7 @@ val dataModule = module {
             accountDataPurger = get(),
             prefsPurger = get(),
             sessionCacheCleaner = get(),
+            serverHeadersProvider = get(),
         )
     }
     single { AccountScopedPrefsPurger(dataStore = get()) }
@@ -167,12 +196,13 @@ val dataModule = module {
             messageDao = get(),
             draftDao = get(),
             tagDao = get(),
+            prefetchWatermarkDao = get(),
             ioDispatcher = get(KoinQualifiers.IO),
         )
     }
-    // Sole owner of account-Session transitions. Lazy (not createdAtStart): instantiated when the
-    // logout path (AuthRepositoryImpl) first resolves it, at which point its collector starts. Its
-    // `current` session flow has no consumer yet — the SessionWriter facade that would is deferred.
+    // Sole owner of account-Session transitions. Lazy, but constructed at Koin start in practice
+    // because PrefetchController (createdAtStart) resolves it — so its collector is running before
+    // the logout path ever asks for it.
     single {
         SessionManager(
             activeAccountProvider = get(),
@@ -197,6 +227,17 @@ val dataModule = module {
             ioDispatcher = get(KoinQualifiers.IO),
         )
     }
+    // Eager because the warm gate blocks the first HTTP request: starting the seed read at Koin start
+    // overlaps the database open it forces with the rest of cold start, instead of serializing it
+    // after whichever client resolves this first.
+    single<ServerRepository>(createdAtStart = true) {
+        ServerRepositoryImpl(
+            serverDao = get(),
+            json = get(),
+            appScope = get<CoroutineScope>(KoinQualifiers.ApplicationScope),
+            ioDispatcher = get(KoinQualifiers.IO),
+        )
+    } bind ServerHeadersProvider::class
     singleOf(::ConfigCacheDataStore)
     singleOf(::RoleCacheDataStore)
     single {
@@ -252,6 +293,82 @@ val dataModule = module {
         SessionTaskRunner(
             tasks = getAll<SessionTask>(),
             applicationScope = get<CoroutineScope>(KoinQualifiers.ApplicationScope),
+        )
+    }
+
+    // --- Background prefetch (opt-in, off by default) ---
+
+    singleOf(::PrefetchPolicy)
+    single {
+        PrefetchGate(
+            deferredWorkWindow = get(),
+            settingsDataStore = get(),
+            networkConditionObserver = get(),
+            connectivityObserver = get(),
+            powerStateObserver = get(),
+            requestActivityTracker = get(),
+        )
+    }
+    single {
+        PrefetchEngine(
+            conversationDao = get(),
+            messageDao = get(),
+            watermarkDao = get(),
+            messageRepository = get(),
+            conversationRepository = get(),
+            configRepository = get(),
+            agentRepository = get(),
+            policy = get(),
+            openConversationRegistry = get(),
+            attachmentWarmer = get(),
+            settingsDataStore = get(),
+            serverUrlProvider = get(),
+            foregroundSignal = get(),
+            ioDispatcher = get(KoinQualifiers.IO),
+        )
+    }
+    // Eager: its entire job is to collect SessionManager.current, so a lazy binding nobody resolves
+    // would simply never start. Not a SessionTask — those fire on login, cold start and switch, but
+    // never on a return to the foreground, which is most of when this should run.
+    single(createdAtStart = true) {
+        PrefetchController(
+            sessionManager = get(),
+            gate = get(),
+            engine = get(),
+            appScope = get<CoroutineScope>(KoinQualifiers.ApplicationScope),
+        )
+    }
+    // Eager for the same reason as PrefetchController: its whole job is a collector, so a lazy
+    // binding nobody resolves would never register or cancel anything.
+    single(createdAtStart = true) {
+        PrefetchScheduleCoordinator(
+            settingsDataStore = get(),
+            activeAccountProvider = get(),
+            scheduler = get(),
+            appScope = get<CoroutineScope>(KoinQualifiers.ApplicationScope),
+        )
+    }
+    single {
+        PrefetchBackgroundRunner(
+            sessionManager = get(),
+            controller = get(),
+            engine = get(),
+            deferredWorkWindow = get(),
+            settingsDataStore = get(),
+        )
+    }
+    single {
+        PrefetchStatusReporter(
+            gate = get(),
+            engine = get(),
+            policy = get(),
+            conversationDao = get(),
+            messageDao = get(),
+            watermarkDao = get(),
+            openConversationRegistry = get(),
+            activeAccountProvider = get(),
+            settingsDataStore = get(),
+            scheduler = get(),
         )
     }
 
@@ -319,6 +436,7 @@ val dataModule = module {
     singleOf(::SearchRepositoryImpl) bind SearchRepository::class
     singleOf(::KeyRepositoryImpl) bind KeyRepository::class
     singleOf(::ApiKeyRepositoryImpl) bind ApiKeyRepository::class
+    singleOf(::MarketRepositoryImpl) bind MarketRepository::class
     singleOf(::McpRepositoryImpl) bind McpRepository::class
     singleOf(::MemoryRepositoryImpl) bind MemoryRepository::class
     singleOf(::PermissionsRepositoryImpl) bind PermissionsRepository::class
@@ -332,4 +450,6 @@ val dataModule = module {
     singleOf(::UserRepositoryImpl) bind UserRepository::class
     singleOf(::BannerRepositoryImpl) bind BannerRepository::class
     singleOf(::FavoritesRepositoryImpl) bind FavoritesRepository::class
+    singleOf(::ToolFavoritesRepositoryImpl) bind ToolFavoritesRepository::class
+    singleOf(::ResumePinStore)
 }

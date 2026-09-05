@@ -6,11 +6,16 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.garfiec.librechat.core.common.di.KoinQualifiers
+import com.garfiec.librechat.core.data.datastore.CommonTokenDataStore
 import com.garfiec.librechat.core.data.datastore.IosTokenDataStore
 import com.garfiec.librechat.core.data.datastore.ServerUrlKeychainFallback
 import com.garfiec.librechat.core.data.db.LibreChatDatabase
 import com.garfiec.librechat.core.data.db.migration.MIGRATION_3_4
 import com.garfiec.librechat.core.data.db.migration.MIGRATION_4_5
+import com.garfiec.librechat.core.data.prefetch.AttachmentWarmer
+import com.garfiec.librechat.core.data.prefetch.IosPrefetchScheduler
+import com.garfiec.librechat.core.data.prefetch.NoopAttachmentWarmer
+import com.garfiec.librechat.core.data.prefetch.PrefetchScheduler
 import com.garfiec.librechat.core.data.repository.CommonSessionCacheCleaner
 import com.garfiec.librechat.core.data.repository.IosSwitchCacheCleaner
 import com.garfiec.librechat.core.data.repository.SessionCacheCleaner
@@ -38,6 +43,9 @@ private fun ensureDirectoryExists(path: String) {
 
 actual val dataPlatformModule: Module = module {
 
+    single<AttachmentWarmer> { NoopAttachmentWarmer() }
+    single<PrefetchScheduler> { IosPrefetchScheduler() }
+
     // --- Database ---
     single {
         val dbDir = NSHomeDirectory() + "/Library/Application Support"
@@ -64,19 +72,29 @@ actual val dataPlatformModule: Module = module {
     single {
         IosTokenDataStore(
             refreshClient = lazy(LazyThreadSafetyMode.NONE) { get<HttpClient>(KoinQualifiers.Refresh) },
+            ioDispatcher = get(KoinQualifiers.IO),
         )
-    } binds arrayOf(TokenManager::class, SecureTokenStorage::class, ServerUrlKeychainFallback::class)
+        // Bound as CommonTokenDataStore too: TokenCacheWarmer needs warmTokenCache(), which is
+        // deliberately not part of the TokenManager contract.
+    } binds arrayOf(
+        TokenManager::class,
+        SecureTokenStorage::class,
+        ServerUrlKeychainFallback::class,
+        CommonTokenDataStore::class,
+    )
 
     // --- Session Cache Cleaner ---
     single<SessionCacheCleaner> {
-        @OptIn(ExperimentalForeignApi::class)
-        val cachePath = NSSearchPathForDirectoriesInDomains(
-            NSCachesDirectory,
-            NSUserDomainMask,
-            true,
-        ).firstOrNull() as? String ?: error("Unable to resolve NSCachesDirectory")
         CommonSessionCacheCleaner(
-            cacheRoot = cachePath,
+            cacheRoot = {
+                @OptIn(ExperimentalForeignApi::class)
+                val cachePath = NSSearchPathForDirectoriesInDomains(
+                    NSCachesDirectory,
+                    NSUserDomainMask,
+                    true,
+                ).firstOrNull() as? String ?: error("Unable to resolve NSCachesDirectory")
+                cachePath
+            },
         )
     }
 

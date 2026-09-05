@@ -17,10 +17,14 @@ import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.data.repository.BannerRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.EndpointTokenRepository
+import com.garfiec.librechat.core.data.repository.FileRepository
+import com.garfiec.librechat.core.data.repository.ResumePinStore
+import com.garfiec.librechat.core.data.repository.ToolFavoritesRepository
 import com.garfiec.librechat.core.data.util.SessionTaskRunner
 import com.garfiec.librechat.core.model.Banner
 import com.garfiec.librechat.core.network.client.AccountReadyGate
 import com.garfiec.librechat.core.network.client.ServerUrlProvider
+import com.garfiec.librechat.core.network.client.SessionEndReason
 import com.garfiec.librechat.core.network.client.TokenManager
 import com.garfiec.librechat.feature.conversations.drawer.AccountUiModel
 import kotlinx.coroutines.CancellationException
@@ -58,13 +62,16 @@ class NavHostViewModel(
     private val serverUrlProvider: ServerUrlProvider,
     private val connectivityObserver: ConnectivityObserver,
     private val endpointTokenRepository: EndpointTokenRepository,
+    private val toolFavoritesRepository: ToolFavoritesRepository,
+    private val fileRepository: FileRepository,
+    private val resumePinStore: ResumePinStore,
     private val activeAccountProvider: ActiveAccountProvider,
     private val accountRoster: AccountRoster,
     private val accountSwitcher: AccountSwitcher,
 ) : ViewModel() {
 
     private val bannerStateHolder =
-        BannerStateHolder(bannerRepository, settingsDataStore, serverUrlProvider, viewModelScope)
+        BannerStateHolder(bannerRepository, serverUrlProvider, viewModelScope, settingsDataStore)
     private val versionCheckStateHolder =
         VersionCheckStateHolder(configRepository, settingsDataStore, serverUrlProvider, viewModelScope)
 
@@ -76,10 +83,19 @@ class NavHostViewModel(
 
     val versionMismatch: StateFlow<VersionMismatchState?> = versionCheckStateHolder.versionMismatch
 
-    val banners: StateFlow<List<Banner>> = bannerStateHolder.banners
-    val dismissedBannerIds: StateFlow<Set<String>> = bannerStateHolder.dismissedBannerIds
+    val banner: StateFlow<Banner?> = bannerStateHolder.banner
 
-    val sessionExpired: SharedFlow<Unit> = tokenManager.sessionExpiredFlow
+    val sessionExpired: SharedFlow<SessionEndReason> = tokenManager.sessionExpiredFlow
+
+    /** The account label to report an unannounced sign-out for, or null when there is nothing to
+     *  report. Set only for [SessionEndReason.EXPIRED] — see [SessionEndReason]. Empty string means
+     *  "expired, but the account could not be named". */
+    private val _sessionExpiredNotice = MutableStateFlow<String?>(null)
+    val sessionExpiredNotice: StateFlow<String?> = _sessionExpiredNotice.asStateFlow()
+
+    fun dismissSessionExpiredNotice() {
+        _sessionExpiredNotice.value = null
+    }
 
     // The live identity for the NavHost's account hygiene (Coil cache clear + back-stack reset on
     // an account flip). Exposed as STATE rather than a transition flow so the UI can persist the
@@ -175,7 +191,22 @@ class NavHostViewModel(
                 _isLoggedIn.value = false
             }
         }
-        bannerStateHolder.fetchBanners()
+        bannerStateHolder.fetchBanner()
+        // A dead session has to lower the flag, not just navigate: the 401 path produces no
+        // [AccountTransition.Ended], so without this the flag stays true for the rest of the process
+        // and the first-frame routing after an Activity recreation still believes the user is signed in.
+        viewModelScope.launch {
+            tokenManager.sessionExpiredFlow.collect { reason ->
+                val wasLoggedIn = _isLoggedIn.value
+                _isLoggedIn.value = false
+                // Only announce an expiry to someone the app believed was signed in. A logged-out cold
+                // start still fires requests (banners, the drawer); each 401s with no token to refresh
+                // and settles as expired, so dropping [wasLoggedIn] puts the dialog on every launch.
+                if (reason == SessionEndReason.EXPIRED && wasLoggedIn == true) {
+                    _sessionExpiredNotice.value = expiredAccountLabel().orEmpty()
+                }
+            }
+        }
         // The active account changed underneath this Activity-scoped VM (switch / add-completion /
         // remove → Switched; remove-last → Ended; plain logout also lands here as Ended, where the
         // clears below just repeat logout()'s — idempotent). This is the nav/session half of the
@@ -186,6 +217,17 @@ class NavHostViewModel(
                 _sidebarMode.value = SidebarMode.Conversations
                 _selectedSettingsCategory.value = null
                 endpointTokenRepository.clear()
+                // Tool favorites are process-lifetime in-memory state, and refresh() deliberately
+                // keeps the old set on any non-404 error, so without this drop a flaky incoming
+                // server would keep rendering the previous account's pins in the tool picker.
+                toolFavoritesRepository.clear()
+                // Same singleton-state hazard: the usage-hold probe verdict describes the server
+                // being left, and carrying its 404 over suppresses the queued-attachment TTL touch
+                // on the incoming one, whose files the reaper then collects out from under a send.
+                fileRepository.clear()
+                // A resume pin names another account's run; keeping it would replay that
+                // account's agent/tool config into a resume on this one.
+                resumePinStore.clear()
                 // Reseed the in-memory config from the (already-flipped) server's own srv:-keyed
                 // cache — warm on switch-back — instead of clear(), which would wipe every server's
                 // disk cache.
@@ -194,7 +236,10 @@ class NavHostViewModel(
                     // The switch path never runs the login-side session machinery
                     // (AuthRepositoryImpl fires these on sign-in; logout/re-auth via onAuthComplete)
                     // so the incoming account's session state is fetched here.
-                    bannerStateHolder.fetchBanners()
+                    // Drop the outgoing account's banner before fetching: until this request
+                    // lands, the previous server's banner would render over the new one.
+                    bannerStateHolder.clearForAccountChange()
+                    bannerStateHolder.fetchBanner()
                     versionCheckStateHolder.checkBackendVersion()
                     sessionTaskRunner.runAll()
                 } else if (transition is AccountTransition.Ended) {
@@ -202,6 +247,9 @@ class NavHostViewModel(
                     // first-frame routing is correct. Nav-to-auth itself rides the session-expired
                     // signal emitted by the teardown.
                     _isLoggedIn.value = false
+                    // The banner belongs to the server just signed out of; the auth screens only
+                    // hide it, so without this it reappears the moment the next login navigates.
+                    bannerStateHolder.clearForAccountChange()
                 }
             }
         }
@@ -253,6 +301,15 @@ class NavHostViewModel(
             false
         }
 
+    /** The display label of the account whose session just ended, or null when it can't be named —
+     *  a legacy pre-tenancy session, or one whose roster entry has already gone. */
+    private suspend fun expiredAccountLabel(): String? {
+        val activeId = (activeAccountProvider.state.value as? AccountState.Resolved)?.id?.value ?: return null
+        return accountRoster.entriesFlow().firstOrNull()
+            ?.firstOrNull { it.accountId == activeId }
+            ?.displayLabel
+    }
+
     private fun retryAccountRestoreOnReconnect() {
         viewModelScope.launch {
             // Suspends until a connected emission finally resolves the account, then stops collecting.
@@ -275,7 +332,7 @@ class NavHostViewModel(
         // login-from-logged-out, so that crossing is wired explicitly there. Session tasks
         // (role fetch, tag refresh, favorites sync) already fired from AuthRepositoryImpl on the
         // preceding login/OAuth/2FA success, so we don't re-run them here.
-        bannerStateHolder.fetchBanners()
+        bannerStateHolder.fetchBanner()
         versionCheckStateHolder.checkBackendVersion()
     }
 

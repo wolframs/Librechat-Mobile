@@ -7,93 +7,105 @@ import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.BannerRepository
 import com.garfiec.librechat.core.model.Banner
 import com.garfiec.librechat.core.network.client.ServerUrlProvider
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.time.Clock
-import kotlin.time.Instant
 
+/**
+ * Holds the single server-configured banner. The server returns at most one and applies the
+ * `displayFrom`/`displayTo` window itself, so a successful fetch simply replaces whatever is held.
+ *
+ * Dismissal is resolved here rather than in the UI, so "should this banner show" has one owner.
+ * This holder is Activity-scoped and outlives account switches, so dismissals accumulate for the
+ * process and are keyed by server. Web keeps the accumulating half of that invariant too
+ * (`hideBannerHint` is an appended `string[]`).
+ */
 class BannerStateHolder(
     private val bannerRepository: BannerRepository,
-    private val settingsDataStore: SettingsDataStore,
     private val serverUrlProvider: ServerUrlProvider,
     private val scope: CoroutineScope,
+    private val settingsDataStore: SettingsDataStore? = null,
 ) {
 
-    private val _banners = MutableStateFlow<List<Banner>>(emptyList())
-    val banners: StateFlow<List<Banner>> = _banners.asStateFlow()
-
-    private val _dismissedBannerIds = MutableStateFlow<Set<String>>(emptySet())
-    val dismissedBannerIds: StateFlow<Set<String>> = _dismissedBannerIds.asStateFlow()
-
+    // serverId the held banner came from, so a failed re-fetch can tell a banner carried over from
+    // a PREVIOUS server (clear it — it describes someone else's deployment) apart from a transient
+    // blip on the current one (keep it). Mirrors VersionCheckStateHolder.mismatchServerId.
     private var bannerServerId: String? = null
 
-    fun fetchBanners() {
+    private val _banner = MutableStateFlow<Banner?>(null)
+    val banner: StateFlow<Banner?> = _banner.asStateFlow()
+
+    // Dismissals, keyed by (server, banner) and never cleared for the process. Both halves of the
+    // key are load-bearing and pull in opposite directions: keyed by banner alone, a fleet that
+    // seeds one bannerId across its servers delivers the next server's banner pre-dismissed; wiped
+    // on switch, dismissing A's banner and switching away and back brings A's straight back.
+    private val dismissedKeys = mutableSetOf<String>()
+
+    fun fetchBanner() {
         scope.launch {
-            try {
-                val requestedServerId = currentServerId() ?: run {
-                    clear()
-                    return@launch
+            // awaitBaseUrl, not getBaseUrl: the init fetch runs inside the ViewModel constructor on
+            // Main.immediate, before the persisted URL has resolved off "", and deriveServerId("")
+            // throws — which would stamp a null id and silently disable the carry-over guard below.
+            val serverId = runCatching { deriveServerId(serverUrlProvider.awaitBaseUrl()).value }
+                .getOrNull()
+            val persisted = serverId?.let { settingsDataStore?.dismissedBannerIds(it)?.first() }.orEmpty()
+            persisted.forEach { dismissedKeys += dismissKey(serverId, it) }
+            val result = bannerRepository.getBanner()
+            val currentServerId = runCatching { deriveServerId(serverUrlProvider.getBaseUrl()).value }.getOrNull()
+            if (currentServerId != serverId) return@launch
+            when (result) {
+                is Result.Success -> {
+                    bannerServerId = serverId
+                    _banner.value = result.data?.takeUnless { it.isDismissed() }
                 }
-                if (bannerServerId != null && bannerServerId != requestedServerId) {
-                    clear()
-                }
-                val result = bannerRepository.getBanners()
-                if (result is Result.Success) {
-                    // A request started for server A must never publish after an account switch
-                    // redirected the shared HTTP stack to server B.
-                    if (currentServerId() != requestedServerId) return@launch
-                    val now = Clock.System.now()
-                    _dismissedBannerIds.value =
-                        settingsDataStore.dismissedBannerIds(requestedServerId).first()
-                    _banners.value = result.data.filter { banner ->
-                        val from = banner.displayFrom?.let {
-                            runCatching { Instant.parse(it) }
-                                .onFailure { e -> Logger.w(e) { "Failed to parse banner displayFrom: $it" } }
-                                .getOrNull()
-                        }
-                        val to = banner.displayTo?.let {
-                            runCatching { Instant.parse(it) }
-                                .onFailure { e -> Logger.w(e) { "Failed to parse banner displayTo: $it" } }
-                                .getOrNull()
-                        }
-                        val afterStart = from == null || now >= from
-                        val beforeEnd = to == null || now < to
-                        afterStart && beforeEnd
+                is Result.Error -> {
+                    if (bannerServerId != null && bannerServerId != serverId) {
+                        clearBanner()
                     }
-                    bannerServerId = requestedServerId
+                    Logger.w(result.exception) { "Failed to fetch banner: ${result.message}" }
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Logger.w(e) { "Failed to fetch banners" }
+                is Result.Loading -> Unit
             }
         }
     }
 
+    /**
+     * Hide the banner and remember it, so the next fetch of the same one on the same server does
+     * not resurrect it. Dropping it here rather than filtering in the UI keeps the decision in one
+     * place; [BannerDisplay] animates it out because it stays composed across the change.
+     */
     fun dismissBanner(bannerId: String) {
-        val serverId = bannerServerId ?: return
-        _dismissedBannerIds.update { it + bannerId }
-        scope.launch {
-            settingsDataStore.dismissBanner(serverId, bannerId)
-        }
+        if (_banner.value?.persistable == true) return
+        val serverId = bannerServerId
+        dismissedKeys += dismissKey(serverId, bannerId)
+        if (serverId != null) scope.launch { settingsDataStore?.dismissBanner(serverId, bannerId) }
+        _banner.value = null
     }
 
-    private fun currentServerId(): String? =
-        runCatching {
-            serverUrlProvider.getBaseUrl()
-                .takeIf(String::isNotBlank)
-                ?.let { deriveServerId(it).value }
-        }.getOrNull()
+    /**
+     * The session this state described has ended (account switched away, or signed out). The banner
+     * is scoped to a deployment, so it must not outlive it — the auth screens only hide it, and it
+     * would otherwise reappear the moment the next login navigates. Dismissals are keyed by server
+     * and deliberately survive: switching away and back must not un-dismiss anything.
+     */
+    fun clearForAccountChange() {
+        clearBanner()
+    }
 
-    private fun clear() {
-        _banners.value = emptyList()
-        _dismissedBannerIds.value = emptySet()
+    private fun Banner.isDismissed(): Boolean {
+        val id = bannerId ?: return false
+        // A persistable banner is one the server says may not be dismissed, so no key can exist.
+        return persistable != true && dismissKey(bannerServerId, id) in dismissedKeys
+    }
+
+    private fun dismissKey(serverId: String?, bannerId: String): String =
+        "${serverId.orEmpty()}\u0000$bannerId"
+
+    private fun clearBanner() {
+        _banner.value = null
         bannerServerId = null
     }
 }

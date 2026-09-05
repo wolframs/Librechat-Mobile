@@ -71,6 +71,71 @@
     <string name="section_language">Language</string>
     <string name="section_layout">Layout</string>
     <string name="section_mcp_servers">MCP Servers</string>
+    <string name="section_prefetch">Background prefetch</string>
+    <string name="prefetch_enabled">Prefetch conversations</string>
+    <string name="prefetch_enabled_desc">Load recent and pinned conversations ahead of time so they open instantly. Runs while the app is idle, and periodically while charging.</string>
+    <string name="prefetch_on_metered">Use mobile data</string>
+    <string name="prefetch_on_metered_desc">Allow prefetching on metered connections. Off by default to avoid unexpected data usage.</string>
+    <string name="prefetch_depth">Depth</string>
+    <string name="prefetch_depth_value">%1$d conversations</string>
+    <string name="prefetch_depth_desc">How many recent conversations to keep cached. Pinned conversations are always included, however old.</string>
+    <string name="prefetch_attachments">Prefetch images</string>
+    <string name="prefetch_attachments_desc">Also download images and attachments. Uses considerably more data.</string>
+    <string name="prefetch_activity">Activity</string>
+    <string name="prefetch_activity_title">Prefetch activity</string>
+    <string name="prefetch_summary_status">Status</string>
+    <string name="prefetch_summary_last_run">Last run</string>
+    <string name="prefetch_summary_last_run_never">Never</string>
+    <string name="prefetch_summary_scheduled_run">Last background run</string>
+    <string name="prefetch_run_outcome_disabled">prefetch was off</string>
+    <string name="prefetch_run_outcome_no_session">not signed in</string>
+    <string name="prefetch_run_outcome_constraints">conditions not met</string>
+    <string name="prefetch_run_outcome_budget">ran out of time</string>
+    <string name="prefetch_run_outcome_stopped">server not answering</string>
+    <string name="prefetch_run_outcome_interrupted">interrupted</string>
+    <string name="prefetch_summary_warmed">Warmed</string>
+    <string name="prefetch_summary_warmed_value">%1$d of %2$d</string>
+    <string name="prefetch_status_off">Off</string>
+    <string name="prefetch_status_working">Working…</string>
+    <string name="prefetch_status_warming">Warming conversations (%1$d of %2$d)</string>
+    <string name="prefetch_status_rate_limited">Waiting — the server asked us to slow down</string>
+    <string name="prefetch_status_stopped">Stopped — repeated request failures</string>
+    <string name="prefetch_status_up_to_date">Up to date</string>
+    <string name="prefetch_status_waiting">Idle — %1$d waiting</string>
+    <string name="prefetch_status_paused_network">Paused — waiting for Wi-Fi</string>
+    <string name="prefetch_status_paused_offline">Paused — no connection</string>
+    <string name="prefetch_condition_enabled">Prefetch enabled</string>
+    <string name="prefetch_condition_enabled_unmet">Switched off</string>
+    <string name="prefetch_condition_network_offline">No connection</string>
+    <string name="prefetch_status_paused_power">Paused — battery saver is on</string>
+    <string name="prefetch_status_paused_busy">Paused — app is busy</string>
+    <string name="prefetch_status_paused_background">Paused — app is in the background</string>
+    <string name="prefetch_conditions_header">Conditions</string>
+    <string name="prefetch_condition_app_available">App ready</string>
+    <string name="prefetch_condition_network">Network</string>
+    <string name="prefetch_condition_network_met">Connection allowed</string>
+    <string name="prefetch_condition_network_unmet">On mobile data</string>
+    <string name="prefetch_condition_power">Battery</string>
+    <string name="prefetch_condition_power_met">Not restricted</string>
+    <string name="prefetch_condition_power_unmet">Battery saver is on</string>
+    <string name="prefetch_condition_idle">App idle</string>
+    <string name="prefetch_condition_idle_met">No requests in flight</string>
+    <string name="prefetch_condition_idle_unmet">A request is in flight</string>
+    <string name="prefetch_condition_server">Server</string>
+    <string name="prefetch_condition_server_met">Responding</string>
+    <string name="prefetch_condition_server_unmet">Stopped after repeated failures</string>
+    <string name="prefetch_warm_now">Warm now</string>
+    <string name="prefetch_warm_now_desc">Run a pass immediately instead of waiting for the next idle moment.</string>
+    <string name="prefetch_warmed_header">Cached conversations</string>
+    <string name="prefetch_warmed_empty">Nothing has been prefetched yet.</string>
+    <string name="prefetch_pending_header">Waiting to be cached</string>
+    <string name="prefetch_pending_empty">Everything eligible is up to date.</string>
+    <string name="prefetch_row_never_warmed">Not cached yet</string>
+    <string name="prefetch_row_pinned">Pinned</string>
+    <string name="prefetch_cache_header">Cache</string>
+    <string name="prefetch_cache_messages">Cached messages</string>
+    <string name="prefetch_cache_messages_value">%1$d messages</string>
+    <string name="prefetch_cache_images">Images and files</string>
     <string name="section_memories">Memories</string>
     <string name="section_personalization">Personalization</string>
     <string name="section_presets">Presets</string>
@@ -81,7 +146,6 @@
     <string name="title_account">Account</string>
     <string name="title_api_keys">API Keys</string>
     <string name="title_chat">Chat</string>
-    <string name="title_commands">Commands</string>
     <string name="title_data">Data</string>
     <string name="title_general">General</string>
     <string name="title_memories">Memories</string>
@@ -129,8 +193,6 @@
     <string name="status_enabled">Enabled</string>
     <string name="status_disabled">Disabled</string>
     <string name="fork_behavior">Fork Behavior</string>
-    <string name="commands">Commands</string>
-    <string name="commands_enabled_count">%1$d enabled</string>
     <string name="api_keys">API Keys</string>
     <string name="api_keys_subtitle">Manage API keys for programmatic access</string>
     <string name="presets">Presets</string>
@@ -302,6 +364,7 @@
     <string name="archived_conversations">Archived Conversations</string>
     <string name="export_all_data">Export All Data</string>
     <string name="shared_links">Shared Links</string>
+    <string name="clear_cache_with_size">Clear Cache (%1$s)</string>
     <string name="clear_cache">Clear Cache</string>
     <string name="revoke_all_api_keys">Revoke All API Keys</string>
     <string name="revoking">Revoking…</string>
@@ -422,9 +485,6 @@
     <string name="response_style_label">How should AI respond?</string>
     <string name="response_style_hint">Preferred tone, format, or style for responses</string>
 
-    <!-- Commands screen -->
-    <string name="no_commands_available">No commands available</string>
-
     <!-- Avatar upload dialog -->
     <string name="dialog_title_update_avatar">Update Avatar</string>
     <string name="avatar_choose_hint">Tap the camera icon to choose an image</string>
@@ -456,6 +516,12 @@
     <!-- Shared links -->
     <string name="no_shared_links">No shared links</string>
     <string name="no_shared_links_desc">Share a conversation to see it here</string>
+    <string name="mcp_oauth_secret_reentry_required">The OAuth endpoints changed, so the saved secret no longer applies. Enter it again.</string>
+    <string name="cd_update_shared_link">Update shared link</string>
+    <string name="dialog_title_update_shared_link">Update Shared Link</string>
+    <string name="dialog_update_shared_link_message">This republishes "%1$s" with the conversation as it is now. The link stays the same, so anyone who already has it will see the updated content.</string>
+    <string name="dialog_update_shared_link_message_new_url">This republishes "%1$s" with the conversation as it is now. This server issues a new link, so anyone who already has the old one will lose access.</string>
+    <string name="action_update_shared_link">Update</string>
     <string name="dialog_title_delete_shared_link">Delete Shared Link</string>
     <string name="dialog_delete_shared_link_message">This will remove the shared link for "%1$s". Anyone with the link will no longer be able to access it.</string>
     <string name="visibility_public">Public</string>
@@ -537,4 +603,34 @@
     <string name="artifact_shortcuts_empty">No artifacts pinned to the home screen yet.</string>
     <string name="artifact_shortcuts_disabled_message">This artifact shortcut was removed.</string>
     <string name="cd_artifact_shortcut_delete">Delete shortcut</string>
+    <!-- Post-login editor for the active server's gateway headers (issue #287) -->
+    <string name="section_server_connection">Server connection</string>
+    <string name="server_headers_scope">Sent to %1$s</string>
+    <string name="server_headers_save">Save headers</string>
+    <string name="server_headers_saved">Headers saved</string>
+    <string name="server_connection_subtitle">Request headers for access gateways</string>
+    <string name="server_headers_discard_title">Discard changes?</string>
+    <string name="server_headers_discard_message">Your unsaved header changes will be lost.</string>
+    <string name="server_headers_discard_confirm">Discard</string>
+    <string name="server_headers_keep_editing">Keep editing</string>
+
+    <!-- Mid-run steering (v0.8.8): what send does while a reply is still generating -->
+    <string name="during_run_action_title">While generating</string>
+    <string name="during_run_action_desc">What sending a message does while a reply is still being written. The composer can override this per message.</string>
+    <string name="during_run_action_queue">Add to queue</string>
+    <string name="during_run_action_queue_desc">Send it as the next message once the reply finishes.</string>
+    <string name="during_run_action_steer">Steer the reply</string>
+    <string name="during_run_action_steer_desc">Push it into the reply being written so the assistant changes course. Needs a server that supports steering; otherwise it queues.</string>
+    <string name="upload_routing_title">Attachments</string>
+    <string name="upload_routing_desc">Files can be sent to the model as-is, or read on the server and sent as text. Not every model accepts every file type.</string>
+    <string name="upload_routing_auto">Choose for me</string>
+    <string name="upload_routing_auto_desc">Send the file to the model when it can read that type, otherwise send the text inside it.</string>
+    <string name="upload_routing_manual">Ask each time</string>
+    <string name="upload_routing_manual_desc">Ask before attaching, whenever both are possible. Images are always sent to the model.</string>
+
+    <!-- MCP OAuth consent (v0.8.8) -->
+    <string name="mcp_oauth_title">Sign in to %1$s</string>
+    <string name="mcp_oauth_message">This server needs your permission before it can be used. You will be sent to the provider to authorize access, then you can come back and reconnect.</string>
+    <string name="mcp_oauth_continue">Continue</string>
+    <string name="mcp_connection_deferred">Connecting in the background \u2014 tools appear once it is ready.</string>
 </resources>

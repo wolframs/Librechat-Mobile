@@ -39,8 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
@@ -98,9 +98,15 @@ actual fun MarkdownContent(
     onFocusedOccurrencePosition: ((LayoutCoordinates, Rect) -> Unit)?,
     immediate: Boolean,
     streaming: Boolean,
+    trailingCursor: Boolean,
 ) {
     val segments = rememberMarkdownSegments(text, streaming)
     val isSearchActive = !searchQuery.isNullOrBlank()
+
+    // Search rewrites text segments into HighlightedTextSegment, which builds its own AnnotatedString
+    // and never reaches the annotator — so an active query forces the block-level cursor too.
+    val inlineCursor = trailingCursor && !isSearchActive &&
+        segments.lastOrNull()?.let { canHostInlineCursor(it) } == true
 
     Column(
         modifier = modifier
@@ -143,6 +149,7 @@ actual fun MarkdownContent(
                             searchQuery = if (isSearchActive) searchQuery else null,
                             searchFocusedOccurrence = focusedInSegment,
                             onFocusedMatchPosition = onFocusedOccurrencePosition,
+                            streaming = streaming,
                         )
                     }
                     if (index < segments.lastIndex) Spacer(modifier = Modifier.height(8.dp))
@@ -160,7 +167,7 @@ actual fun MarkdownContent(
                     Column {
                         // Rebase again per Text run within the segment.
                         var inlineOffset = 0
-                        segment.segments.forEach { inlineSegment ->
+                        segment.segments.forEachIndexed { inlineIndex, inlineSegment ->
                             when (inlineSegment) {
                                 is InlineSegment.Text -> {
                                     if (inlineSegment.text.isNotBlank()) {
@@ -181,6 +188,9 @@ actual fun MarkdownContent(
                                                 fontSizeMultiplier = fontSizeMultiplier,
                                                 immediate = immediate,
                                                 streaming = streaming,
+                                                trailingCursor = inlineCursor &&
+                                                    index == segments.lastIndex &&
+                                                    inlineIndex == segment.segments.lastIndex,
                                             )
                                         }
                                     }
@@ -233,11 +243,16 @@ actual fun MarkdownContent(
                                 fontSizeMultiplier = fontSizeMultiplier,
                                 immediate = immediate,
                                 streaming = streaming,
+                                trailingCursor = inlineCursor && index == segments.lastIndex,
                             )
                         }
                     }
                 }
             }
+        }
+
+        if (trailingCursor && !inlineCursor) {
+            StandaloneStreamingCursor(fontSizeMultiplier = fontSizeMultiplier)
         }
     }
 }
@@ -254,6 +269,7 @@ private fun MarkdownTextSegment(
     fontSizeMultiplier: Float = 1.0f,
     immediate: Boolean = false,
     streaming: Boolean = false,
+    trailingCursor: Boolean = false,
 ) {
     val colors = markdownColor(
         text = MaterialTheme.colorScheme.onSurface,
@@ -295,6 +311,7 @@ private fun MarkdownTextSegment(
             modifier = modifier.fillMaxWidth(),
             immediate = immediate,
             streaming = streaming,
+            trailingCursor = trailingCursor,
         )
     }
 }
@@ -401,12 +418,14 @@ private fun FullscreenTableDialog(
                     .verticalScroll(verticalScrollState)
                     .padding(16.dp),
             ) {
-                MarkdownTable(
-                    headers = headers,
-                    alignments = alignments,
-                    rows = rows,
-                    fontSizeMultiplier = fontSizeMultiplier,
-                )
+                SubwindowSelectionContainer {
+                    MarkdownTable(
+                        headers = headers,
+                        alignments = alignments,
+                        rows = rows,
+                        fontSizeMultiplier = fontSizeMultiplier,
+                    )
+                }
             }
         }
     }

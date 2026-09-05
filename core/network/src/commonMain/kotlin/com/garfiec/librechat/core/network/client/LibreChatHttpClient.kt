@@ -1,6 +1,8 @@
 package com.garfiec.librechat.core.network.client
 
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.network.RequestActivityTracker
+import com.garfiec.librechat.core.common.result.AccessGatewayException
 import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.logging.LogOrigin
 import com.garfiec.librechat.core.logging.redact.LogRedactor
@@ -38,6 +40,8 @@ object LibreChatHttpClient {
         redactor: LogRedactor,
         accountReadyGate: AccountReadyGate? = null,
         switchGate: SwitchGate? = null,
+        serverHeadersProvider: ServerHeadersProvider = EmptyServerHeadersProvider,
+        requestActivityTracker: RequestActivityTracker? = null,
         debug: Boolean = false,
     ): HttpClient = HttpClient(engineFactory) {
         install(ContentNegotiation) {
@@ -53,12 +57,34 @@ object LibreChatHttpClient {
                 }
             }
             level = if (debug) LogLevel.HEADERS else LogLevel.NONE
+            // A user-configured gateway header is a secret under a name only the user knows, so
+            // LogRedactor's pattern matching can't recognise it the way it recognises `Bearer`. Gate
+            // it here, where the name is known, instead. Pre-emptive: `level` is NONE in release
+            // builds, so nothing reaches the logger today — this keeps a future `debug = true` from
+            // silently starting to print the credential.
+            //
+            // Matched against the CONFIGURED names only. "Any name that would be a legal custom
+            // header" is every RFC-7230 token outside RESERVED_NAMES — Location, Set-Cookie,
+            // Retry-After, X-Request-Id — i.e. exactly the fields someone turns HEADERS logging on to
+            // read, and redacting them makes the log useless for the gateway problems it exists for.
+            sanitizeHeader { name ->
+                serverHeadersProvider.headersFor(serverUrlProvider.getBaseUrl())
+                    .keys.any { it.equals(name, ignoreCase = true) }
+            }
         }
 
         install(HttpTimeout) {
             requestTimeoutMillis = 30_000
             connectTimeoutMillis = 10_000
             socketTimeoutMillis = 120_000
+        }
+
+        // First HttpSend interceptor installed, so it is the outermost one: a call that retries,
+        // redirects or replays after a token refresh counts once, not once per wire send.
+        if (requestActivityTracker != null) {
+            install(RequestActivityPlugin) {
+                this.tracker = requestActivityTracker
+            }
         }
 
         install(HttpRequestRetry) {
@@ -72,6 +98,17 @@ object LibreChatHttpClient {
             // LibreChat session token to that host.
             this.serverUrlProvider = serverUrlProvider
         }
+
+        // Installed AFTER AuthInterceptorPlugin so its HttpSend interceptor is the inner one: it then
+        // runs on every actual send, including the auth plugin's post-refresh 401 retry.
+        install(ServerHeadersPlugin) {
+            this.serverHeadersProvider = serverHeadersProvider
+            this.serverUrlProvider = serverUrlProvider
+        }
+
+        // Must see the gateway's own 302, so it has to be inside the redirect loop — following that
+        // redirect yields a 200 sign-in page, which no status-based check can catch.
+        install(GatewayDetectionPlugin)
 
         // The SwitchBarrierPlugin (when a SwitchGate is wired) captures a consistent
         // (url, bearer, account) snapshot per request and resolves the URL against it, subsuming
@@ -93,7 +130,7 @@ object LibreChatHttpClient {
                 if (!response.status.isSuccess()) {
                     val statusCode = response.status.value
                     val bodyText = try { response.bodyAsText() } catch (_: Exception) { "" }
-                    val errorMessage = extractErrorMessage(json, bodyText, statusCode)
+                    val extracted = extractErrorMessage(json, bodyText, statusCode)
                     val isBanned = statusCode == 403 && bodyText.contains("ban", ignoreCase = true)
 
                     Diag.w(
@@ -114,15 +151,19 @@ object LibreChatHttpClient {
                         // the server being ADDED belongs to the add flow, mirroring the 401 path.
                         val identity = response.call.request.attributes.getOrNull(RequestIdentityKey)
                         if (identity?.isPending != true) {
-                            tokenManager.emitSessionExpired(identity?.accountId)
+                            tokenManager.emitSessionExpired(identity?.accountId, SessionEndReason.BANNED)
                         }
                     }
 
                     throw ApiException(
                         statusCode = statusCode,
-                        message = errorMessage,
+                        message = extracted.message,
                         isBanned = isBanned,
                         body = bodyText.ifBlank { null },
+                        serverAuthored = extracted.serverAuthored,
+                        retryAfterSeconds = response.headers[HttpHeaders.RetryAfter]
+                            ?.trim()
+                            ?.toLongOrNull(),
                     )
                 }
             }
@@ -138,22 +179,34 @@ object LibreChatHttpClient {
     const val BROWSER_USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
-    private fun extractErrorMessage(json: Json, body: String, statusCode: Int): String {
+    /**
+     * The message for an error response, plus whether it came from the body.
+     *
+     * The provenance flag matters downstream: server-authored text is screened before it is
+     * rendered (a gateway can put an entire HTML login page in `message`), while this app's own
+     * wording below is shown as-is.
+     */
+    private data class ExtractedError(val message: String, val serverAuthored: Boolean)
+
+    private fun extractErrorMessage(json: Json, body: String, statusCode: Int): ExtractedError {
         if (body.isNotBlank()) {
             try {
                 val jsonObj = json.parseToJsonElement(body).jsonObject
                 val msg = (jsonObj["message"] as? JsonPrimitive)?.content
                     ?: (jsonObj["error"] as? JsonPrimitive)?.content
                     ?: (jsonObj["error_message"] as? JsonPrimitive)?.content
-                if (!msg.isNullOrBlank()) return msg
+                if (!msg.isNullOrBlank()) return ExtractedError(msg, serverAuthored = true)
             } catch (_: Exception) {
                 if (body.contains("banned", ignoreCase = true) || body.contains("forbidden", ignoreCase = true)) {
-                    return "Access denied. Your account may have been restricted."
+                    return ExtractedError(
+                        "Access denied. Your account may have been restricted.",
+                        serverAuthored = false,
+                    )
                 }
             }
         }
 
-        return when (statusCode) {
+        val fallback = when (statusCode) {
             400 -> "Bad request"
             403 -> "Access denied"
             404 -> "Not found"
@@ -161,6 +214,7 @@ object LibreChatHttpClient {
             in 500..599 -> "Server error. Please try again later."
             else -> "Request failed (HTTP $statusCode)"
         }
+        return ExtractedError(fallback, serverAuthored = false)
     }
 }
 
@@ -178,7 +232,12 @@ internal fun HttpRequestRetryConfig.configureRetryPolicy() {
         request.method.isRetrySafe() && response.status.value in 500..599
     }
     retryOnExceptionIf(maxRetries = 2) { request, cause ->
-        request.method.isRetrySafe() && cause !is kotlinx.coroutines.CancellationException
+        request.method.isRetrySafe() &&
+            cause !is kotlinx.coroutines.CancellationException &&
+            // Deterministic until the user edits the credential, so retrying only delays the report.
+            // Excluded here rather than by install order: this plugin is installed first and so runs
+            // outermost, which it must stay for the transient failures it exists to absorb.
+            cause !is AccessGatewayException
     }
     exponentialDelay()
 }

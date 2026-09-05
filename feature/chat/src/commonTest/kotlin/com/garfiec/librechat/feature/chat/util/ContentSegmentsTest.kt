@@ -1,0 +1,549 @@
+package com.garfiec.librechat.feature.chat.util
+
+import com.garfiec.librechat.core.model.ContentType
+import com.garfiec.librechat.core.model.content.AgentToolCall
+import com.garfiec.librechat.core.model.content.AgentUpdateContent
+import com.garfiec.librechat.core.model.content.MessageContentPart
+import kotlinx.serialization.json.JsonPrimitive
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+class ContentSegmentsTest {
+
+    private fun text(value: String) = MessageContentPart(type = ContentType.TEXT, text = value)
+
+    private fun think(value: String) = MessageContentPart(type = ContentType.THINK, think = value)
+
+    private fun tool(id: String, name: String = "search", output: String? = "done") =
+        MessageContentPart(
+            type = ContentType.TOOL_CALL,
+            toolCall = AgentToolCall(id = id, name = name, output = output),
+        )
+
+    private fun subagent(id: String, nested: List<MessageContentPart>) =
+        MessageContentPart(
+            type = ContentType.TOOL_CALL,
+            toolCall = AgentToolCall(id = id, name = "subagent", output = "done", subagentContent = nested),
+        )
+
+    private fun label(
+        text: String?,
+        pending: Boolean? = null,
+        status: String? = null,
+        toolCallIds: List<String>? = null,
+    ) = MessageContentPart(
+        type = ContentType.ACTIVITY_LABEL,
+        activityLabel = text,
+        pending = pending,
+        status = status,
+        toolCallIds = toolCallIds,
+    )
+
+    private fun steer(value: String) =
+        MessageContentPart(type = ContentType.STEER, steer = JsonPrimitive(value))
+
+    private fun handoff(agentId: String) = MessageContentPart(
+        type = ContentType.AGENT_UPDATE,
+        agentUpdate = AgentUpdateContent(agentId = agentId),
+    )
+
+    private fun onlySegment(parts: List<MessageContentPart>): ContentSegment {
+        val segments = groupContentParts(parts)
+        assertEquals(1, segments.size, "expected a single segment")
+        return segments.single()
+    }
+
+    // ─── segmentation ───────────────────────────────────────────────
+
+    @Test
+    fun noSteers_produceExactlyOneUnattributedSegment() {
+        val segment = onlySegment(listOf(text("hello"), tool("t1"), text("bye")))
+        assertNull(segment.author, "the bubble's own header already names the author")
+    }
+
+    @Test
+    fun emptyContent_producesNoSegments() {
+        assertEquals(emptyList(), groupContentParts(emptyList()))
+    }
+
+    @Test
+    fun aSteerSplitsTheMessageAndReattributesWhatResumes() {
+        val segments = groupContentParts(listOf(text("before"), steer("do it differently"), text("after")))
+
+        assertEquals(2, segments.size)
+        assertNull(segments[0].author)
+        assertEquals(SegmentAuthor.Message, segments[1].author)
+        // The steer terminates the segment it interrupted, so the user's words stay in reading
+        // order rather than opening the resumed one.
+        assertEquals(listOf(0, 1), segments[0].groups.flatMap { g -> g.entries.map { it.index } })
+        assertEquals(listOf(2), segments[1].groups.flatMap { g -> g.entries.map { it.index } })
+    }
+
+    @Test
+    fun consecutiveSteersOpenOneSegmentNotTwo() {
+        // Two steers sent back to back are one interruption, so the attribution is restated once.
+        val segments = groupContentParts(
+            listOf(text("a"), steer("first"), steer("second"), text("b")),
+        )
+        assertEquals(2, segments.size)
+        assertEquals(listOf(0, 1, 2), segments[0].groups.flatMap { g -> g.entries.map { it.index } })
+        assertEquals(listOf(3), segments[1].groups.flatMap { g -> g.entries.map { it.index } })
+    }
+
+    @Test
+    fun aTrailingSteerDoesNotOpenAnEmptySegment() {
+        val segments = groupContentParts(listOf(text("a"), steer("last word")))
+        assertEquals(1, segments.size)
+    }
+
+    @Test
+    fun resumeAfterAHandoffIsAttributedToTheAgentThatTookOver() {
+        val segments = groupContentParts(
+            listOf(text("a"), handoff("agent_9"), steer("switch topic"), text("b")),
+        )
+        assertEquals(SegmentAuthor.Agent("agent_9"), segments[1].author)
+    }
+
+    @Test
+    fun aHandoffAtTheResumePointKeepsThePreHandoffAuthor() {
+        // The agent-update part announces the transition itself; restating the NEW agent above it
+        // would attribute the handoff marker to the agent it is handing off to.
+        val segments = groupContentParts(listOf(text("a"), steer("go"), handoff("agent_2"), text("b")))
+        assertEquals(SegmentAuthor.Message, segments[1].author)
+    }
+
+    @Test
+    fun aGroupNeverSpansASteer() {
+        val segments = groupContentParts(
+            listOf(tool("t1"), tool("t2"), steer("stop"), tool("t3"), tool("t4")),
+        )
+        assertEquals(2, segments.size)
+        segments.forEach { segment ->
+            segment.groups.filterIsInstance<ContentGroup.Activity>().forEach { group ->
+                assertTrue(group.entries.none { it.part.type == ContentType.STEER })
+            }
+        }
+    }
+
+    @Test
+    fun steerText_readsThePayloadAndRejectsWhatIsNotAString() {
+        assertEquals("do it differently", steer("do it differently").steerText())
+        assertNull(MessageContentPart(type = ContentType.STEER, steer = null).steerText())
+        assertNull(steer("   ").steerText())
+        // Parked as a raw element precisely so an unexpected shape degrades instead of failing
+        // the whole message decode.
+        assertNull(
+            MessageContentPart(type = ContentType.STEER, steer = JsonPrimitive(7)).steerText(),
+        )
+    }
+
+    // ─── grouping ───────────────────────────────────────────────────
+
+    @Test
+    fun aLabelClaimsItsBatchIncludingTheLeadingReasoning() {
+        val segment = onlySegment(listOf(think("planning"), tool("t1"), label("Searched the codebase")))
+
+        val group = segment.groups.single() as ContentGroup.Activity
+        assertEquals("Searched the codebase", group.labelText)
+        assertEquals(listOf(0, 1), group.entries.map { it.index })
+        assertEquals(1, group.toolCount, "absorbed reasoning is not a tool")
+    }
+
+    @Test
+    fun aLabelThatNeverArrivesFallsBackToLegacyGrouping() {
+        // Reasoning renders standalone in its original position and only runs of two or more
+        // tools group — exactly what the feature-off path does.
+        val segment = onlySegment(listOf(think("planning"), tool("t1"), tool("t2")))
+
+        assertEquals(2, segment.groups.size)
+        assertTrue(segment.groups[0] is ContentGroup.Single)
+        val group = segment.groups[1] as ContentGroup.Activity
+        assertEquals("", group.labelText)
+        assertEquals(listOf(1, 2), group.entries.map { it.index })
+    }
+
+    @Test
+    fun asingleUnlabeledToolCallDoesNotGroup() {
+        val segment = onlySegment(listOf(tool("t1")))
+        assertTrue(segment.groups.single() is ContentGroup.Single)
+    }
+
+    @Test
+    fun aPendingLabelIsInvisibleAndDoesNotFormAGroup() {
+        // The reservation publishes at the batch boundary, before the text exists. Rendering it
+        // would wrap a lone tool call under an empty header mid-run.
+        val segment = onlySegment(listOf(tool("t1"), label(null, pending = true)))
+
+        assertEquals(1, segment.groups.size)
+        assertTrue(segment.groups.single() is ContentGroup.Single)
+        assertTrue(segment.groups.none { g -> g.entries.any { it.part.type == ContentType.ACTIVITY_LABEL } })
+    }
+
+    @Test
+    fun aBlankLabelStillMergesItsBatchWithTheNextOne() {
+        // Two one-call batches whose first label stayed empty must render as ONE legacy group,
+        // not two standalone cards — otherwise turning the feature on splits what it merges off.
+        val segment = onlySegment(listOf(tool("t1"), label(""), tool("t2")))
+
+        val group = segment.groups.single() as ContentGroup.Activity
+        assertEquals(listOf(0, 2), group.entries.map { it.index })
+        assertEquals("", group.labelText)
+    }
+
+    @Test
+    fun aFilledLabelCannotReachBackPastABlankOne() {
+        val segment = onlySegment(listOf(tool("t1"), label(""), tool("t2"), label("Ran the second batch")))
+
+        assertEquals(2, segment.groups.size)
+        assertTrue(segment.groups[0] is ContentGroup.Single, "the blank-labeled batch renders legacy-style")
+        val labeled = segment.groups[1] as ContentGroup.Activity
+        assertEquals(listOf(2), labeled.entries.map { it.index })
+        assertEquals("Ran the second batch", labeled.labelText)
+    }
+
+    @Test
+    fun anOrphanLabelRendersOnItsOwn() {
+        val segment = onlySegment(listOf(text("hi"), label("Looked something up")))
+        assertEquals(2, segment.groups.size)
+        assertTrue(segment.groups[1] is ContentGroup.Single)
+    }
+
+    @Test
+    fun anOrphanLabelOverAHandoffIsDropped() {
+        // The handoff card already names the destination; the label would be a stray line.
+        val parts = listOf(
+            tool("h1", name = "lc_transfer_to_billing", output = null),
+            label("Handing off", toolCallIds = listOf("h1")),
+        )
+        val segment = onlySegment(parts)
+        assertTrue(segment.groups.none { g -> g.entries.any { it.part.type == ContentType.ACTIVITY_LABEL } })
+    }
+
+    @Test
+    fun handoffCallsAreNeverFoldedIntoAGroup() {
+        val segment = onlySegment(
+            listOf(tool("h1", name = "lc_transfer_to_billing", output = null), tool("h2", name = "lc_transfer_to_sales", output = null)),
+        )
+        assertTrue(segment.groups.all { it is ContentGroup.Single })
+    }
+
+    @Test
+    fun anyOtherPartTypeBreaksTheBlock() {
+        val segment = onlySegment(listOf(tool("t1"), tool("t2"), text("interjection"), tool("t3"), tool("t4")))
+        assertEquals(3, segment.groups.size)
+        assertEquals(listOf(0, 1), (segment.groups[0] as ContentGroup.Activity).entries.map { it.index })
+        assertTrue(segment.groups[1] is ContentGroup.Single)
+        assertEquals(listOf(3, 4), (segment.groups[2] as ContentGroup.Activity).entries.map { it.index })
+    }
+
+    // ─── group identity and collapse ────────────────────────────────
+
+    @Test
+    fun groupKeyIsStableWhenTheLabelAbsorbsLeadingReasoning() {
+        // The block's FIRST PART flips from the tool call to the THINK the moment the label lands.
+        // Keying on it would remount the group and drop whatever the user had expanded.
+        val beforeLabel = onlySegment(listOf(think("planning"), tool("t1"), tool("t2")))
+        val afterLabel = onlySegment(listOf(think("planning"), tool("t1"), tool("t2"), label("Searched")))
+
+        val before = beforeLabel.groups.filterIsInstance<ContentGroup.Activity>().single()
+        val after = afterLabel.groups.filterIsInstance<ContentGroup.Activity>().single()
+        assertEquals("tool:t1", before.key)
+        assertEquals(before.key, after.key)
+    }
+
+    @Test
+    fun groupKeyFallsBackToTheFirstToolIndexWhenCallsCarryNoId() {
+        val parts = listOf(
+            think("planning"),
+            MessageContentPart(type = ContentType.TOOL_CALL, toolCall = AgentToolCall(name = "a", output = "x")),
+            MessageContentPart(type = ContentType.TOOL_CALL, toolCall = AgentToolCall(name = "b", output = "y")),
+            label("Did two things"),
+        )
+        assertEquals("toolidx:1", (onlySegment(parts).groups.single() as ContentGroup.Activity).key)
+    }
+
+    @Test
+    fun aLabeledSingleCallCollapsesButAnUnlabeledPairNeedsToFinish() {
+        val labeled = onlySegment(listOf(tool("t1"), label("Read the file")))
+            .groups.single() as ContentGroup.Activity
+        assertTrue(labeled.collapsedByDefault)
+
+        val unlabeled = onlySegment(listOf(tool("t1"), tool("t2")))
+            .groups.single() as ContentGroup.Activity
+        assertTrue(unlabeled.collapsedByDefault)
+
+        val unfinished = onlySegment(listOf(tool("t1", output = null), tool("t2", output = null)))
+            .groups.single() as ContentGroup.Activity
+        assertTrue(!unfinished.collapsedByDefault)
+    }
+
+    @Test
+    fun aSettledLabelCountsAsCompletionEvenWhenAToolReturnedNothing() {
+        // A tool legitimately returning "" would otherwise read as unfinished forever, and its
+        // group would never collapse.
+        val group = onlySegment(listOf(tool("t1", output = ""), label("Checked the config")))
+            .groups.single() as ContentGroup.Activity
+        assertTrue(group.completed)
+    }
+
+    @Test
+    fun aPendingLabelIsNotCompletionProof() {
+        val group = onlySegment(
+            listOf(tool("t1", output = ""), tool("t2", output = ""), label("Working", pending = true)),
+        ).groups.single() as ContentGroup.Activity
+        assertTrue(!group.completed)
+    }
+
+    @Test
+    fun aFailedBatchIsFlagged() {
+        val group = onlySegment(listOf(tool("t1"), label("Tried to search", status = "partial")))
+            .groups.single() as ContentGroup.Activity
+        assertTrue(group.failed)
+    }
+
+    // Image-gen calls group like any other tool, matching `groupToolCalls.ts`. Generated images
+    // stay visible because the render layer hoists them out of the collapsible, NOT because the
+    // grouping skips them — do not add an image special-case here.
+    @Test
+    fun imageGenCallsStillGroupIntoOneActivityBlock() {
+        val groups = onlySegment(
+            listOf(tool("t1", name = "image_gen_oai"), tool("t2", name = "image_gen_oai")),
+        ).groups
+
+        val group = groups.single() as ContentGroup.Activity
+        assertEquals(2, group.toolCount)
+    }
+
+    @Test
+    fun groupedToolCallIdsReturnsToolCallsInOrderAndSkipsReasoning() {
+        val group = onlySegment(listOf(tool("t1"), think("pondering"), tool("t2"), label("Looked it up")))
+            .groups.single() as ContentGroup.Activity
+
+        assertEquals(listOf("t1", "t2"), group.groupedToolCallIds())
+    }
+
+    @Test
+    fun groupedToolCallIdsSkipsBlankIds() {
+        val group = onlySegment(listOf(tool(""), tool("t2")))
+            .groups.single() as ContentGroup.Activity
+
+        assertEquals(listOf("t2"), group.groupedToolCallIds())
+    }
+
+    @Test
+    fun groupedToolCallIdsIncludesCallsNestedInsideASubagent() {
+        val group = onlySegment(
+            listOf(
+                subagent("s1", nested = listOf(tool("n1", name = "image_gen_oai"), tool("n2"))),
+                tool("t2"),
+            ),
+        ).groups.single() as ContentGroup.Activity
+
+        assertEquals(listOf("s1", "n1", "n2", "t2"), group.groupedToolCallIds())
+    }
+
+    // The walk is deliberately uncapped where the render stops at depth 1: a depth-2 subagent draws
+    // no nested parts at all, but its files still have to reach the hoist.
+    @Test
+    fun groupedToolCallIdsDescendsThroughNestedSubagents() {
+        val group = onlySegment(
+            listOf(
+                subagent("s1", nested = listOf(subagent("s2", nested = listOf(tool("n1"))))),
+                label("Ran a subagent"),
+            ),
+        ).groups.single() as ContentGroup.Activity
+
+        assertEquals(listOf("s1", "s2", "n1"), group.groupedToolCallIds())
+    }
+
+    // The ungrouped path: a lone subagent call never forms a group, and mid-run there is no
+    // persisted `subagent_content` to walk — the live trace's parts are fed in directly.
+    @Test
+    fun outputToolCallIdsWalksALooseRunOfParts() {
+        assertEquals(
+            listOf("n1", "n2"),
+            outputToolCallIds(listOf(think("pondering"), tool("n1"), text("done"), tool("n2"))),
+        )
+    }
+
+    @Test
+    fun outputToolCallIdsSkipsBlankAndNonToolParts() {
+        assertEquals(listOf("n2"), outputToolCallIds(listOf(text("hi"), tool(""), tool("n2"))))
+    }
+
+    // ─── parent activity phases (SYNC-05) ───────────────────────────
+
+    private fun phaseLabel(
+        text: String?,
+        startIndex: Int? = null,
+        count: Int? = null,
+        endIndex: Int? = null,
+        pending: Boolean? = null,
+    ) = MessageContentPart(
+        type = ContentType.ACTIVITY_LABEL,
+        activityLabel = text,
+        activityLabelType = "phase",
+        activityStartIndex = startIndex,
+        activityEndIndex = endIndex,
+        activityCount = count,
+        pending = pending,
+    )
+
+    @Test
+    fun trailingPhaseLabelDoesNotClaimTheTailOfTheMessage() {
+        // The exact shape upstream emits: a phase label appended at the END of content, whose
+        // activity_start_index points back at where the phase began. Grouping must not read it as
+        // a batch header, or it claims the reply's own answer text.
+        val segment = onlySegment(
+            listOf(
+                think("planning"),
+                tool("t1"),
+                label("Searched the docs"),
+                text("Here is the answer."),
+                phaseLabel("Researching", startIndex = 0, count = 3),
+            ),
+        )
+        val groups = segment.groups
+        assertEquals(2, groups.size, "phase label must add no group of its own")
+        val activity = groups[0] as ContentGroup.Activity
+        assertEquals("Searched the docs", activity.labelText)
+        assertEquals(listOf(0, 1), activity.entries.map { it.index })
+        val answer = groups[1] as ContentGroup.Single
+        assertEquals(3, answer.entry.index, "the answer text must stay standalone, unclaimed")
+    }
+
+    @Test
+    fun phaseLabelRendersNothingEvenWhenItIsTheOnlyLabel() {
+        // With no per-batch label the block re-splits legacy-style. A phase label must not
+        // resurrect grouping, and must not render as a stray orphan line either.
+        val segment = onlySegment(listOf(tool("t1"), text("done"), phaseLabel("Researching")))
+        assertEquals(2, segment.groups.size)
+        assertTrue(segment.groups.all { it is ContentGroup.Single })
+    }
+
+    @Test
+    fun perBatchLabelIsUnaffectedByTheNewDiscriminator() {
+        // Guards the discriminator itself: absence of activity_label_type means per-batch, so an
+        // ordinary label must still claim its block. Break `isActivityPhaseLabel` to match every
+        // label and this fails.
+        val segment = onlySegment(listOf(think("planning"), tool("t1"), label("Searched")))
+        val activity = segment.groups.single() as ContentGroup.Activity
+        assertEquals("Searched", activity.labelText)
+        assertEquals(listOf(0, 1), activity.entries.map { it.index })
+    }
+
+    @Test
+    fun phaseLabelIsSkippedInAComparisonLaneToo() {
+        // A lane renders every part it is handed standalone, so a phase label reaching it would
+        // paint as a bare sentence under the pane.
+        val segments = groupContentParts(
+            listOf(text("lane text"), phaseLabel("Researching")),
+            groupActivity = false,
+        )
+        assertEquals(1, segments.single().groups.size)
+    }
+
+    @Test
+    fun emptyPhaseLabelIsSkippedBeforeItIsFilled() {
+        // A phase part is published empty and re-emitted filled, so the skip cannot key on
+        // activity_start_index or on the label text being present.
+        val segment = onlySegment(listOf(text("answer"), phaseLabel(null)))
+        assertEquals(1, segment.groups.size)
+    }
+
+    // ─── exclusive phase end index (v0.8.8-rc1, upstream #14768) ─────
+
+    @Test
+    fun lateBatchLabelConsumedByAFinalizedPhaseIsSuppressed() {
+        // A batch's label can be published AFTER the phase it belongs to closed: it lands at an
+        // index past the phase's exclusive end but before the trailing phase marker. At that
+        // position it describes nothing that precedes it, so rendering it would paint a stray
+        // bare line under the answer (or claim a later batch's tools).
+        val segment = onlySegment(
+            listOf(
+                tool("t1"),
+                tool("t2"),
+                text("Here is the answer."),
+                label("Searched the docs"),
+                phaseLabel("Researching", startIndex = 0, endIndex = 2),
+            ),
+        )
+        val groups = segment.groups
+        assertEquals(2, groups.size, "the consumed label must not render at all")
+        val activity = groups[0] as ContentGroup.Activity
+        assertEquals("", activity.labelText, "the consumed label must not claim the tools either")
+        assertEquals(listOf(0, 1), activity.entries.map { it.index })
+        assertEquals(2, (groups[1] as ContentGroup.Single).entry.index)
+    }
+
+    @Test
+    fun pendingPhaseMarkerConsumesNothing() {
+        // Only a FINALIZED phase owns its span; while the marker is pending the late label must
+        // keep rendering — suppressing on a reservation would hide it forever if the phase fails.
+        val segment = onlySegment(
+            listOf(
+                tool("t1"),
+                text("answer"),
+                label("Searched"),
+                phaseLabel(null, startIndex = 0, endIndex = 1, pending = true),
+            ),
+        )
+        assertTrue(
+            segment.groups.any { g -> g.entries.any { it.index == 2 } },
+            "the batch label must still render while the phase is pending",
+        )
+    }
+
+    @Test
+    fun phaseMarkerWithoutAnEndIndexConsumesNothing() {
+        // Pre-#14768 servers emit phase labels without activity_end_index; every batch label
+        // renders exactly as before — the feature-off shape.
+        val segment = onlySegment(
+            listOf(
+                tool("t1"),
+                text("answer"),
+                label("Searched"),
+                phaseLabel("Researching", startIndex = 0),
+            ),
+        )
+        assertTrue(segment.groups.any { g -> g.entries.any { it.index == 2 } })
+    }
+
+    @Test
+    fun batchLabelInsideThePhaseSpanIsNotConsumed() {
+        // The suppression is scoped by the EXCLUSIVE end index: a label before it belongs to a
+        // batch the phase covers in order, and still claims its block.
+        val segment = onlySegment(
+            listOf(
+                think("planning"),
+                tool("t1"),
+                label("Searched the docs"),
+                text("Here is the answer."),
+                phaseLabel("Researching", startIndex = 0, endIndex = 3),
+            ),
+        )
+        val activity = segment.groups[0] as ContentGroup.Activity
+        assertEquals("Searched the docs", activity.labelText)
+        assertEquals(listOf(0, 1), activity.entries.map { it.index })
+    }
+
+    @Test
+    fun multiplePhaseMarkersLowerTheEarliestEndTogether() {
+        // Phases split after ~200 chars of label text, so one response can carry several phase
+        // markers. The walk keys on the EARLIEST finalized end, exactly like upstream's
+        // findLateActivityLabelsConsumedByPhase.
+        val consumed = findLateBatchLabelsConsumedByPhase(
+            listOf(
+                tool("t1"), // 0
+                text("mid"), // 1
+                label("First batch"), // 2 — consumed: the walk has already lowered the end to 1
+                phaseLabel("Phase one", startIndex = 0, endIndex = 4), // 3 — min(1, 4) keeps 1
+                label("Second batch"), // 4 — consumed: 1 <= 4
+                phaseLabel("Phase two", startIndex = 4, endIndex = 1), // 5 — seen first, end 1
+            ),
+        )
+        assertEquals(setOf(2, 4), consumed)
+    }
+}

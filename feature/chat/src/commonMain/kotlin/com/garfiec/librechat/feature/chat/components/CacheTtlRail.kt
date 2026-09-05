@@ -35,6 +35,7 @@ import com.garfiec.librechat.feature.chat.resources.Res
 import com.garfiec.librechat.feature.chat.resources.cache_ttl_armed_1h
 import com.garfiec.librechat.feature.chat.resources.cache_ttl_armed_5m
 import com.garfiec.librechat.feature.chat.resources.cache_ttl_expired
+import com.garfiec.librechat.feature.chat.resources.cache_ttl_gateway_fixed
 import com.garfiec.librechat.feature.chat.resources.cache_ttl_idle
 import com.garfiec.librechat.feature.chat.resources.cache_ttl_semantics
 import com.garfiec.librechat.feature.chat.viewmodel.CacheTtl
@@ -56,6 +57,7 @@ fun CacheTtlRail(
     armed: CacheTtl?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val fallbackAnchorTime = remember(anchor?.messageId) { Clock.System.now().toEpochMilliseconds() }
     val anchorTime = anchor?.timestampMillis ?: fallbackAnchorTime
@@ -94,7 +96,11 @@ fun CacheTtlRail(
         CacheTtl.FIVE_MINUTES -> Color(0xFF38A8F8)
         null -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val semanticsLabel = stringResource(Res.string.cache_ttl_semantics, label)
+    val semanticsLabel = if (enabled) {
+        stringResource(Res.string.cache_ttl_semantics, label)
+    } else {
+        stringResource(Res.string.cache_ttl_gateway_fixed, label)
+    }
 
     Box(
         modifier = modifier
@@ -104,6 +110,7 @@ fun CacheTtlRail(
     ) {
         Surface(
             onClick = onClick,
+            enabled = enabled,
             modifier = Modifier
                 // The parent is intentionally only 28 dp wide. requiredWidth prevents those
                 // constraints from squeezing the pill before the graphics-layer rotation.

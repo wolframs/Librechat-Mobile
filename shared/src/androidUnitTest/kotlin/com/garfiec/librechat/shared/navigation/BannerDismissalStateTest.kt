@@ -36,17 +36,18 @@ class BannerDismissalStateTest {
         every { serverUrlProvider.getBaseUrl() } answers { currentUrl }
         every { settings.dismissedBannerIds(serverAId) } returns flowOf(setOf("same-id"))
         every { settings.dismissedBannerIds(serverBId) } returns flowOf(emptySet())
-        coEvery { repository.getBanners() } returns Result.Success(listOf(banner))
-        val holder = BannerStateHolder(repository, settings, serverUrlProvider, this)
+        coEvery { repository.getBanner() } returns Result.Success(banner)
+        coEvery { serverUrlProvider.awaitBaseUrl() } answers { currentUrl }
+        val holder = BannerStateHolder(repository, serverUrlProvider, this, settings)
 
-        holder.fetchBanners()
+        holder.fetchBanner()
         advanceUntilIdle()
-        assertThat(holder.dismissedBannerIds.value).containsExactly("same-id")
+        assertThat(holder.banner.value).isNull()
 
         currentUrl = serverB
-        holder.fetchBanners()
+        holder.fetchBanner()
         advanceUntilIdle()
-        assertThat(holder.dismissedBannerIds.value).isEmpty()
+        assertThat(holder.banner.value).isEqualTo(banner)
 
         holder.dismissBanner("same-id")
         advanceUntilIdle()

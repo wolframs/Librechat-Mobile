@@ -22,7 +22,8 @@ Material 3 theme and shared Compose components used across all feature modules. 
 - `SearchBar` - Reusable search input field.
 - `BottomSheetScaffold` - Wrapper for modal bottom sheets.
 - `PullToRefresh` - Pull-to-refresh wrapper.
-- `BannerDisplay` - Dismissible server banner cards (info/warning/error types).
+- `BannerDisplay` - The server banner. The server sends at most one and only ever types it
+  `banner`, so there is a single visual treatment; a `persistable` banner hides the dismiss control.
 
 ### Markdown
 - core/ui does NOT provide a shared markdown renderer. Features render markdown
@@ -46,7 +47,6 @@ Material 3 theme and shared Compose components used across all feature modules. 
   it scrolls out. Shared by `:feature:chat`'s viewer (adds per-page pinch-zoom via the modifier
   slot) and `:feature:files`' preview (adds page labels). Fix render/recycle logic HERE, not in the
   feature copies — there are none.
-- `StreamingIndicator` - Pulsing indicator during SSE streaming.
 
 ## Rules
 

@@ -12,6 +12,14 @@ extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
         applicationId = "com.garfiec.librechat"
     }
 
+    buildTypes {
+        debug {
+            // Release must keep the bare id — Obtainium tracks updates by package name.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+    }
+
     signingConfigs {
         getByName("debug") {
             storeFile = file("debug.keystore")

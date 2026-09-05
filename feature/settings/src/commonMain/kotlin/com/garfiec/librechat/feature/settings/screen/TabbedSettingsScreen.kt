@@ -42,6 +42,7 @@ fun TabbedSettingsScreen(
     onNavigateToArchive: () -> Unit,
     onNavigateToSharedLinks: () -> Unit,
     onNavigateToArtifactShortcuts: () -> Unit,
+    onNavigateToPrefetchActivity: () -> Unit,
     onNavigateToPresets: () -> Unit,
     onNavigateToApiKeys: () -> Unit,
     onNavigateToFavorites: () -> Unit,
@@ -124,6 +125,7 @@ fun TabbedSettingsScreen(
                     onNavigateToArchive = onNavigateToArchive,
                     onNavigateToSharedLinks = onNavigateToSharedLinks,
                     onNavigateToArtifactShortcuts = onNavigateToArtifactShortcuts,
+                    onNavigateToPrefetchActivity = onNavigateToPrefetchActivity,
                     snackbarHostState = snackbarHostState,
                     modifier = Modifier.fillMaxSize(),
                 )

@@ -32,8 +32,8 @@ import com.garfiec.librechat.core.ui.components.isMonochromeEndpointIcon
  * Extracted from MessageBubble.kt to avoid merge conflicts with WS4
  * (which modifies the action row in MessageBubble).
  *
- * Shows a blinking cursor at the end of the streaming content, or a standalone
- * blinking cursor when no content has arrived yet.
+ * Shows the live cursor at the end of the streaming content, or the waiting indicator before the
+ * first delta. See StreamingCursor.kt.
  */
 @Composable
 fun StreamingMessageBubble(
@@ -148,15 +148,19 @@ private fun ThreadStreamingBubble(
                 },
         ) {
             if (streamingContent.isNotBlank()) {
-                MarkdownContent(
+                // Routed through TextContentPart so artifact directives render as cards while the
+                // reply streams (#302) — an unclosed artifact shows its source via IncompleteArtifact.
+                // It also owns the cursor — a cursor placed here as a sibling lands on a line of its
+                // own instead of after the last word.
+                TextContentPart(
                     text = streamingContent,
                     fontSizeMultiplier = fontSizeMultiplier,
                     useKatex = useKatex,
                     streaming = true,
+                    trailingCursor = true,
                 )
-                StreamingIndicator()
             } else {
-                StreamingIndicator()
+                StreamingWaitIndicator()
             }
         }
     }
@@ -236,15 +240,19 @@ private fun TwoSidedStreamingBubble(
             )
             Spacer(modifier = Modifier.height(4.dp))
             if (streamingContent.isNotBlank()) {
-                MarkdownContent(
+                // Routed through TextContentPart so artifact directives render as cards while the
+                // reply streams (#302) — an unclosed artifact shows its source via IncompleteArtifact.
+                // It also owns the cursor — a cursor placed here as a sibling lands on a line of its
+                // own instead of after the last word.
+                TextContentPart(
                     text = streamingContent,
                     fontSizeMultiplier = fontSizeMultiplier,
                     useKatex = useKatex,
                     streaming = true,
+                    trailingCursor = true,
                 )
-                StreamingIndicator()
             } else {
-                StreamingIndicator()
+                StreamingWaitIndicator()
             }
         }
     }

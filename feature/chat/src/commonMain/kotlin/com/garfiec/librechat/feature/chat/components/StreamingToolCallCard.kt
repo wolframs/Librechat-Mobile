@@ -38,6 +38,9 @@ import com.garfiec.librechat.feature.chat.resources.Res
 import com.garfiec.librechat.feature.chat.viewmodel.ActiveToolCall
 import org.jetbrains.compose.resources.stringResource
 
+// A dispatcher: each branch emits one card and returns. Wrapping it to satisfy the rule would
+// add a layout node to every streaming tool call.
+@Suppress("MultipleEmitters")
 @Composable
 fun StreamingToolCallCard(
     toolCall: ActiveToolCall,
@@ -57,6 +60,33 @@ fun StreamingToolCallCard(
             result = imageResult,
             modifier = modifier,
             showDescription = showImageDescriptions,
+        )
+        return
+    }
+
+    // An answered question renders as its Q&A record, so the exchange stays on screen for the
+    // rest of the run instead of reappearing only when the message finalizes. The PAUSED one
+    // never reaches here — `withoutUnansweredQuestions` drops it while the pause card owns it —
+    // but a parallel sibling ask still awaiting its own pause does, and renders as the record
+    // card with an empty answer: its question visible, no spinner lying about progress.
+    if (isAskUserQuestionToolCall(toolCall.name.lowercase())) {
+        // A batched ask reads its questions from `questions[]` and its answers from the output's
+        // `{"answers": {…}}` map; neither is visible to the single-question parse below.
+        val batch = remember(toolCall.input) { parseAskUserQuestionBatch(toolCall.input) }
+        if (batch.isNotEmpty()) {
+            val answers = remember(toolCall.output) { parseAskUserAnswers(toolCall.output) }
+            AskUserQuestionBatchRecordCard(
+                questions = batch,
+                answers = answers,
+                modifier = modifier,
+            )
+            return
+        }
+        val question = remember(toolCall.input) { parseAskUserQuestion(toolCall.input) }
+        AskUserQuestionRecordCard(
+            question = question,
+            answer = toolCall.output.orEmpty(),
+            modifier = modifier,
         )
         return
     }

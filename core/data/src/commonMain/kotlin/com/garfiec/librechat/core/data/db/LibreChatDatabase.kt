@@ -14,14 +14,18 @@ import com.garfiec.librechat.core.data.db.dao.ConversationDao
 import com.garfiec.librechat.core.data.db.dao.ConversationTagDao
 import com.garfiec.librechat.core.data.db.dao.DraftDao
 import com.garfiec.librechat.core.data.db.dao.MessageDao
+import com.garfiec.librechat.core.data.db.dao.PrefetchWatermarkDao
 import com.garfiec.librechat.core.data.db.dao.PresetDao
+import com.garfiec.librechat.core.data.db.dao.ServerDao
 import com.garfiec.librechat.core.data.db.entity.AgentEntity
 import com.garfiec.librechat.core.data.db.entity.ArtifactShortcutEntity
 import com.garfiec.librechat.core.data.db.entity.ConversationEntity
 import com.garfiec.librechat.core.data.db.entity.ConversationTagEntity
 import com.garfiec.librechat.core.data.db.entity.DraftEntity
 import com.garfiec.librechat.core.data.db.entity.MessageEntity
+import com.garfiec.librechat.core.data.db.entity.PrefetchWatermarkEntity
 import com.garfiec.librechat.core.data.db.entity.PresetEntity
+import com.garfiec.librechat.core.data.db.entity.ServerEntity
 
 @Database(
     entities = [
@@ -32,8 +36,10 @@ import com.garfiec.librechat.core.data.db.entity.PresetEntity
         ConversationTagEntity::class,
         DraftEntity::class,
         ArtifactShortcutEntity::class,
+        ServerEntity::class,
+        PrefetchWatermarkEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -52,6 +58,8 @@ import com.garfiec.librechat.core.data.db.entity.PresetEntity
         // 8 -> 9 adds an optional feature-owned payload to text drafts. Existing rows remain
         // valid text-only drafts; chat uses the payload for uploaded attachments and queued sends.
         AutoMigration(from = 8, to = 9),
+        // Preserve fork v8/v9; add upstream server registry and prefetch watermarks together.
+        AutoMigration(from = 9, to = 10),
     ],
 )
 @TypeConverters(Converters::class)
@@ -65,6 +73,8 @@ abstract class LibreChatDatabase : RoomDatabase() {
     abstract fun draftDao(): DraftDao
     abstract fun accountClaimDao(): AccountClaimDao
     abstract fun artifactShortcutDao(): ArtifactShortcutDao
+    abstract fun serverDao(): ServerDao
+    abstract fun prefetchWatermarkDao(): PrefetchWatermarkDao
 }
 
 // Room KSP auto-generates the actual implementations for each platform

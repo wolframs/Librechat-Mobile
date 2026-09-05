@@ -47,7 +47,18 @@ This document is intentionally separate from `DISCOVERY.md`:
 
 ## Verified Baseline
 
-Last refreshed: **2026-07-27**
+Last refreshed: **2026-09-05**
+
+- September sync: integrated upstream mobile `7b2311af` (73 incoming commits)
+  with the fork starting at `4f3414db` on `develop`.
+- Android debug APK, 2,399 tests, Detekt/common metadata checks, and app lint pass.
+  Lint reports 0 errors, 9 warnings, and 3 hints; German key coverage passes.
+- Room is now v10; the fork's original v8/v9 schemas remain intact.
+- Backend source/runtime audit and device acceptance steps:
+  [Surplus/MCP integration](docs/SURPLUS_MCP_UPSTREAM_SYNC.md).
+- No device or iOS runtime validation was performed for this sync.
+
+### July baseline (historical)
 
 - Branch: `develop`
 - Code checkpoint: `072359cf` (`fix(chat): make Android API guards explicit`)
@@ -73,6 +84,7 @@ changes materially.
 
 | ID | Priority | Area | Status | Automated | Device |
 |---|---:|---|---|---|---|
+| SYNC-20260905 | P1 | Upstream merge, Surplus routing/prices and MCP compatibility | `AUTO_VERIFIED` | 2,399 tests + static checks passed | Not started |
 | UX-001 | P0 | Signed-in server management | `AUTO_VERIFIED` | Passed | Not started |
 | UX-002 | P0 | Server/account-scoped tools and MCP | `AUTO_VERIFIED` | Passed | Not started |
 | UX-003 | P0 | Stream teardown after clean EOF | `AUTO_VERIFIED` | Passed | Not started |
@@ -990,7 +1002,7 @@ the local saved tag until it is unarchived.
 Run the smallest relevant checks during iteration, then the broader suite before
 committing:
 
-- [ ] `git diff --check`
+- [ ] `git diff --check upstream/develop`
 - [ ] Relevant module unit tests
 - [ ] Relevant new regression tests
 - [ ] `:app:assembleDebug`
@@ -1130,7 +1142,39 @@ conclusion. Correct earlier entries with a new dated note.
   now accounts for `SavedStateHandle`, Android locale reads observe configuration changes, and the
   speech-recognizer API guard sits beside its API-31 platform call.
 - `scripts/check-localization.py --require-complete de` passes.
-- `git diff --check` passes, and the intended worktree is clean apart from the pre-existing local
+- `git diff --check upstream/develop` passes, and the intended worktree is clean apart from the pre-existing local
   Android Studio Gradle configuration files.
 - Full feature-level Apple compilation and Apple device behavior remain explicitly unverified on
   this Linux host; those limits are recorded under UX-015 rather than hidden by Android success.
+
+
+## 2026-09-05 — upstream merge and deployed backend compatibility
+
+Read-only SSH orientation confirmed the current LibreChatDocs and backend working
+files, including the two vendored MCPs and the deployed audio patch. The deployment
+check passed all markers and sidecar health probes. Imported 73 mobile upstream
+commits while preserving the fork features described in
+[the integration record](docs/SURPLUS_MCP_UPSTREAM_SYNC.md).
+
+Added provider-aware custom endpoint parameters, locked YAML defaults, restricted
+gateway cache TTL, and a native market-price panel with a browser link to `/cost`.
+The user explicitly chose the existing dashboard over a new backend summary API.
+The UI explains that this dashboard excludes both MCPs' spend. Existing generic MCP
+selection and upstream media rendering serve the two custom tools; regressions
+cover their names and native audio routing without invoking paid inference.
+
+Resolved the v8/v9 schema collision with v10, retained persistent banner dismissal
+on upstream's single-banner contract, and combined remembered-server selection
+with upstream's per-server access headers. Updated the shared test fixture for the
+fork's paragraph spacing and draft state; retained the corresponding regressions.
+
+Validation: `:app:assembleDebug testDebugUnitTest detekt detektMetadataCommonMain
+:app:lint --continue` passed; 2,399 tests, no failures/errors/skips. App lint:
+9 warnings and 3 hints, no errors. `scripts/check-localization.py
+--require-complete de` and `git diff --check upstream/develop` passed. No device was attached and no
+AVD configured. iOS could not be executed on Linux. Status remains `AUTO_VERIFIED`.
+
+The APK is `app/build/outputs/apk/debug/app-debug.apk`, upstream version
+`2026.08.4-debug`, application ID `com.garfiec.librechat.debug`. Upstream now installs
+debug alongside release; it does not open the release package's private data.
+No backend mutation or remote push was performed.

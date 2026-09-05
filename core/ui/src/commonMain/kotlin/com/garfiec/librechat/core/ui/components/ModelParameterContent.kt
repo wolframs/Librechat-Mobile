@@ -142,6 +142,7 @@ fun ModelParameterContent(
     onParametersChange: (ModelParameters) -> Unit,
     modifier: Modifier = Modifier,
     selectedEndpoint: String = "",
+    endpointConfig: com.garfiec.librechat.core.model.EndpointConfig? = null,
     dynamicParameterDefinitions: List<ParameterDefinition>? = null,
     extendedEffortSupported: Boolean = false,
     selectedProvider: String? = null,
@@ -158,6 +159,7 @@ fun ModelParameterContent(
     val definitions = remember(
         selectedEndpoint,
         dynamicParameterDefinitions,
+        endpointConfig,
         extendedEffortSupported,
         selectedProvider,
         selectedModel,
@@ -170,6 +172,7 @@ fun ModelParameterContent(
                 extendedEffortSupported = extendedEffortSupported,
                 provider = selectedProvider,
                 model = selectedModel,
+                endpointConfig = endpointConfig,
             )
         }
     }
@@ -195,6 +198,11 @@ fun ModelParameterContent(
         }
 
         definitions.forEach { definition ->
+            if (definition.readOnly) {
+                Text("${definition.label}: ${definition.default.orEmpty()}", style = MaterialTheme.typography.bodyMedium)
+                definition.description?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                return@forEach
+            }
             val currentValue = parameters.getValueForKey(definition.key)
             val differs = parameters.valueDiffersFromDefault(definition)
 

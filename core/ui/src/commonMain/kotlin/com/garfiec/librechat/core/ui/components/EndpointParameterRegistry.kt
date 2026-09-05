@@ -1,7 +1,9 @@
 package com.garfiec.librechat.core.ui.components
 
+import com.garfiec.librechat.core.model.EndpointConfig
 import com.garfiec.librechat.core.model.ParameterDefinition
 import com.garfiec.librechat.core.model.ParameterType
+import com.garfiec.librechat.core.model.applyEndpointOverrides
 
 /**
  * Registry of parameter definitions per endpoint, matching the official LibreChat web app's
@@ -30,15 +32,18 @@ object EndpointParameterRegistry {
         extendedEffortSupported: Boolean = false,
         provider: String? = null,
         model: String? = null,
+        endpointConfig: EndpointConfig? = null,
     ): List<ParameterDefinition> {
-        val key = endpoint.lowercase()
+        val key = (endpointConfig?.customParams?.defaultParamsEndpoint
+            ?: endpointConfig?.provider ?: endpoint).lowercase()
         val base = when (key) {
             "bedrock" -> bedrockParamsForModel(model, extendedEffortSupported)
             "agents" -> agentsParamsForProvider(provider, model, extendedEffortSupported)
             else -> ENDPOINT_PARAMS[key] ?: ENDPOINT_PARAMS["default"]!!
         }
-        if (extendedEffortSupported) return base
-        return base.map { def ->
+        val configured = applyEndpointOverrides(base, endpointConfig)
+        if (extendedEffortSupported) return configured
+        return configured.map { def ->
             val options = def.options
             if (def.key in EFFORT_KEYS && options != null && options.any { it in EXTENDED_EFFORT_VALUES }) {
                 def.copy(options = options.filterNot { it in EXTENDED_EFFORT_VALUES })

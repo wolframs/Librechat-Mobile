@@ -1,6 +1,7 @@
 package com.garfiec.librechat.feature.chat.components.artifact
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -111,6 +112,80 @@ Global temperatures are rising.
         assertEquals("report", ref.artifact.identifier)
         assertEquals("text/markdown", ref.artifact.type)
         assertTrue(ref.artifact.content.contains("# Climate Change Report"))
+    }
+
+    @Test
+    fun `detects artifact fenced with 4 backticks`() {
+        // LibreChat's server-side artifact prompt defaults to a 4-backtick fence
+        // (bumping to 5+ only if the content itself contains a 4-backtick run), so a
+        // 3-backtick-only regex misses every artifact real backends actually emit.
+        val text = """
+:::artifact{identifier="report" type="text/markdown" title="Report"}
+````markdown
+# Report
+
+## Section
+Body text.
+````
+:::
+        """.trimIndent()
+
+        val segments = detectArtifacts(text)
+        assertEquals(1, segments.size)
+        val ref = segments[0] as ArtifactSegment.ArtifactReference
+        assertEquals("report", ref.artifact.identifier)
+        assertEquals("text/markdown", ref.artifact.type)
+        assertEquals("markdown", ref.artifact.language)
+        assertTrue(ref.artifact.content.contains("# Report"))
+    }
+
+    @Test
+    fun `4-backtick fence correctly wraps content containing a 3-backtick code block`() {
+        // This is the actual scenario the artifact instructions bump the fence length for:
+        // a markdown/document artifact whose own content demonstrates a fenced code block.
+        val text = """
+:::artifact{identifier="guide" type="text/markdown" title="Guide"}
+````markdown
+# Guide
+
+Run this:
+
+```bash
+echo hello
+```
+````
+:::
+        """.trimIndent()
+
+        val segments = detectArtifacts(text)
+        assertEquals(1, segments.size)
+        val ref = segments[0] as ArtifactSegment.ArtifactReference
+        assertEquals("guide", ref.artifact.identifier)
+        assertTrue(ref.artifact.content.contains("```bash"))
+        assertTrue(ref.artifact.content.contains("echo hello"))
+    }
+
+    @Test
+    fun `mismatched fence lengths still produce an artifact, with the stray fence as content`() {
+        // Inverted from the assertion #296 shipped. A 3-backtick line cannot close a 4-backtick
+        // fence, so the code block simply runs to the container close — upstream renders this as an
+        // artifact whose content includes the stray fence, and the differential corpus confirms it.
+        // The previous test's embedded 3-backtick block is still safe: it is inside a 4-backtick
+        // fence that closes properly, so the artifact never ends early.
+        val text = """
+:::artifact{identifier="bad" type="text/markdown" title="Bad"}
+````markdown
+content
+```
+:::
+        """.trimIndent()
+
+        val segments = detectArtifacts(text)
+        assertEquals(1, segments.size)
+        val ref = segments[0] as ArtifactSegment.ArtifactReference
+        assertEquals("bad", ref.artifact.identifier)
+        assertEquals("content\n```", ref.artifact.content)
+        assertTrue(ref.artifact.isComplete)
     }
 
     @Test
@@ -241,6 +316,45 @@ Let me know if you want changes.
         assertEquals(1, segments.size)
         assertTrue(segments[0] is ArtifactSegment.Text)
         assertEquals(text, (segments[0] as ArtifactSegment.Text).text)
+    }
+
+    @Test
+    fun `plain text keeps surrounding whitespace verbatim`() {
+        // Web hands the raw text to react-markdown, so a 4-space-indented first line is an indented
+        // code block there — trimming here would render it as a paragraph instead.
+        val text = "    indented code line\n\nA paragraph after it.\n"
+        val segments = detectArtifacts(text)
+        assertEquals(1, segments.size)
+        assertEquals(text, (segments[0] as ArtifactSegment.Text).text)
+    }
+
+    @Test
+    fun `streaming prefixes progress from text to incomplete to complete`() {
+        // The live bubble re-runs detection on the growing buffer every flush (#302). Phases:
+        // directive line alone is prose (the fence guard), the opening fence makes it an
+        // incomplete artifact, and only the closing ::: completes it.
+        val directive = """:::artifact{identifier="demo" type="text/html" title="Demo"}"""
+
+        val directiveOnly = detectArtifacts(directive)
+        assertEquals(1, directiveOnly.size)
+        assertTrue(directiveOnly[0] is ArtifactSegment.Text)
+
+        val fenceOpen = detectArtifacts("$directive\n```html\n<p>hi")
+        val partial = (fenceOpen.single() as ArtifactSegment.ArtifactReference).artifact
+        assertFalse(partial.isComplete)
+        assertEquals("<p>hi", partial.content)
+
+        val fenceGrown = detectArtifacts("$directive\n```html\n<p>hi</p>\n<p>more</p>")
+        val grown = (fenceGrown.single() as ArtifactSegment.ArtifactReference).artifact
+        assertFalse(grown.isComplete)
+        assertEquals("<p>hi</p>\n<p>more</p>", grown.content)
+
+        val closed = detectArtifacts("$directive\n```html\n<p>hi</p>\n<p>more</p>\n```\n:::\nAfter.")
+        assertEquals(2, closed.size)
+        val complete = (closed[0] as ArtifactSegment.ArtifactReference).artifact
+        assertTrue(complete.isComplete)
+        assertEquals("<p>hi</p>\n<p>more</p>", complete.content)
+        assertEquals("After.", (closed[1] as ArtifactSegment.Text).text)
     }
 
     @Test

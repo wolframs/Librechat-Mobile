@@ -47,7 +47,7 @@
     <string name="cd_more_options">خيارات إضافية</string>
     <string name="cd_scroll_to_bottom">التمرير إلى الأسفل</string>
     <string name="cd_select_model">اختيار النموذج</string>
-    <string name="cd_librechat">LibreChat</string>
+    <string name="cd_librechat">Switchboard</string>
     <string name="cd_comparison_enabled">المقارنة مُفعّلة</string>
 
     <!-- Content descriptions - Messages -->
@@ -64,7 +64,6 @@
     <string name="cd_generating_response">جارٍ إنشاء الرد</string>
 
     <!-- Content descriptions - Images -->
-    <string name="cd_fullscreen_image">صورة بملء الشاشة</string>
     <string name="cd_close">إغلاق</string>
     <string name="cd_save_to_device">الحفظ في الجهاز</string>
     <string name="cd_share_image">مشاركة الصورة</string>
@@ -236,7 +235,6 @@
     <string name="preset_model">النموذج: %1$s</string>
 
     <!-- Feedback dialog -->
-    <string name="dialog_title_feedback">تقديم ملاحظات</string>
     <string name="feedback_question">ما المشكلة في هذا الرد؟</string>
     <string name="hint_optional_comment">تعليق اختياري…</string>
 
@@ -260,6 +258,7 @@
     <string name="cd_previous_version">الإصدار السابق</string>
     <string name="cd_next_version">الإصدار التالي</string>
     <string name="artifact_version">الإصدار %1$d/%2$d</string>
+    <string name="artifact_incomplete">غير مكتمل</string>
     <!-- Prompts -->
     <string name="prompts_library">مكتبة المطالبات</string>
     <string name="use_in_chat">استخدام في المحادثة</string>

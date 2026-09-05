@@ -24,6 +24,44 @@ class SearchMatchEnumerationTest {
     private fun textPart(text: String) = MessageContentPart(type = ContentType.TEXT, text = text)
     private fun thinkPart(think: String) = MessageContentPart(type = ContentType.THINK, think = think)
 
+    // --- artifacts (see the render-order contract in SearchMatchEnumeration.kt) ---
+
+    // NB: these must go through a TEXT *part*. A message with no content parts renders
+    // message.text via MarkdownContent with no artifact split at all (clause 1 of the contract) —
+    // that gap is #304, tracked separately.
+
+    @Test
+    fun `complete artifact content is not counted`() {
+        // Whether a complete artifact renders inline depends on a UI preference the ViewModel
+        // cannot see, so its content is excluded from navigable occurrences.
+        val msg = message(
+            parts = listOf(
+                textPart(
+                    "before match\n\n" +
+                        ":::artifact{identifier=\"a\" type=\"text/html\" title=\"A\"}\n" +
+                        "```html\n<p>match match match</p>\n```\n:::",
+                ),
+            ),
+        )
+        assertThat(countMessageOccurrences(msg, "match")).isEqualTo(1)
+    }
+
+    @Test
+    fun `incomplete artifact content is counted`() {
+        // An incomplete artifact always renders its source (IncompleteArtifact -> CodeBlock)
+        // regardless of that preference, so its matches are on screen and must be navigable.
+        val msg = message(
+            parts = listOf(
+                textPart(
+                    "before match\n\n" +
+                        ":::artifact{identifier=\"a\" type=\"text/html\" title=\"A\"}\n" +
+                        "```html\n<p>match match</p>",
+                ),
+            ),
+        )
+        assertThat(countMessageOccurrences(msg, "match")).isEqualTo(3)
+    }
+
     // --- plain text / fallback (no parts) ---
 
     @Test
@@ -181,5 +219,34 @@ class SearchMatchEnumerationTest {
             }
             assertThat(owners).hasSize(1)
         }
+    }
+
+    @Test
+    fun `a late batch label consumed by a finalized phase is not counted`() {
+        // The grouping pass suppresses such a label (it never renders), so counting it would
+        // shift every later occurrence off its on-screen match.
+        val parts = listOf(
+            MessageContentPart(
+                type = ContentType.TOOL_CALL,
+                toolCall = com.garfiec.librechat.core.model.content.AgentToolCall(
+                    id = "t1",
+                    name = "search",
+                    output = "done",
+                ),
+            ),
+            textPart("beta answer"),
+            MessageContentPart(
+                type = ContentType.ACTIVITY_LABEL,
+                activityLabel = "beta batch label",
+            ),
+            MessageContentPart(
+                type = ContentType.ACTIVITY_LABEL,
+                activityLabel = "Phase",
+                activityLabelType = "phase",
+                activityStartIndex = 0,
+                activityEndIndex = 2,
+            ),
+        )
+        assertThat(countMessageOccurrences(message(parts = parts), "beta")).isEqualTo(1)
     }
 }

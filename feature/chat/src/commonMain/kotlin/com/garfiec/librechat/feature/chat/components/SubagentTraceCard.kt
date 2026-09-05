@@ -26,7 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +47,19 @@ import com.garfiec.librechat.feature.chat.viewmodel.SubagentTrace
 import org.jetbrains.compose.resources.stringResource
 
 /**
+ * The parts a trace card renders, in its reload precedence order: persisted content is
+ * authoritative over any live buffer.
+ *
+ * Shared with [ToolCallDispatcher], which walks the same run for the tool-call ids it has to hoist
+ * — resolve it twice by hand and the two drift into hoisting one run's ids while rendering another's.
+ */
+internal fun subagentTraceParts(
+    persistedParts: List<MessageContentPart>?,
+    liveTrace: SubagentTrace?,
+): List<MessageContentPart> =
+    persistedParts?.takeIf { it.isNotEmpty() } ?: liveTrace?.parts.orEmpty()
+
+/**
  * Collapsible card rendering a child agent's run (v0.8.6 subagents). Mirrors the
  * thinking/summary cards: a tappable header with the subagent's name + a live
  * ticker (phase), an in-progress spinner until the run resolves, and an
@@ -62,6 +75,11 @@ import org.jetbrains.compose.resources.stringResource
  * Depth is capped at 1: nested parts are rendered with `allowSubagentCard=false`
  * so a subagent tool_call inside a subagent never recurses into another trace
  * card (it falls back to the generic tool-call card).
+ *
+ * **Nested parts render with `hideAttachments`; the files they produced are the caller's to place.**
+ * [ToolCallDispatcher] hoists the whole subtree's output to a sibling below this card (or hands the
+ * ids to the enclosing activity group). Dropping the flag here renders those files twice; dropping
+ * the hoist renders them nowhere.
  */
 @Composable
 internal fun SubagentTraceCard(
@@ -71,15 +89,18 @@ internal fun SubagentTraceCard(
     baseUrl: String = "",
     attachments: List<Attachment> = emptyList(),
     showImageDescriptions: Boolean = true,
+    // Scopes this card's expand state and its nested parts'. Unscoped, every subagent card's
+    // first nested part shared one key — the lazy item's SaveableStateHolder is keyed by
+    // conversation slot, so expansion bled between unrelated cards.
+    stateKey: String = "",
 ) {
-    // Reload precedence: persisted content is authoritative over any live buffer.
-    val parts = persistedParts?.takeIf { it.isNotEmpty() } ?: liveTrace?.parts.orEmpty()
+    val parts = subagentTraceParts(persistedParts, liveTrace)
     val isComplete = persistedParts != null || (liveTrace?.isComplete ?: true)
     val title = liveTrace?.subagentType?.takeIf { it.isNotBlank() }
         ?: liveTrace?.label?.takeIf { it.isNotBlank() }
         ?: stringResource(Res.string.label_subagent)
 
-    var isExpanded by remember { mutableStateOf(false) }
+    var isExpanded by rememberSaveable(key = "subagent:$stateKey") { mutableStateOf(false) }
     val toggleCd =
         stringResource(if (isExpanded) Res.string.cd_collapse_subagent else Res.string.cd_expand_subagent, title)
 
@@ -131,15 +152,18 @@ internal fun SubagentTraceCard(
 
             AnimatedVisibility(visible = isExpanded, enter = expandVertically(), exit = shrinkVertically()) {
                 Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
-                    parts.forEach { part ->
+                    parts.forEachIndexed { index, part ->
                         Spacer(modifier = Modifier.padding(top = 6.dp))
                         ContentPartDispatcher(
                             part = part,
                             baseUrl = baseUrl,
                             attachments = attachments,
                             showImageDescriptions = showImageDescriptions,
+                            stateKey = "$stateKey:$index",
                             // Depth-1 guard: a nested subagent renders flat, never another card.
                             allowSubagentCard = false,
+                            // The caller hoists this subtree's files out — see the KDoc.
+                            hideAttachments = true,
                         )
                     }
                 }

@@ -1,7 +1,10 @@
 package com.garfiec.librechat.core.common.result
 
+import com.garfiec.librechat.core.common.di.ioDispatcher
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.test.runTest
+import kotlin.coroutines.ContinuationInterceptor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -21,18 +24,54 @@ class SafeApiCallTest {
         assertEquals("hello", result.data)
     }
 
+    /**
+     * The exception is kept for logging and diagnosis, but its message is NOT the user-facing text:
+     * Ktor quotes the request URL in its own messages, so passing `e.message` through would render
+     * a gateway redirect and its `meta=` JWT in an error banner.
+     */
     @Test
     fun safeApiCallReturnsErrorOnException() = runTest {
         val result = safeApiCall<String> { throw IllegalStateException("boom") }
         assertIs<Result.Error>(result)
-        assertEquals("boom", result.message)
+        assertEquals(FailureMessages.UNKNOWN, result.message)
+        assertEquals(FailureKind.Unknown, result.kind)
         assertIs<IllegalStateException>(result.exception)
+        assertEquals("boom", result.exception?.message)
     }
 
     @Test
     fun safeApiCallPropagatesCancellation() = runTest {
         assertFailsWith<CancellationException> {
             safeApiCall<String> { throw CancellationException("cancelled") }
+        }
+    }
+
+    /**
+     * Asserts on the interceptor rather than a thread name so it holds on both platforms. `runTest`
+     * installs a dispatcher of its own, so a missing hop fails this rather than passing by
+     * coincidence.
+     */
+    @Test
+    fun safeApiCallRunsItsBlockOnTheIoDispatcher() = runTest {
+        var inside: ContinuationInterceptor? = null
+        val result = safeApiCall {
+            inside = currentCoroutineContext()[ContinuationInterceptor]
+            "ok"
+        }
+        assertIs<Result.Success<String>>(result)
+        assertSame(ioDispatcher, inside)
+    }
+
+    @Test
+    fun onApiDispatcherRunsItsBlockOnTheIoDispatcher() = runTest {
+        val inside = onApiDispatcher { currentCoroutineContext()[ContinuationInterceptor] }
+        assertSame(ioDispatcher, inside)
+    }
+
+    @Test
+    fun onApiDispatcherLetsFailuresEscape() = runTest {
+        assertFailsWith<IllegalStateException> {
+            onApiDispatcher { throw IllegalStateException("boom") }
         }
     }
 

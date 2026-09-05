@@ -24,13 +24,18 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v6.3.0
+
+      # The WebView renderers execute these files. Nothing else notices if one is
+      # hand-edited, replaced, or left behind by a repin -- the app just runs it.
+      - name: Verify vendored web assets
+        run: scripts/vendor-web-assets.py --check
 
       - name: Check localization key coverage
         run: python3 scripts/check-localization.py --require-complete de
@@ -40,7 +45,7 @@ jobs:
 
       - name: Upload detekt SARIF
         if: always() && hashFiles('build/reports/detekt/merged.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.9
         with:
           sarif_file: build/reports/detekt/merged.sarif
           category: detekt
@@ -62,13 +67,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v6.3.0
 
       - name: Run tests
         run: ./gradlew test
@@ -94,23 +99,30 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v6.3.0
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
+
+      # Compile-only gate for :feature:chat's instrumented tests (they execute on a
+      # local emulator via connectedDebugAndroidTest, never in CI). Scoped to the one
+      # module on purpose: a repo-wide assembleDebugAndroidTest would also compile
+      # :app's stale androidTest sources.
+      - name: Compile chat instrumented tests
+        run: ./gradlew :feature:chat:assembleDebugAndroidTest
 
       - name: Upload debug APK
         id: upload_apk
         if: always() && hashFiles('app/build/outputs/apk/debug/app-debug.apk') != ''
         uses: actions/upload-artifact@v7
         with:
-          name: librechat-android-debug-${{ github.event.pull_request.number || github.sha }}
+          name: switchboard-android-debug-${{ github.event.pull_request.number || github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 90
           if-no-files-found: error
@@ -118,7 +130,7 @@ jobs:
       - name: Write APK summary
         if: always() && steps.upload_apk.outputs.artifact-url != ''
         env:
-          ARTIFACT_NAME: librechat-android-debug-${{ github.event.pull_request.number || github.sha }}
+          ARTIFACT_NAME: switchboard-android-debug-${{ github.event.pull_request.number || github.sha }}
           ARTIFACT_URL: ${{ steps.upload_apk.outputs.artifact-url }}
         run: |
           {
@@ -140,8 +152,8 @@ jobs:
           message: |
             ## Android debug APK
 
-            **Artifact:** `librechat-android-debug-${{ github.event.pull_request.number }}`
-            **Download:** [librechat-android-debug-${{ github.event.pull_request.number }}.zip](${{ steps.upload_apk.outputs.artifact-url }})
+            **Artifact:** `switchboard-android-debug-${{ github.event.pull_request.number }}`
+            **Download:** [switchboard-android-debug-${{ github.event.pull_request.number }}.zip](${{ steps.upload_apk.outputs.artifact-url }})
             **Retention:** 90 days
             **Commit:** `${{ github.event.pull_request.head.sha }}`
 
@@ -161,13 +173,13 @@ jobs:
           xcode-version: latest-stable
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v6.3.0
 
       - name: Cache Kotlin/Native toolchain
         uses: actions/cache@v6
@@ -195,3 +207,42 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=YES
+
+  ios-release-link:
+    name: iOS Release Link (OOM canary)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6.3.0
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v6
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: ${{ runner.os }}-konan-
+
+      # The Release device link runs Kotlin/Native's whole-program optimization pass
+      # (DevirtualizationAnalysis), whose memory use grows with total code size and
+      # OOM'd the 7 GB runner on every release from Jul 2 to Jul 25, 2026 (KT-80367;
+      # the #200 ktor pin was a stopgap that code growth overtook). The Debug/simulator
+      # builds above skip that pass entirely, so without this job the first signal that
+      # the IPA / App Store archive can't link is a failed release. Same task, same
+      # heap cap (gradle.properties -Xmx6g) as release.yml and appstore.yml.
+      - name: Link Release framework (device)
+        run: ./gradlew :shared:linkReleaseFrameworkIosArm64

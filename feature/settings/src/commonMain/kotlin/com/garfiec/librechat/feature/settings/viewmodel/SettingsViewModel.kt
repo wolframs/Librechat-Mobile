@@ -3,18 +3,22 @@ package com.garfiec.librechat.feature.settings.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.garfiec.librechat.core.common.AppInfo
+import com.garfiec.librechat.core.common.BackendVersion
 import com.garfiec.librechat.core.data.datastore.ArtifactDisplayMode
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
 import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
+import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
 import com.garfiec.librechat.core.data.datastore.ThemeDataStore
 import com.garfiec.librechat.core.data.datastore.ThemeMode
+import com.garfiec.librechat.core.data.datastore.UploadRoutingMode
+import com.garfiec.librechat.core.data.prefetch.AttachmentWarmer
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.data.repository.BalanceRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
@@ -51,7 +55,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-@Suppress("LongParameterList")
+// TooManyFunctions: the members are one-line forwarders to controllers, one per setting, so the
+// count tracks how many settings exist rather than how much this class does.
+@Suppress("LongParameterList", "TooManyFunctions")
 class SettingsViewModel(
     contentReader: ContentReader,
     cacheCleaner: PlatformCacheCleaner,
@@ -72,12 +78,18 @@ class SettingsViewModel(
     private val configRepository: ConfigRepository,
     diagnosticLogRepository: DiagnosticLogRepository,
     appInfo: AppInfo,
+    attachmentWarmer: AttachmentWarmer,
     ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
     /** Raw state for everything not driven by DataStore flows. */
     private val _uiState = MutableStateFlow(
-        SettingsUiState(appVersion = appInfo.versionName, gitSha = appInfo.gitSha),
+        SettingsUiState(
+            appVersion = appInfo.versionName,
+            gitSha = appInfo.gitSha,
+            // Constant per platform, so it is seeded rather than observed.
+            prefetchAttachmentsSupported = attachmentWarmer.isSupported,
+        ),
     )
 
     private val stateHandle = SettingsStateHandle(_uiState, viewModelScope)
@@ -121,6 +133,7 @@ class SettingsViewModel(
         observePermissionFlags()
         observeAccountDeletionPolicy()
         dataDelegate.loadLogsBufferSize()
+        dataDelegate.loadCacheSize()
     }
 
     /**
@@ -154,6 +167,11 @@ class SettingsViewModel(
                         serverMemoriesEnabled = role.hasAccessOrPermissive(PermissionType.MEMORIES, Permission.USE),
                         remoteAgentsEnabled = role.hasAccessOrPermissive(PermissionType.REMOTE_AGENTS, Permission.USE),
                         remoteAgentsCreateEnabled = role.hasAccessOrPermissive(PermissionType.REMOTE_AGENTS, Permission.CREATE),
+                        // Only the update affordance is gated — DELETE stays ungated server-side.
+                        // Permissive on unknown: an older server emits no such permission and
+                        // still accepts the call, and the server enforces with 403 either way.
+                        sharedLinksUpdateEnabled =
+                            role.hasAccessOrPermissive(PermissionType.SHARED_LINKS, Permission.CREATE),
                     )
                 }
             }
@@ -176,6 +194,10 @@ class SettingsViewModel(
                         allowAccountDeletion = config?.allowAccountDeletion ?: true,
                         buildInfo = config?.buildInfo,
                         serverVersion = version,
+                        // Fail-safe false: only a CONFIRMED rc1+ server keeps the shareId across
+                        // a re-publish, so an unresolved version warns instead of promising it.
+                        sharedLinkUpdateKeepsUrl = version != null &&
+                            BackendVersion.isCompatibleOrNewer(version, "0.8.8-rc1"),
                     )
                 }
             }
@@ -236,12 +258,36 @@ class SettingsViewModel(
         prefsController.setAutoScrollEnabled(enabled)
     }
 
+    fun setPrefetchEnabled(enabled: Boolean) {
+        prefsController.setPrefetchEnabled(enabled)
+    }
+
+    fun setPrefetchAttachmentsEnabled(enabled: Boolean) {
+        prefsController.setPrefetchAttachmentsEnabled(enabled)
+    }
+
+    fun setPrefetchDepth(depth: Int) {
+        prefsController.setPrefetchDepth(depth)
+    }
+
+    fun setPrefetchOnMeteredEnabled(enabled: Boolean) {
+        prefsController.setPrefetchOnMeteredEnabled(enabled)
+    }
+
     fun setShowThinkingBlocks(show: Boolean) {
         prefsController.setShowThinkingBlocks(show)
     }
 
     fun setContextBarPlacement(placement: ContextBarPlacement) {
         prefsController.setContextBarPlacement(placement)
+    }
+
+    fun setDuringRunAction(action: DuringRunAction) {
+        prefsController.setDuringRunAction(action)
+    }
+
+    fun setUploadRoutingMode(mode: UploadRoutingMode) {
+        prefsController.setUploadRoutingMode(mode)
     }
 
     fun setShowImageDescriptions(show: Boolean) {
@@ -327,26 +373,6 @@ class SettingsViewModel(
         _uiState.update { it.copy(forkMode = mode, showForkSettingsDialog = false) }
     }
 
-    // ── Commands ───────────────────────────────────────────────────
-
-    fun showCommandsScreen() {
-        _uiState.update { it.copy(showCommandsScreen = true) }
-    }
-
-    fun hideCommandsScreen() {
-        _uiState.update { it.copy(showCommandsScreen = false) }
-    }
-
-    fun toggleCommand(name: String, enabled: Boolean) {
-        _uiState.update { state ->
-            state.copy(
-                commands = state.commands.map { cmd ->
-                    if (cmd.name == name) cmd.copy(enabled = enabled) else cmd
-                },
-            )
-        }
-    }
-
     // ── Personalization ────────────────────────────────────────────
 
     fun showPersonalizationDialog() {
@@ -384,7 +410,7 @@ class SettingsViewModel(
     fun showEditMemoryDialog(memory: Memory) = memoryDelegate.showEditMemoryDialog(memory)
     fun dismissMemoryDialog() = memoryDelegate.dismissMemoryDialog()
     fun saveMemory(key: String, value: String) = memoryDelegate.saveMemory(key, value)
-    fun deleteMemory(key: String) = memoryDelegate.deleteMemory(key)
+    fun deleteMemory(memory: Memory) = memoryDelegate.deleteMemory(memory)
     fun toggleMemoriesEnabled(enabled: Boolean) = memoryDelegate.toggleMemoriesEnabled(enabled)
 
     // MCP server management
@@ -424,7 +450,7 @@ class SettingsViewModel(
     fun dismissExportComingSoon() = dataDelegate.dismissExportComingSoon()
     fun loadSharedLinks() = dataDelegate.loadSharedLinks()
     fun loadMoreSharedLinks() = dataDelegate.loadMoreSharedLinks()
-    fun toggleSharedLinkVisibility(shareId: String) = dataDelegate.toggleSharedLinkVisibility(shareId)
+    fun updateSharedLink(shareId: String) = dataDelegate.updateSharedLink(shareId)
     fun deleteSharedLink(shareId: String) = dataDelegate.deleteSharedLink(shareId)
     fun clearCache() = dataDelegate.clearCache()
     fun revokeAllKeys() = dataDelegate.revokeAllKeys()

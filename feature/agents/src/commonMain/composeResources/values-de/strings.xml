@@ -196,9 +196,6 @@
     <string name="select_agent">Agent auswählen</string>
 
     <!-- MCP Tools selector -->
-    <string name="mcp_tools_count">MCP-Tools (%1$d ausgewählt)</string>
-    <string name="no_mcp_tools">Keine MCP-Tools verfügbar. Konfiguriere MCP-Server in den Einstellungen.</string>
-    <string name="unknown_server">Unbekannter Server</string>
 
     <!-- Model picker -->
     <string name="model_required_label">Modell *</string>
@@ -289,4 +286,30 @@
     <string name="discard_agent_changes_message">Deine Änderungen an diesem Agenten wurden noch nicht gespeichert.</string>
     <string name="discard">Verwerfen</string>
     <string name="stay">Bleiben</string>
+    <string name="tools_marketplace_title">Werkzeuge</string>
+    <string name="tools_marketplace_description">Wähle, was dieser Agent tun kann</string>
+    <string name="tools_marketplace_search_hint">Werkzeuge, Server und Skills suchen…</string>
+    <string name="tools_marketplace_no_matches">Keine Treffer für „%1$s“</string>
+    <string name="tools_marketplace_no_favorites">Markiere ein Werkzeug als Favorit, um es hier anzuheften</string>
+    <string name="tools_marketplace_empty">Noch nichts verfügbar</string>
+    <string name="tools_filter_all">Alle</string>
+    <string name="tools_filter_favorites">Favoriten</string>
+    <string name="tools_filter_builtin">Integriert</string>
+    <string name="tools_filter_tools">Werkzeuge</string>
+    <string name="tools_filter_mcp">MCP</string>
+    <string name="tools_filter_skills">Skills</string>
+    <string name="tools_browse">Werkzeuge durchsuchen</string>
+    <string name="cd_pin_tool">Anheften</string>
+    <string name="cd_unpin_tool">Lösen</string>
+    <string name="builtin_code_interpreter">Code-Interpreter</string>
+    <string name="builtin_code_interpreter_desc">Führt Code in einer Sandbox aus und liefert die Ausgabe und Dateien zurück.</string>
+    <string name="builtin_file_search">Dateisuche</string>
+    <string name="builtin_file_search_desc">Findet Textstellen in Dateien, die diesem Agenten angehängt sind.</string>
+    <string name="builtin_web_search">Websuche</string>
+    <string name="builtin_web_search_desc">Durchsucht das Web und nennt die verwendeten Quellen.</string>
+    <string name="builtin_file_context">Dateikontext</string>
+    <string name="builtin_file_context_desc">Fügt ganze angehängte Dateien in den Kontext des Agenten ein.</string>
+    <string name="builtin_ask_user">Nutzer fragen</string>
+    <string name="builtin_ask_user_desc">Unterbricht die Ausführung, um dir eine Rückfrage zu stellen.</string>
+    <string name="agent_contact_title">Kontakt</string>
 </resources>

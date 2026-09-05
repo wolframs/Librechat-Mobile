@@ -14,7 +14,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
@@ -25,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +35,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
@@ -44,13 +46,17 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
+import com.garfiec.librechat.core.common.conversation.OpenConversationRegistry
 import com.garfiec.librechat.core.common.identity.AccountState
+import com.garfiec.librechat.core.common.lifecycle.DeferredWorkWindow
+import com.garfiec.librechat.core.common.lifecycle.ForegroundSignal
 import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.ui.components.BannerDisplay
 import com.garfiec.librechat.core.ui.theme.AppLocale
 import com.garfiec.librechat.feature.agents.navigation.AgentMarketplace
 import com.garfiec.librechat.feature.agents.navigation.agentsEntries
 import com.garfiec.librechat.feature.auth.navigation.AddAccountServerUrl
+import com.garfiec.librechat.feature.auth.navigation.ServerUrl
 import com.garfiec.librechat.feature.auth.navigation.authEntries
 import com.garfiec.librechat.feature.auth.navigation.isAddAccountFlowRoute
 import com.garfiec.librechat.feature.chat.navigation.Chat
@@ -76,6 +82,9 @@ import com.garfiec.librechat.feature.skills.navigation.skillsEntries
 import com.garfiec.librechat.shared.resources.Res
 import com.garfiec.librechat.shared.resources.dismiss
 import com.garfiec.librechat.shared.resources.dont_warn_again
+import com.garfiec.librechat.shared.resources.session_expired_message
+import com.garfiec.librechat.shared.resources.session_expired_message_named
+import com.garfiec.librechat.shared.resources.session_expired_title
 import com.garfiec.librechat.shared.resources.version_mismatch_message
 import com.garfiec.librechat.shared.resources.version_mismatch_title
 import kotlinx.coroutines.Dispatchers
@@ -109,8 +118,42 @@ fun LibreChatNavHost(
 ) {
     val isLoggedIn by navHostViewModel.isLoggedIn.collectAsStateWithLifecycle()
 
-    // Stable start key — auth redirect handled via LaunchedEffect below.
-    val backStack = rememberNavBackStack(navigationSavedStateConfig, NewChat())
+    // Publish foreground state for deferred background work. onDispose reports background because a
+    // host leaving composition is the app going away as far as any consumer is concerned.
+    val foregroundSignal = koinInject<ForegroundSignal>()
+    val deferredWorkWindow = koinInject<DeferredWorkWindow>()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, foregroundSignal, deferredWorkWindow) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    foregroundSignal.set(true)
+                    // Latches, so this is only ever the first ON_START that matters. It is what
+                    // lets deferred work outlive the foreground, and what keeps it off cold start.
+                    deferredWorkWindow.markUiStarted()
+                }
+                Lifecycle.Event.ON_STOP -> foregroundSignal.set(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            foregroundSignal.set(false)
+        }
+    }
+
+    val openConversationRegistry = koinInject<OpenConversationRegistry>()
+
+    // Start key comes from the synchronous logged-in seed, not a fixed NewChat. Starting logged-in
+    // and redirecting away composes the chat shell for real and then plays NavDisplay's transition
+    // animation over it — a third of a second of "signed in" before the auth screen, on every
+    // logged-out cold start. This reads the same seed the redirect below does, which leaves that
+    // redirect a backstop for the deep-link path rather than the thing that picks the screen.
+    val backStack = rememberNavBackStack(
+        navigationSavedStateConfig,
+        if (navHostViewModel.isLoggedIn.value != false) NewChat() else ServerUrl,
+    )
     val navigator = remember(backStack) { Navigator(backStack) }
 
     // Redirect to auth if not logged in — once per saved-state lifecycle, NOT on every recreation.
@@ -146,6 +189,9 @@ fun LibreChatNavHost(
     LaunchedEffect(navigator.currentRoute) {
         val conversationId = (navigator.currentRoute as? Chat)?.conversationId
         drawerViewModel.setActiveConversation(conversationId)
+        // Same answer, different audience: the drawer highlights this conversation, background cache
+        // work has to leave it alone. A non-chat route clears it — nothing open, nothing protected.
+        openConversationRegistry.set(conversationId)
 
         // Navigation breadcrumb: route type name only — low cardinality, content-free.
         val screen = navigator.currentRoute?.let { it::class.simpleName } ?: "none"
@@ -249,7 +295,46 @@ fun LibreChatNavHost(
                 onDismissPermanently = navHostViewModel::dismissVersionWarningPermanently,
             )
         }
+
+        // Rendered here rather than inside the auth screens: it sits above NavDisplay and so survives
+        // the back-stack reset that routed the user to auth in the first place.
+        val sessionExpiredNotice by navHostViewModel.sessionExpiredNotice.collectAsStateWithLifecycle()
+        sessionExpiredNotice?.let { accountLabel ->
+            SessionExpiredDialog(
+                accountLabel = accountLabel,
+                onDismiss = navHostViewModel::dismissSessionExpiredNotice,
+            )
+        }
     }
+}
+
+/** Reports an unannounced sign-out. [accountLabel] is blank when the account can't be named. */
+@Composable
+private fun SessionExpiredDialog(accountLabel: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(Res.string.session_expired_title),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+        },
+        text = {
+            Text(
+                text = if (accountLabel.isBlank()) {
+                    stringResource(Res.string.session_expired_message)
+                } else {
+                    stringResource(Res.string.session_expired_message_named, accountLabel)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(Res.string.dismiss))
+            }
+        },
+    )
 }
 
 @Composable
@@ -296,8 +381,7 @@ fun PhoneLayout(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val isLoggedIn by navHostViewModel.isLoggedIn.collectAsStateWithLifecycle()
-    val banners by navHostViewModel.banners.collectAsStateWithLifecycle()
-    val dismissedBannerIds by navHostViewModel.dismissedBannerIds.collectAsStateWithLifecycle()
+    val banner by navHostViewModel.banner.collectAsStateWithLifecycle()
 
     // Reset sidebar mode to Conversations when the drawer closes
     LaunchedEffect(drawerState.isClosed) {
@@ -366,12 +450,10 @@ fun PhoneLayout(
         },
     ) {
         Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            if (!navigator.isInAuthFlow && banners.isNotEmpty()) {
+            if (!navigator.isInAuthFlow) {
                 BannerDisplay(
-                    banners = banners,
-                    dismissedIds = dismissedBannerIds,
+                    banner = banner,
                     onDismiss = navHostViewModel::dismissBanner,
-                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
             MainNavDisplay(

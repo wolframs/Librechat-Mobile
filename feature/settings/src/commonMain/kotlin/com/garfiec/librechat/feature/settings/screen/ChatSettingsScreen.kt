@@ -17,7 +17,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Brush
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,9 +45,11 @@ import com.garfiec.librechat.core.data.datastore.ArtifactDisplayMode
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
+import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
+import com.garfiec.librechat.core.data.datastore.UploadRoutingMode
 import com.garfiec.librechat.feature.settings.resources.*
 import com.garfiec.librechat.feature.settings.resources.Res
 import com.garfiec.librechat.feature.settings.viewmodel.SettingsViewModel
@@ -120,6 +121,8 @@ fun ChatSettingsContent(
                     autoScrollEnabled = uiState.autoScrollEnabled,
                     showThinkingBlocks = uiState.showThinkingBlocks,
                     contextBarPlacement = uiState.contextBarPlacement,
+                    duringRunAction = uiState.duringRunAction,
+                    uploadRoutingMode = uiState.uploadRoutingMode,
                     showImageDescriptions = uiState.showImageDescriptions,
                     dismissKeyboardOnSend = uiState.dismissKeyboardOnSend,
                     chatLayoutStyle = uiState.chatLayoutStyle,
@@ -180,14 +183,6 @@ fun ChatSettingsContent(
                     title = stringResource(Res.string.fork_behavior),
                     subtitle = forkModeLabel(ForkMode.fromApiValue(uiState.forkMode)),
                     onClick = viewModel::showForkSettingsDialog,
-                )
-            }
-            item(key = "commands_row") {
-                ChatSettingsRow(
-                    icon = Icons.Default.Terminal,
-                    title = stringResource(Res.string.commands),
-                    subtitle = stringResource(Res.string.commands_enabled_count, uiState.commands.count { it.enabled }),
-                    onClick = viewModel::showCommandsScreen,
                 )
             }
 
@@ -285,6 +280,42 @@ fun ChatSettingsContent(
                 onSave = saveAndClose(viewModel::setContextBarPlacement),
                 onDismiss = dismissDialog,
                 optionLabel = { contextBarPlacementLabel(it) },
+            )
+        }
+
+        if (openDialog == ChatSettingDialog.DURING_RUN_ACTION) {
+            RadioSelectionDialog(
+                title = stringResource(Res.string.during_run_action_title),
+                description = stringResource(Res.string.during_run_action_desc),
+                options = DuringRunAction.entries,
+                selected = uiState.duringRunAction,
+                onSave = saveAndClose(viewModel::setDuringRunAction),
+                onDismiss = dismissDialog,
+                optionLabel = { duringRunActionLabel(it) },
+                optionDescription = {
+                    when (it) {
+                        DuringRunAction.QUEUE -> stringResource(Res.string.during_run_action_queue_desc)
+                        DuringRunAction.STEER -> stringResource(Res.string.during_run_action_steer_desc)
+                    }
+                },
+            )
+        }
+
+        if (openDialog == ChatSettingDialog.UPLOAD_ROUTING) {
+            RadioSelectionDialog(
+                title = stringResource(Res.string.upload_routing_title),
+                description = stringResource(Res.string.upload_routing_desc),
+                options = UploadRoutingMode.entries,
+                selected = uiState.uploadRoutingMode,
+                onSave = saveAndClose(viewModel::setUploadRoutingMode),
+                onDismiss = dismissDialog,
+                optionLabel = { uploadRoutingModeLabel(it) },
+                optionDescription = {
+                    when (it) {
+                        UploadRoutingMode.AUTO -> stringResource(Res.string.upload_routing_auto_desc)
+                        UploadRoutingMode.MANUAL -> stringResource(Res.string.upload_routing_manual_desc)
+                    }
+                },
             )
         }
 
@@ -389,21 +420,6 @@ fun ChatSettingsContent(
                 onStopPreview = viewModel::stopTtsPreview,
                 onConfirm = viewModel::saveTtsSettings,
                 onDismiss = viewModel::dismissTtsDetailDialog,
-            )
-        }
-
-        // Commands screen (full screen overlay)
-        if (uiState.showCommandsScreen) {
-            CommandsConfigScreen(
-                commands = uiState.commands.map { cmd ->
-                    CommandConfig(
-                        name = cmd.name,
-                        description = cmd.description,
-                        enabled = cmd.enabled,
-                    )
-                },
-                onToggleCommand = viewModel::toggleCommand,
-                onNavigateBack = viewModel::hideCommandsScreen,
             )
         }
     } // Box

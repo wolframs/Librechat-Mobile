@@ -20,6 +20,16 @@ data class Conversation(
     @SerialName("assistant_id") val assistantId: String? = null,
     val tags: List<String> = emptyList(),
     val isArchived: Boolean = false,
+    /**
+     * Whether a shared link currently exists for this conversation.
+     *
+     * Derived per **list** request from one batched SharedLink lookup and deliberately NOT
+     * persisted, so it is absent from single-conversation payloads and from anything read back
+     * out of the local cache. The whole pass is also skipped when `ALLOW_SHARED_LINKS` is off,
+     * and a lookup failure drops the flag rather than failing the list — so null means "not
+     * known here", never "not shared", and nothing may render an absence as a negative.
+     */
+    val isShared: Boolean? = null,
     val temperature: Double? = null,
     @SerialName("top_p") @JsonNames("topP") val topP: Double? = null,
     val topK: Int? = null,
@@ -34,6 +44,10 @@ data class Conversation(
     val chatGptLabel: String? = null,
     @SerialName("reasoning_effort") @JsonNames("reasoningEffort") val reasoningEffort: String? = null,
     @SerialName("reasoning_summary") @JsonNames("reasoningSummary") val reasoningSummary: String? = null,
+    /** Reasoning mode for Responses-API models (sibling of [reasoningEffort]). */
+    @SerialName("reasoning_mode") val reasoningMode: String? = null,
+    /** Reasoning context carried alongside [reasoningMode] for Responses-API models. */
+    @SerialName("reasoning_context") val reasoningContext: String? = null,
     val effort: String? = null,
     val verbosity: String? = null,
     val useResponsesApi: Boolean? = null,

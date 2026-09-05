@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.VerticalDivider
@@ -57,8 +56,7 @@ fun TabletLayout(
     modifier: Modifier = Modifier,
 ) {
     // Banner state only -- drawer state is collected inside DrawerContent itself
-    val banners by navHostViewModel.banners.collectAsStateWithLifecycle()
-    val dismissedBannerIds by navHostViewModel.dismissedBannerIds.collectAsStateWithLifecycle()
+    val banner by navHostViewModel.banner.collectAsStateWithLifecycle()
 
     // Persisted sidebar state from DataStore -- single source of truth in the ViewModel.
     // Null until the persisted value resolves; treat unknown as closed for boolean callers.
@@ -216,8 +214,7 @@ fun TabletLayout(
                 MainContent(
                     navigator = navigator,
                     isInAuthFlow = false,
-                    banners = banners,
-                    dismissedBannerIds = dismissedBannerIds,
+                    banner = banner,
                     onDismissBanner = navHostViewModel::dismissBanner,
                     onToggleDrawer = {
                         navHostViewModel.toggleTabletSidebar()
@@ -247,8 +244,7 @@ fun TabletLayout(
         MainContent(
             navigator = navigator,
             isInAuthFlow = true,
-            banners = banners,
-            dismissedBannerIds = dismissedBannerIds,
+            banner = banner,
             onDismissBanner = navHostViewModel::dismissBanner,
             onToggleDrawer = {},
             modifier = Modifier.fillMaxSize(),
@@ -260,19 +256,16 @@ fun TabletLayout(
 private fun MainContent(
     navigator: Navigator,
     isInAuthFlow: Boolean,
-    banners: List<Banner>,
-    dismissedBannerIds: Set<String>,
+    banner: Banner?,
     onDismissBanner: (String) -> Unit,
     onToggleDrawer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
-        if (!isInAuthFlow && banners.isNotEmpty()) {
+        if (!isInAuthFlow) {
             BannerDisplay(
-                banners = banners,
-                dismissedIds = dismissedBannerIds,
+                banner = banner,
                 onDismiss = onDismissBanner,
-                modifier = Modifier.padding(top = 4.dp),
             )
         }
         MainNavDisplay(

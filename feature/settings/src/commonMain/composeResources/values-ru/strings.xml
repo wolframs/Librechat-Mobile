@@ -68,6 +68,71 @@
     <string name="section_language">Язык</string>
     <string name="section_layout">Макет</string>
     <string name="section_mcp_servers">Серверы MCP</string>
+    <string name="section_prefetch">Background prefetch</string>
+    <string name="prefetch_enabled">Prefetch conversations</string>
+    <string name="prefetch_enabled_desc">Load recent and pinned conversations ahead of time so they open instantly. Runs while the app is idle, and periodically while charging.</string>
+    <string name="prefetch_on_metered">Use mobile data</string>
+    <string name="prefetch_on_metered_desc">Allow prefetching on metered connections. Off by default to avoid unexpected data usage.</string>
+    <string name="prefetch_depth">Depth</string>
+    <string name="prefetch_depth_value">%1$d conversations</string>
+    <string name="prefetch_depth_desc">How many recent conversations to keep cached. Pinned conversations are always included, however old.</string>
+    <string name="prefetch_attachments">Prefetch images</string>
+    <string name="prefetch_attachments_desc">Also download images and attachments. Uses considerably more data.</string>
+    <string name="prefetch_activity">Activity</string>
+    <string name="prefetch_activity_title">Prefetch activity</string>
+    <string name="prefetch_summary_status">Status</string>
+    <string name="prefetch_summary_last_run">Last run</string>
+    <string name="prefetch_summary_last_run_never">Never</string>
+    <string name="prefetch_summary_scheduled_run">Last background run</string>
+    <string name="prefetch_run_outcome_disabled">prefetch was off</string>
+    <string name="prefetch_run_outcome_no_session">not signed in</string>
+    <string name="prefetch_run_outcome_constraints">conditions not met</string>
+    <string name="prefetch_run_outcome_budget">ran out of time</string>
+    <string name="prefetch_run_outcome_stopped">server not answering</string>
+    <string name="prefetch_run_outcome_interrupted">interrupted</string>
+    <string name="prefetch_summary_warmed">Warmed</string>
+    <string name="prefetch_summary_warmed_value">%1$d of %2$d</string>
+    <string name="prefetch_status_off">Off</string>
+    <string name="prefetch_status_working">Working…</string>
+    <string name="prefetch_status_warming">Warming conversations (%1$d of %2$d)</string>
+    <string name="prefetch_status_rate_limited">Waiting — the server asked us to slow down</string>
+    <string name="prefetch_status_stopped">Stopped — repeated request failures</string>
+    <string name="prefetch_status_up_to_date">Up to date</string>
+    <string name="prefetch_status_waiting">Idle — %1$d waiting</string>
+    <string name="prefetch_status_paused_network">Paused — waiting for Wi-Fi</string>
+    <string name="prefetch_status_paused_offline">Paused — no connection</string>
+    <string name="prefetch_condition_enabled">Prefetch enabled</string>
+    <string name="prefetch_condition_enabled_unmet">Switched off</string>
+    <string name="prefetch_condition_network_offline">No connection</string>
+    <string name="prefetch_status_paused_power">Paused — battery saver is on</string>
+    <string name="prefetch_status_paused_busy">Paused — app is busy</string>
+    <string name="prefetch_status_paused_background">Paused — app is in the background</string>
+    <string name="prefetch_conditions_header">Conditions</string>
+    <string name="prefetch_condition_app_available">App ready</string>
+    <string name="prefetch_condition_network">Network</string>
+    <string name="prefetch_condition_network_met">Connection allowed</string>
+    <string name="prefetch_condition_network_unmet">On mobile data</string>
+    <string name="prefetch_condition_power">Battery</string>
+    <string name="prefetch_condition_power_met">Not restricted</string>
+    <string name="prefetch_condition_power_unmet">Battery saver is on</string>
+    <string name="prefetch_condition_idle">App idle</string>
+    <string name="prefetch_condition_idle_met">No requests in flight</string>
+    <string name="prefetch_condition_idle_unmet">A request is in flight</string>
+    <string name="prefetch_condition_server">Server</string>
+    <string name="prefetch_condition_server_met">Responding</string>
+    <string name="prefetch_condition_server_unmet">Stopped after repeated failures</string>
+    <string name="prefetch_warm_now">Warm now</string>
+    <string name="prefetch_warm_now_desc">Run a pass immediately instead of waiting for the next idle moment.</string>
+    <string name="prefetch_warmed_header">Cached conversations</string>
+    <string name="prefetch_warmed_empty">Nothing has been prefetched yet.</string>
+    <string name="prefetch_pending_header">Waiting to be cached</string>
+    <string name="prefetch_pending_empty">Everything eligible is up to date.</string>
+    <string name="prefetch_row_never_warmed">Not cached yet</string>
+    <string name="prefetch_row_pinned">Pinned</string>
+    <string name="prefetch_cache_header">Cache</string>
+    <string name="prefetch_cache_messages">Cached messages</string>
+    <string name="prefetch_cache_messages_value">%1$d messages</string>
+    <string name="prefetch_cache_images">Images and files</string>
     <string name="section_memories">Память</string>
     <string name="section_personalization">Персонализация</string>
     <string name="section_presets">Пресеты</string>
@@ -78,7 +143,6 @@
     <string name="title_account">Аккаунт</string>
     <string name="title_api_keys">API-ключи</string>
     <string name="title_chat">Чат</string>
-    <string name="title_commands">Команды</string>
     <string name="title_data">Данные</string>
     <string name="title_general">Общие</string>
     <string name="title_memories">Память</string>
@@ -112,8 +176,6 @@
     <string name="status_enabled">Включено</string>
     <string name="status_disabled">Выключено</string>
     <string name="fork_behavior">Поведение при ответвлении</string>
-    <string name="commands">Команды</string>
-    <string name="commands_enabled_count">Включено: %1$d</string>
     <string name="api_keys">API-ключи</string>
     <string name="api_keys_subtitle">Управление API-ключами для программного доступа</string>
     <string name="presets">Пресеты</string>
@@ -249,6 +311,7 @@
     <string name="archived_conversations">Архивированные беседы</string>
     <string name="export_all_data">Экспортировать все данные</string>
     <string name="shared_links">Общие ссылки</string>
+    <string name="clear_cache_with_size">Clear Cache (%1$s)</string>
     <string name="clear_cache">Очистить кэш</string>
     <string name="revoke_all_api_keys">Отозвать все API-ключи</string>
     <string name="revoking">Отзыв…</string>
@@ -369,9 +432,6 @@
     <string name="response_style_label">Как ИИ должен отвечать?</string>
     <string name="response_style_hint">Предпочитаемый тон, формат или стиль ответов</string>
 
-    <!-- Commands screen -->
-    <string name="no_commands_available">Нет доступных команд</string>
-
     <!-- Avatar upload dialog -->
     <string name="dialog_title_update_avatar">Обновить аватар</string>
     <string name="avatar_choose_hint">Нажмите значок камеры, чтобы выбрать изображение</string>
@@ -478,4 +538,14 @@
     <string name="role_skills_share">Делиться навыками</string>
     <string name="role_skills_share_public">Делиться навыками публично</string>
     <string name="role_skills_save">Сохранить</string>
+    <!-- Post-login editor for the active server's gateway headers (issue #287) -->
+    <string name="section_server_connection">Подключение к серверу</string>
+    <string name="server_headers_scope">Отправляются на %1$s</string>
+    <string name="server_headers_save">Сохранить заголовки</string>
+    <string name="server_headers_saved">Заголовки сохранены</string>
+    <string name="server_connection_subtitle">Заголовки запросов для шлюзов доступа</string>
+    <string name="server_headers_discard_title">Отменить изменения?</string>
+    <string name="server_headers_discard_message">Несохранённые изменения заголовков будут потеряны.</string>
+    <string name="server_headers_discard_confirm">Отменить</string>
+    <string name="server_headers_keep_editing">Продолжить правку</string>
 </resources>

@@ -10,7 +10,6 @@ import io.ktor.client.request.headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.URLBuilder
-import io.ktor.http.Url
 import io.ktor.util.AttributeKey
 
 class AuthInterceptorPlugin private constructor(
@@ -28,25 +27,11 @@ class AuthInterceptorPlugin private constructor(
          * bearer token to that host. Null disables host-scoping (attach to every
          * non-auth-path request), preserving legacy behavior for callers/tests
          * that don't wire a provider.
+         *
+         * The rule itself lives in `HostScoping.kt` (`isSameHostAsServer`), shared with the
+         * gateway-header plugin so the two can't drift onto different definitions of "same server".
          */
         var serverUrlProvider: ServerUrlProvider? = null
-    }
-
-    /**
-     * True when [requestHost] belongs to the server [baseUrl] (so the bearer token is safe to attach).
-     * Returns true when host-scoping is disabled ([baseUrl] null — no provider and no snapshot) or the
-     * base URL isn't resolved yet (empty host) — the latter only happens during cold-start warm-up,
-     * before any cross-host CDN fetch can occur, so it preserves same-origin auth without leaking.
-     *
-     * [baseUrl] is the request's snapshotted server URL when the [SwitchBarrierPlugin] is installed, so
-     * an account switch mid-request scopes the bearer to the account the request was snapshotted for
-     * (never the live one), keeping A's bearer off B's host.
-     */
-    private fun isSameHostAsServer(requestHost: String, baseUrl: String?): Boolean {
-        if (baseUrl.isNullOrEmpty()) return true
-        val baseHost = runCatching { Url(baseUrl).host }.getOrNull()
-        if (baseHost.isNullOrEmpty()) return true
-        return requestHost.equals(baseHost, ignoreCase = true)
     }
 
     companion object : HttpClientPlugin<Config, AuthInterceptorPlugin> {
@@ -60,19 +45,9 @@ class AuthInterceptorPlugin private constructor(
 
         override fun install(plugin: AuthInterceptorPlugin, scope: HttpClient) {
             // Endpoints that take no bearer and whose 401 is the endpoint's own verdict, not an
-            // expired session — kept out of the refresh/session-expiry leg below.
-            val skipPaths = setOf(
-                "auth/login", "auth/register", "auth/refresh",
-                "auth/requestPasswordReset", "auth/resetPassword",
-                "auth/2fa/verify-temp",
-            )
-
-            // Matched on whole path segments, not as a substring of the URL, so a path-prefixed
-            // deployment (e.g. /apps/auth/login-x) doesn't match every request it serves.
-            fun isSkipPath(url: URLBuilder): Boolean {
-                val path = url.encodedPathSegments.filter { it.isNotEmpty() }.joinToString("/")
-                return skipPaths.any { path == it || path.endsWith("/$it") }
-            }
+            // expired session — kept out of the refresh/session-expiry leg below. Shared with
+            // SwitchBarrierPlugin; see AuthSkipPaths.kt.
+            fun isSkipPath(url: URLBuilder): Boolean = isAuthSkipPath(url)
 
             // Attach token to outgoing requests. Runs at State, which is after
             // the SwitchBarrier/defaultRequest phases have applied the base URL —
@@ -89,7 +64,7 @@ class AuthInterceptorPlugin private constructor(
             scope.requestPipeline.intercept(HttpRequestPipeline.State) {
                 val snapshot = context.attributes.getOrNull(RequestIdentityKey)
                 val serverBaseUrl = snapshot?.baseUrl ?: plugin.serverUrlProvider?.getBaseUrl()
-                if (!isSkipPath(context.url) && plugin.isSameHostAsServer(context.url.host, serverBaseUrl)) {
+                if (!isSkipPath(context.url) && isSameHostAsServer(context.url.host, serverBaseUrl)) {
                     // Explicit branch (not `?:`): a snapshot whose bearer is null must attach
                     // nothing — a pending add-account probe before sign-in has no token yet, and
                     // falling through to the live cache would send the ACTIVE account's bearer to
@@ -119,7 +94,7 @@ class AuthInterceptorPlugin private constructor(
                 // original 401 straight through with no token on the retry.
                 val snapshot = request.attributes.getOrNull(RequestIdentityKey)
                 val serverBaseUrl = snapshot?.baseUrl ?: plugin.serverUrlProvider?.getBaseUrl()
-                if (!plugin.isSameHostAsServer(request.url.host, serverBaseUrl)) {
+                if (!isSameHostAsServer(request.url.host, serverBaseUrl)) {
                     return@intercept originalCall
                 }
 

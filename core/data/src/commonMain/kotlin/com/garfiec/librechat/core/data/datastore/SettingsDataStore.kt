@@ -5,11 +5,16 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.garfiec.librechat.core.common.identity.AccountState
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.identity.currentAccountId
+import com.garfiec.librechat.core.common.identity.flatMapAccountOrEmpty
+import com.garfiec.librechat.core.data.prefetch.PrefetchDepth
+import com.garfiec.librechat.core.data.prefetch.PrefetchRunOutcome
+import com.garfiec.librechat.core.data.prefetch.ScheduledRunRecord
 import com.garfiec.librechat.core.model.ModelRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -106,6 +111,29 @@ class SettingsDataStore(
         prefs[KEY_AUTO_SCROLL_ENABLED] ?: true
     }
 
+    // Background prefetch. Deliberately global, not account-scoped — these are preferences about
+    // the device's bandwidth and battery. All default off: this spends the user's data on requests
+    // they did not make, which has to be asked for.
+
+    val prefetchEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_PREFETCH_ENABLED] ?: false
+    }
+
+    /** Nested under [prefetchEnabled]; far heavier than the text it accompanies. */
+    val prefetchAttachmentsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_PREFETCH_ATTACHMENTS] ?: false
+    }
+
+    /** Overrides the unmetered-only default, for users who are mostly on cellular. */
+    val prefetchOnMeteredEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_PREFETCH_ON_METERED] ?: false
+    }
+
+    /** Clamped on read, not trusted: this value is the request count for every pass. */
+    val prefetchDepth: Flow<Int> = dataStore.data.map { prefs ->
+        (prefs[KEY_PREFETCH_DEPTH] ?: PrefetchDepth.DEFAULT).coerceIn(PrefetchDepth.RANGE)
+    }
+
     val showThinkingBlocks: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[KEY_SHOW_THINKING_BLOCKS] ?: true
     }
@@ -118,6 +146,22 @@ class SettingsDataStore(
     /** Whether the options-sheet context gauge's inline breakdown is expanded. */
     val contextGaugeExpanded: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[KEY_CONTEXT_GAUGE_EXPANDED] ?: false
+    }
+
+    /**
+     * What the send control does mid-run (v0.8.8 steering). Default [DuringRunAction.QUEUE] —
+     * steering needs a server that has the route, queueing works everywhere.
+     */
+    val duringRunAction: Flow<DuringRunAction> = dataStore.data.map { prefs ->
+        DuringRunAction.fromString(prefs[KEY_DURING_RUN_ACTION])
+    }
+
+    /**
+     * Whether composer attachments are routed to the provider / to text extraction automatically,
+     * or with a prompt. Default [UploadRoutingMode.AUTO].
+     */
+    val uploadRoutingMode: Flow<UploadRoutingMode> = dataStore.data.map { prefs ->
+        UploadRoutingMode.fromString(prefs[KEY_UPLOAD_ROUTING_MODE])
     }
 
     val autoReadEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -357,6 +401,30 @@ class SettingsDataStore(
         }
     }
 
+    suspend fun setPrefetchEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_PREFETCH_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setPrefetchAttachmentsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_PREFETCH_ATTACHMENTS] = enabled
+        }
+    }
+
+    suspend fun setPrefetchDepth(depth: Int) {
+        dataStore.edit { prefs ->
+            prefs[KEY_PREFETCH_DEPTH] = depth.coerceIn(PrefetchDepth.RANGE)
+        }
+    }
+
+    suspend fun setPrefetchOnMeteredEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_PREFETCH_ON_METERED] = enabled
+        }
+    }
+
     suspend fun setShowThinkingBlocks(show: Boolean) {
         dataStore.edit { prefs ->
             prefs[KEY_SHOW_THINKING_BLOCKS] = show
@@ -366,6 +434,18 @@ class SettingsDataStore(
     suspend fun setContextBarPlacement(placement: ContextBarPlacement) {
         dataStore.edit { prefs ->
             prefs[KEY_CONTEXT_BAR_PLACEMENT] = placement.toStorageString()
+        }
+    }
+
+    suspend fun setDuringRunAction(action: DuringRunAction) {
+        dataStore.edit { prefs ->
+            prefs[KEY_DURING_RUN_ACTION] = action.toStorageString()
+        }
+    }
+
+    suspend fun setUploadRoutingMode(mode: UploadRoutingMode) {
+        dataStore.edit { prefs ->
+            prefs[KEY_UPLOAD_ROUTING_MODE] = mode.toStorageString()
         }
     }
 
@@ -452,6 +532,62 @@ class SettingsDataStore(
 
     private fun decodeStringSet(raw: String?): Set<String> =
         raw?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+    private fun listRefreshKey(accountId: String) =
+        accountScopedKey(accountId, PREFETCH_LIST_REFRESHED_AT)
+
+    /**
+     * When the prefetcher last paged the whole conversation list for [accountId], or null if it
+     * never has. Account-scoped, so the prefix purge sweeps it on logout with everything else.
+     */
+    suspend fun prefetchListRefreshedAt(accountId: String): Long? =
+        dataStore.data.first()[listRefreshKey(accountId)]?.toLongOrNull()
+
+    suspend fun recordPrefetchListRefreshed(accountId: String, atMillis: Long) {
+        dataStore.edit { prefs -> prefs[listRefreshKey(accountId)] = atMillis.toString() }
+    }
+
+    /** Forgets the recorded refresh, so the next pass pages the list rather than reusing it. */
+    suspend fun clearPrefetchListRefreshed(accountId: String) {
+        dataStore.edit { prefs -> prefs.remove(listRefreshKey(accountId)) }
+    }
+
+    private fun scheduledRunKey(accountId: String) =
+        accountScopedKey(accountId, PREFETCH_LAST_SCHEDULED_RUN)
+
+    /**
+     * The last scheduled prefetch for the active account, and how it ended.
+     *
+     * Account-scoped, because what a run did is account-specific and every other figure on the
+     * readout is resolved against the active account — a device-level record would show one
+     * account's overnight warm on another account's screen. Emits null rather than nothing while
+     * identity is warming: this feeds a `combine` that would otherwise hold the entire readout blank
+     * until an account resolved.
+     *
+     * Stored as one string so adding a field cannot silently change the shape of an existing
+     * install's value: an entry that does not parse reads as "no run recorded", which is honest.
+     */
+    val lastScheduledRun: Flow<ScheduledRunRecord?> =
+        activeAccountProvider.flatMapAccountOrEmpty<ScheduledRunRecord?>(null) { id ->
+            dataStore.data.map { prefs -> prefs[scheduledRunKey(id.value)]?.let(::decodeScheduledRun) }
+        }
+
+    /** No-ops without an account: a run that never resolved one has nothing to attribute the record to. */
+    suspend fun recordScheduledRun(accountId: String?, record: ScheduledRunRecord) {
+        if (accountId == null) return
+        dataStore.edit { prefs ->
+            prefs[scheduledRunKey(accountId)] = "${record.atMillis}|${record.outcome.name}"
+        }
+    }
+
+    private fun decodeScheduledRun(raw: String): ScheduledRunRecord? {
+        val (millis, outcome) = raw.split('|', limit = 2).takeIf { it.size == 2 } ?: return null
+        return ScheduledRunRecord(
+            atMillis = millis.toLongOrNull() ?: return null,
+            // An outcome this build does not know about (a downgrade) is not worth failing over,
+            // but it must not be guessed at either.
+            outcome = PrefetchRunOutcome.entries.firstOrNull { it.name == outcome } ?: return null,
+        )
+    }
 
     /**
      * Records one "used" tick for [endpoint]/[model] — called once per message sent, the true
@@ -732,8 +868,14 @@ class SettingsDataStore(
         private val KEY_CHAT_HEADER_CONTENT = stringPreferencesKey("chat_header_content")
         private val KEY_CHAT_HEADER_ALIGNMENT = stringPreferencesKey("chat_header_alignment")
         private val KEY_AUTO_SCROLL_ENABLED = booleanPreferencesKey("auto_scroll_enabled")
+        private val KEY_PREFETCH_ENABLED = booleanPreferencesKey("prefetch_enabled")
+        private val KEY_PREFETCH_ATTACHMENTS = booleanPreferencesKey("prefetch_attachments")
+        private val KEY_PREFETCH_ON_METERED = booleanPreferencesKey("prefetch_on_metered")
+        private val KEY_PREFETCH_DEPTH = intPreferencesKey("prefetch_depth")
         private val KEY_SHOW_THINKING_BLOCKS = booleanPreferencesKey("show_thinking_blocks")
         private val KEY_CONTEXT_BAR_PLACEMENT = stringPreferencesKey("context_bar_placement")
+        private val KEY_DURING_RUN_ACTION = stringPreferencesKey("during_run_action")
+        private val KEY_UPLOAD_ROUTING_MODE = stringPreferencesKey("upload_routing_mode")
         private val KEY_CONTEXT_GAUGE_EXPANDED = booleanPreferencesKey("context_gauge_expanded")
         private val KEY_AUTO_READ_ENABLED = booleanPreferencesKey("auto_read_enabled")
         private val KEY_SHOW_IMAGE_DESCRIPTIONS = booleanPreferencesKey("show_image_descriptions")
@@ -741,6 +883,8 @@ class SettingsDataStore(
         private const val LAST_USED_ENDPOINT = "last_used_endpoint"
         private const val LAST_USED_MODEL = "last_used_model"
         private const val MODEL_USAGE = "model_usage"
+        private const val PREFETCH_LIST_REFRESHED_AT = "prefetch_list_refreshed_at"
+        private const val PREFETCH_LAST_SCHEDULED_RUN = "prefetch_last_scheduled_run"
         private const val MAX_USAGE_ENTRIES = 50
         private const val USAGE_KEY_SEPARATOR = '\u0000'
         private val KEY_DISMISS_KEYBOARD_ON_SEND = booleanPreferencesKey("dismiss_keyboard_on_send")

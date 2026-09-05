@@ -202,10 +202,12 @@ fun CitationText(
             onDismissRequest = { activeCitation = null },
             properties = PopupProperties(focusable = true),
         ) {
-            CitationPopup(
-                citation = citation,
-                onDismiss = { activeCitation = null },
-            )
+            SubwindowSelectionContainer {
+                CitationPopup(
+                    citation = citation,
+                    onDismiss = { activeCitation = null },
+                )
+            }
         }
     }
 }

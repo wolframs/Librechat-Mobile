@@ -67,6 +67,13 @@ fun PromptsLibraryScreen(
     viewModel: PromptsViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // Keyed on the revision from inside the composition, so the reload happens when this list is on
+    // screen: a user who saves three prompts in a row pays one reload on return, and a screen that
+    // stays composed still reloads as soon as one lands.
+    val promptLibraryRevision by viewModel.promptLibraryRevision.collectAsStateWithLifecycle()
+    LaunchedEffect(promptLibraryRevision) { viewModel.refreshIfStale() }
+
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(uiState.error) {
         val error = uiState.error
@@ -82,12 +89,14 @@ fun PromptsLibraryScreen(
             group = selectedGroup,
             onBack = viewModel::clearSelectedGroup,
             onDelete = { viewModel.deleteGroup(selectedGroup.id) },
-            onUseInChat = { command ->
-                val promptText = selectedGroup.productionPromptText
-                if (promptText != null && promptText.contains("{{")) {
+            onUseInChat = { promptText ->
+                // Only user-fillable variables warrant the dialog. A prompt whose only placeholders
+                // are server-substituted specials ({{current_date}} and friends) goes straight
+                // through — prompting for those would both freeze the value and show empty fields.
+                if (hasFillableVariables(promptText)) {
                     viewModel.showVariableDialog(promptText)
                 } else {
-                    onUseInChat(command)
+                    onUseInChat(promptText)
                 }
             },
             onEdit = { groupId ->
@@ -104,7 +113,7 @@ fun PromptsLibraryScreen(
             VariableInputDialog(
                 promptTemplate = uiState.variablePromptTemplate,
                 variables = uiState.variableNames,
-                onInsert = { interpolated, _ ->
+                onInsert = { interpolated ->
                     viewModel.dismissVariableDialog()
                     onUseInChat(interpolated)
                 },

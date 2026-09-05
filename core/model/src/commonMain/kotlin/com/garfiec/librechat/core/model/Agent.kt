@@ -45,6 +45,32 @@ data class Agent(
      */
     val versions: List<JsonElement>? = null,
     @SerialName("support_contact") val supportContact: JsonElement? = null,
+    /**
+     * The agent owner's contact, projected onto the view-only agent GET alongside
+     * [supportContact] (v0.8.8 line).
+     *
+     * Read-only: it comes from the owner's account, not from the agent editor, and is the
+     * fallback shown when an agent declares no support contact of its own.
+     *
+     * **No longer carries `email`** (validated security advisory): any authenticated user with
+     * VIEW access to a shared agent could read the owner's private account address. The server
+     * now resolves a display name only, and discards any candidate containing `@`. Nothing here
+     * breaks — `toContact()` already returns name-only when the address is absent — but a mailto
+     * affordance on the OWNER fallback is dead against a current server. An agent's own declared
+     * [supportContact] is unaffected.
+     */
+    @SerialName("owner_contact") val ownerContact: JsonElement? = null,
+    /**
+     * Whether the caller may edit this agent, stamped per row by the LIST endpoint from an
+     * EDIT-scoped accessible-id set resolved alongside the VIEW set.
+     *
+     * **Absent means UNKNOWN, and unknown must not grant edit.** An older server sends nothing
+     * here, so an edit affordance shown on absence would appear for every agent in the list on
+     * every server that predates the field — including agents the caller cannot touch, whose
+     * edit attempt then 403s. The per-agent probe that `AgentDetailViewModel.canEdit` performs
+     * stays the authority; this only lets the LIST avoid it where the server has already answered.
+     */
+    val isEditable: Boolean? = null,
     @SerialName("tool_options") val toolOptions: JsonObject? = null,
     /**
      * Runtime-supplied extra instructions appended to the agent system prompt.
@@ -93,6 +119,19 @@ data class Agent(
     @SerialName("skills_enabled") val skillsEnabled: Boolean? = null,
     /** Subagent spawning configuration — isolated-context child agents. Forward-compat (v0.8.6). */
     val subagents: AgentSubagentsConfig? = null,
+    /**
+     * Keeps the code-interpreter sandbox alive between tool calls in a run instead of
+     * booting a fresh one each time. Gated server-side by the `stateful_code_sessions`
+     * agent capability. Mobile has no editor toggle yet — round-tripped so an agent
+     * edited on mobile doesn't lose the flag an admin set on web.
+     */
+    @SerialName("stateful_code_sessions") val statefulCodeSessions: Boolean? = null,
+    /**
+     * Memory partition for this agent: `"agent"` isolates memories per (user, agent),
+     * `"user"`/null uses the shared personal pool. Round-tripped only — mobile surfaces
+     * no picker for it.
+     */
+    @SerialName("memory_scope") val memoryScope: String? = null,
 ) {
     val avatarUrl: String?
         get() = try {

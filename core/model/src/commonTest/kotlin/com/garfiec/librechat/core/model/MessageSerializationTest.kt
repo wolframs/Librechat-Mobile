@@ -4,6 +4,7 @@ import com.garfiec.librechat.core.model.content.MessageContentPart
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -133,6 +134,92 @@ class MessageSerializationTest {
     }
 
     @Test
+    fun messageWithActivityLabelPartDeserializes() {
+        // v0.8.8 activity groups (upstream #14391) persist an `activity_label` part into saved
+        // message content. `ContentType` has no default, so an undeclared value fails the whole
+        // decode and takes every surrounding part with it — the conversation stops opening.
+        val serverJson = """
+            {
+                "messageId": "msg-activity",
+                "conversationId": "conv-activity",
+                "text": "",
+                "content": [
+                    {"type": "text", "text": "Before the group."},
+                    {
+                        "type": "activity_label",
+                        "activity_label": "Searched the codebase",
+                        "tool_call_ids": ["call-1", "call-2"],
+                        "counts": {"searches": 2, "reads": 1, "writes": 0, "commands": 0, "other": 0},
+                        "status": "ok",
+                        "agentId": "agent-1",
+                        "pending": false
+                    },
+                    {"type": "text", "text": "After the group."}
+                ]
+            }
+        """.trimIndent()
+        val decoded = json.decodeFromString(Message.serializer(), serverJson)
+        val parts = decoded.content!!
+        assertEquals(3, parts.size)
+        assertEquals("Before the group.", parts[0].text)
+        assertEquals(ContentType.ACTIVITY_LABEL, parts[1].type)
+        assertEquals("Searched the codebase", parts[1].activityLabel)
+        assertEquals(listOf("call-1", "call-2"), parts[1].toolCallIds)
+        assertEquals("agent-1", parts[1].agentId)
+        assertEquals("After the group.", parts[2].text)
+    }
+
+    @Test
+    fun messageWithPendingActivityLabelPartDeserializes() {
+        // The reservation emitted at the tool-batch boundary, before the label model answers:
+        // an empty label plus `pending: true`. Must decode as readily as the resolved form.
+        val serverJson = """
+            {
+                "messageId": "msg-activity-pending",
+                "conversationId": "conv-activity",
+                "text": "",
+                "content": [
+                    {"type": "activity_label", "activity_label": "", "pending": true},
+                    {"type": "text", "text": "Still streaming."}
+                ]
+            }
+        """.trimIndent()
+        val decoded = json.decodeFromString(Message.serializer(), serverJson)
+        val parts = decoded.content!!
+        assertEquals(2, parts.size)
+        assertEquals(ContentType.ACTIVITY_LABEL, parts[0].type)
+        assertEquals("", parts[0].activityLabel)
+        assertEquals("Still streaming.", parts[1].text)
+    }
+
+    @Test
+    fun steerPartSurvivesItsNumericCreatedAt() {
+        // The server stamps a steer part's `createdAt` as epoch millis — a NUMBER — while the
+        // field is typed String? for every other part that carries an ISO timestamp. Only
+        // `isLenient` (set on the real client Json) keeps that from throwing, and a throw here
+        // fails the whole `GET /messages` decode and loses every message in the conversation.
+        // Pinned because the rescue is a Json setting, not anything visible at the declaration.
+        val lenient = Json { ignoreUnknownKeys = true; isLenient = true }
+        val serverJson = """
+            {
+                "messageId": "msg-steer",
+                "conversationId": "conv-steer",
+                "text": "",
+                "content": [
+                    {"type": "text", "text": "Working on it."},
+                    {"type": "steer", "steer": "actually use Kotlin", "createdAt": 1753900000000},
+                    {"type": "text", "text": "Switching to Kotlin."}
+                ]
+            }
+        """.trimIndent()
+        val parts = lenient.decodeFromString(Message.serializer(), serverJson).content!!
+        assertEquals(3, parts.size)
+        assertEquals(ContentType.STEER, parts[1].type)
+        assertEquals("actually use Kotlin", parts[1].steer?.jsonPrimitive?.content)
+        assertEquals("Switching to Kotlin.", parts[2].text)
+    }
+
+    @Test
     fun messageDeserializesFromServerJson() {
         val serverJson = """
             {
@@ -150,5 +237,60 @@ class MessageSerializationTest {
         assertEquals("msg-srv", decoded.messageId)
         assertEquals("stop", decoded.finishReason)
         assertEquals("t-1", decoded.threadId)
+    }
+
+    // ─── tolerant TEXT part decode (upstream d920328bfa53) ──────────
+
+    @Test
+    fun textPartDecodesTheAnnotatedObjectForm() {
+        // A part edited via PUT /api/messages spread-preserves its text as {value, annotations};
+        // every later fetch of the conversation returns that object where a string used to be.
+        val serverJson = """
+            {
+                "messageId": "msg-edit",
+                "conversationId": "conv-1",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": { "value": "Edited body.", "annotations": [] }
+                    },
+                    { "type": "text", "text": "Plain body." }
+                ]
+            }
+        """.trimIndent()
+        val decoded = json.decodeFromString(Message.serializer(), serverJson)
+        assertEquals("Edited body.", decoded.content?.get(0)?.text)
+        assertEquals("Plain body.", decoded.content?.get(1)?.text)
+    }
+
+    @Test
+    fun textPartObjectFormWithoutAValueDegradesToNullNotAThrow() {
+        // The point of the tolerance: one malformed part must not reject the whole response.
+        val serverJson = """
+            {
+                "messageId": "msg-odd",
+                "conversationId": "conv-1",
+                "content": [
+                    { "type": "text", "text": { "annotations": [] } },
+                    { "type": "text", "text": ["not", "a", "string"] }
+                ]
+            }
+        """.trimIndent()
+        val decoded = json.decodeFromString(Message.serializer(), serverJson)
+        assertEquals(null, decoded.content?.get(0)?.text)
+        assertEquals(null, decoded.content?.get(1)?.text)
+    }
+
+    @Test
+    fun textPartRoundTripsAsAPlainString() {
+        // The Room cache and conversation export re-encode decoded parts; the object form must
+        // come back out as the plain string every consumer and older app version reads.
+        val part = json.decodeFromString(
+            MessageContentPart.serializer(),
+            """{ "type": "text", "text": { "value": "Edited body.", "annotations": [{"x":1}] } }""",
+        )
+        val encoded = json.encodeToString(MessageContentPart.serializer(), part)
+        val reDecoded = json.decodeFromString(MessageContentPart.serializer(), encoded)
+        assertEquals("Edited body.", reDecoded.text)
     }
 }

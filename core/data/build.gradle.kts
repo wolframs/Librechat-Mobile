@@ -32,6 +32,12 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.koin.android)
             implementation(libs.security.crypto)
+            // Prefetching attachments warms the singleton image loader's disk cache, which only the
+            // Android side configures. iOS binds a no-op and needs no image dependency at all.
+            implementation(libs.coil3.core)
+            // Scheduled background warming. Android-only: iOS binds a no-op scheduler because
+            // BGTaskScheduler registration has to happen in the app target at launch.
+            implementation(libs.work.runtime)
         }
         named("androidUnitTest").dependencies {
             implementation(libs.koin.test)
@@ -43,8 +49,13 @@ kotlin {
             implementation(libs.room.testing)
             implementation(libs.truth)
             implementation(libs.coroutines.test)
+            implementation(libs.work.testing)
         }
         named("androidInstrumentedTest").dependencies {
+            // Device-rig only (GateProbeDeviceTest talks to a real LibreChat on 10.0.2.2).
+            implementation(libs.ktor.client.okhttp)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.room.testing)
             implementation(libs.truth)
             implementation(libs.coroutines.test)

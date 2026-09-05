@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -38,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,16 +48,22 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.garfiec.librechat.core.data.repository.HeaderWriteFailure
 import com.garfiec.librechat.core.ui.components.OtpVerificationDialog
+import com.garfiec.librechat.core.ui.resources.server_headers_no_server
+import com.garfiec.librechat.core.ui.resources.server_headers_save_error
+import com.garfiec.librechat.core.ui.resources.server_headers_unverified_delete
 import com.garfiec.librechat.feature.settings.resources.*
 import com.garfiec.librechat.feature.settings.resources.Res
 import com.garfiec.librechat.feature.settings.screen.sections.BackupCodesDialog
 import com.garfiec.librechat.feature.settings.screen.sections.TwoFactorCodeDialog
 import com.garfiec.librechat.feature.settings.screen.sections.TwoFactorSetupDialog
+import com.garfiec.librechat.feature.settings.viewmodel.ServerHeadersViewModel
 import com.garfiec.librechat.feature.settings.viewmodel.SettingsViewModel
 import com.garfiec.librechat.feature.settings.viewmodel.SignOutViewModel
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
+import com.garfiec.librechat.core.ui.resources.Res as UiRes
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,14 +124,21 @@ fun AccountSettingsContent(
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     viewModel: SettingsViewModel = koinViewModel(),
     signOutViewModel: SignOutViewModel = koinViewModel(),
+    serverHeadersViewModel: ServerHeadersViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val signOutState by signOutViewModel.uiState.collectAsStateWithLifecycle()
+    val serverHeadersState by serverHeadersViewModel.uiState.collectAsStateWithLifecycle()
     val currentOnLogout by rememberUpdatedState(onLogout)
     val retryLabel = stringResource(Res.string.action_retry)
 
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    // Saveable, unlike its two neighbours: the ViewModel behind this one outlives the composition and
+    // holds half-typed rows. A rotation that closed the dialog without running the discard prompt
+    // would strand them — and reopening deliberately won't re-read while they are unsaved, so the
+    // next open would present a truncated credential as the configured one.
+    var showServerHeadersDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(uiState.error) {
         val error = uiState.error ?: return@LaunchedEffect
@@ -141,6 +156,32 @@ fun AccountSettingsContent(
         if (uiState.isLoggedOut || uiState.isAccountDeleted) {
             currentOnLogout()
         }
+    }
+
+    // Consume after showing: the ViewModel outlives the composition, so a flag that merely *changes*
+    // re-fires on the next fresh composition tree (rotation, fold/unfold, theme change).
+    val headersSavedMsg = stringResource(Res.string.server_headers_saved)
+    LaunchedEffect(serverHeadersState.saved) {
+        if (serverHeadersState.saved) {
+            // Close on a save that actually landed, not on the Save tap — a save the store could not
+            // persist keeps the dialog open with the typed rows intact so it can be retried.
+            showServerHeadersDialog = false
+            snackbarHostState.showSnackbar(message = headersSavedMsg)
+            serverHeadersViewModel.consumeSaved()
+        }
+    }
+
+    // Resolved here but rendered inside the dialog: a refused save leaves it open, and a snackbar
+    // raised from this Scaffold would draw behind the dialog's own scrim.
+    val headersSaveFailureMsg = when (serverHeadersState.saveFailure) {
+        HeaderWriteFailure.NoServer -> stringResource(UiRes.string.server_headers_no_server)
+        HeaderWriteFailure.StorageUnavailable -> stringResource(UiRes.string.server_headers_save_error)
+        HeaderWriteFailure.UnverifiedDelete ->
+            stringResource(UiRes.string.server_headers_unverified_delete)
+        // Unreachable from here — save() validates every row first — so this is a backstop rather
+        // than a message anyone should see, and it deliberately gets no string of its own.
+        HeaderWriteFailure.NothingUsable -> stringResource(UiRes.string.server_headers_save_error)
+        null -> null
     }
 
     Column(modifier = modifier) {
@@ -182,6 +223,20 @@ fun AccountSettingsContent(
             // Security section
             item(key = "security_header") {
                 SectionHeader(stringResource(Res.string.section_security))
+            }
+            item(key = "server_connection_row") {
+                AccountSettingsRow(
+                    icon = Icons.Default.Dns,
+                    title = stringResource(Res.string.section_server_connection),
+                    subtitle = stringResource(Res.string.server_connection_subtitle),
+                    onClick = {
+                        showServerHeadersDialog = true
+                        // The ViewModel loads once per server, so a read that failed would keep this
+                        // editor warning about a store that has since recovered — with no way to get
+                        // it to look again short of restarting the app.
+                        serverHeadersViewModel.reload()
+                    },
+                )
             }
             item(key = "security_settings") {
                 SecuritySection(
@@ -280,6 +335,25 @@ fun AccountSettingsContent(
             BackupCodesDialog(
                 backupCodes = uiState.backupCodes,
                 onDismiss = viewModel::dismissBackupCodesDialog,
+            )
+        }
+
+        if (showServerHeadersDialog) {
+            ServerHeadersDialog(
+                serverUrl = serverHeadersState.serverUrl,
+                headers = serverHeadersState.headers,
+                error = serverHeadersState.error,
+                loadFailed = serverHeadersState.loadFailed,
+                saveFailure = headersSaveFailureMsg,
+                isSaving = serverHeadersState.isSaving,
+                isDirty = serverHeadersState.isDirty,
+                onNameChange = serverHeadersViewModel::onNameChanged,
+                onValueChange = serverHeadersViewModel::onValueChanged,
+                onAdd = serverHeadersViewModel::addHeaderRow,
+                onRemove = serverHeadersViewModel::removeHeaderRow,
+                onSave = serverHeadersViewModel::save,
+                onDiscard = serverHeadersViewModel::discardEdits,
+                onDismiss = { showServerHeadersDialog = false },
             )
         }
 

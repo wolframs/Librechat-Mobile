@@ -9,11 +9,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.garfiec.librechat.core.ui.components.LoadingIndicator
@@ -44,7 +41,6 @@ fun AgentEditorScreen(
     viewModel: AgentEditorViewModel = koinViewModel { parametersOf(agentId) },
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showToolDialog by rememberSaveable { mutableStateOf(false) }
     val currentOnSaved by rememberUpdatedState(onSave)
     val currentOnDuplicated by rememberUpdatedState(onDuplicate)
     val currentOnDeleted by rememberUpdatedState(onDelete)
@@ -111,8 +107,8 @@ fun AgentEditorScreen(
     AgentEditorDialogs(
         uiState = uiState,
         viewModel = viewModel,
-        showToolDialog = showToolDialog,
-        onDismissToolDialog = { showToolDialog = false },
+        showToolDialog = uiState.showToolsMarketplace,
+        onDismissToolDialog = viewModel::closeToolsMarketplace,
         onDiscardDraft = {
             viewModel.discardDraft()
             currentOnBack()
@@ -144,7 +140,7 @@ fun AgentEditorScreen(
                     onAddCodeFile = { codeFilePicker.launch("*/*") },
                     onAddKnowledgeFile = { knowledgeFilePicker.launch("*/*") },
                     onAddContextFile = { contextFilePicker.launch("*/*") },
-                    onShowToolDialog = { showToolDialog = true },
+                    onShowToolDialog = viewModel::openToolsMarketplace,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),

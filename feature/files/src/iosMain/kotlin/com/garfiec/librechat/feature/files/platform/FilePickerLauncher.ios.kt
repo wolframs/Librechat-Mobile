@@ -32,7 +32,7 @@ actual fun rememberFilePickerLauncher(
 actual class FilePickerLauncher {
     internal var onPicked: ((Any) -> Unit)? = null
 
-    actual fun launch(mimeType: String) {
+    actual fun launch(mimeTypes: List<String>) {
         dispatch_async(dispatch_get_main_queue()) {
             val presenter = currentTopmostViewController() ?: run {
                 Logger.w { "FilesPicker: no view controller available to present picker" }

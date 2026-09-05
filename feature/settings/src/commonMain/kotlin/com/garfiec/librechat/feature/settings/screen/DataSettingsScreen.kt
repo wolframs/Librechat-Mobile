@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.garfiec.librechat.feature.settings.platform.LogFileSaver
 import com.garfiec.librechat.feature.settings.resources.*
 import com.garfiec.librechat.feature.settings.resources.Res
+import com.garfiec.librechat.feature.settings.viewmodel.PrefetchActivityViewModel
 import com.garfiec.librechat.feature.settings.viewmodel.SettingsViewModel
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
@@ -53,6 +54,7 @@ fun DataSettingsScreen(
     onNavigateToArchive: () -> Unit,
     onNavigateToSharedLinks: () -> Unit,
     onNavigateToArtifactShortcuts: () -> Unit,
+    onNavigateToPrefetchActivity: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -78,6 +80,7 @@ fun DataSettingsScreen(
             onNavigateToArchive = onNavigateToArchive,
             onNavigateToSharedLinks = onNavigateToSharedLinks,
             onNavigateToArtifactShortcuts = onNavigateToArtifactShortcuts,
+            onNavigateToPrefetchActivity = onNavigateToPrefetchActivity,
             snackbarHostState = snackbarHostState,
             modifier = Modifier
                 .fillMaxSize()
@@ -95,11 +98,15 @@ fun DataSettingsContent(
     onNavigateToArchive: () -> Unit,
     onNavigateToSharedLinks: () -> Unit,
     onNavigateToArtifactShortcuts: () -> Unit,
+    onNavigateToPrefetchActivity: () -> Unit,
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     viewModel: SettingsViewModel = koinViewModel(),
+    prefetchViewModel: PrefetchActivityViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val prefetchState by prefetchViewModel.uiState.collectAsStateWithLifecycle()
+    val timeReference = rememberTickingTimeReference()
 
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showRevokeKeysDialog by remember { mutableStateOf(false) }
@@ -187,8 +194,31 @@ fun DataSettingsContent(
                     onArtifactShortcutsClick = onNavigateToArtifactShortcuts,
                     onClearCacheClick = { showClearCacheDialog = true },
                     isCacheClearing = uiState.isCacheClearing,
+                    cacheSizeBytes = uiState.cacheSizeBytes,
                     onRevokeKeysClick = { showRevokeKeysDialog = true },
                     isKeyRevoking = uiState.isKeyRevoking,
+                )
+            }
+
+            item(key = "prefetch_header") {
+                SectionHeader(stringResource(Res.string.section_prefetch))
+            }
+            item(key = "prefetch_settings") {
+                PrefetchSettingsSection(
+                    prefetchEnabled = uiState.prefetchEnabled,
+                    prefetchOnMeteredEnabled = uiState.prefetchOnMeteredEnabled,
+                    prefetchAttachmentsEnabled = uiState.prefetchAttachmentsEnabled,
+                    prefetchAttachmentsSupported = uiState.prefetchAttachmentsSupported,
+                    onPrefetchEnabledChange = viewModel::setPrefetchEnabled,
+                    onPrefetchOnMeteredChange = viewModel::setPrefetchOnMeteredEnabled,
+                    onPrefetchAttachmentsChange = viewModel::setPrefetchAttachmentsEnabled,
+                    prefetchDepth = uiState.prefetchDepth,
+                    onPrefetchDepthChange = viewModel::setPrefetchDepth,
+                    status = prefetchState.status,
+                    warmedCount = prefetchState.warmedCount,
+                    eligibleCount = prefetchState.eligibleCount,
+                    lastRunLabel = prefetchState.lastWarmedAt?.relativeLabel(timeReference),
+                    onActivityClick = onNavigateToPrefetchActivity,
                 )
             }
 
@@ -243,6 +273,7 @@ fun DataSettingsContent(
         if (uiState.showMcpServerDialog) {
             McpServerDialog(
                 editingServer = uiState.editingMcpServer,
+                oauthSecretReentryRequired = uiState.mcpOAuthSecretReentryRequired,
                 onDismiss = viewModel::dismissMcpServerDialog,
                 onSave = { name, description, url, type, apiKey, oauth ->
                     viewModel.saveMcpServer(name, description, url, type, apiKey, oauth)
@@ -321,6 +352,7 @@ private fun DataExtraActions(
     onArtifactShortcutsClick: () -> Unit,
     onClearCacheClick: () -> Unit,
     isCacheClearing: Boolean,
+    cacheSizeBytes: Long?,
     onRevokeKeysClick: () -> Unit,
     isKeyRevoking: Boolean,
 ) {
@@ -369,13 +401,23 @@ private fun DataExtraActions(
                 }
             }
 
-            // Clear cache
+            // Clear cache. The size is only shown once read and non-zero — a "(0 B)" on a cache that
+            // simply hasn't been measured yet reads as a broken feature rather than an empty one.
             OutlinedButton(
                 onClick = onClearCacheClick,
                 enabled = !isCacheClearing,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(if (isCacheClearing) Res.string.clearing else Res.string.clear_cache))
+                Text(
+                    when {
+                        isCacheClearing -> stringResource(Res.string.clearing)
+                        cacheSizeBytes != null && cacheSizeBytes > 0 -> stringResource(
+                            Res.string.clear_cache_with_size,
+                            formatBytes(cacheSizeBytes),
+                        )
+                        else -> stringResource(Res.string.clear_cache)
+                    },
+                )
             }
 
             // Revoke API keys

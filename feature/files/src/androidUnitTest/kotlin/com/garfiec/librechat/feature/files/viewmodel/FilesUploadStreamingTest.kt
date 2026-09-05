@@ -34,6 +34,7 @@ class FilesUploadStreamingTest {
 
     private val dispatcher = StandardTestDispatcher()
     private val repository = mockk<FileRepository>(relaxed = true)
+    private val configRepository = mockk<com.garfiec.librechat.core.data.repository.ConfigRepository>(relaxed = true)
     private val reader = mockk<FileReader>(relaxed = true)
     private val serverDataStore = mockk<ServerDataStore>(relaxed = true)
     private val settingsDataStore = mockk<SettingsDataStore>(relaxed = true)
@@ -45,6 +46,7 @@ class FilesUploadStreamingTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
+        every { configRepository.detectedBackendVersion } returns MutableStateFlow(null)
         coEvery { repository.getFiles() } returns Result.Success(emptyList())
         every { serverDataStore.getBaseUrl() } returns "https://chat.example.com"
         every { settingsDataStore.filesViewMode } returns viewMode
@@ -59,6 +61,7 @@ class FilesUploadStreamingTest {
 
     private fun viewModel() = FilesViewModel(
         repository,
+        configRepository,
         reader,
         serverDataStore,
         settingsDataStore,

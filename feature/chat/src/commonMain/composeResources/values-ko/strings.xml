@@ -47,7 +47,7 @@
     <string name="cd_more_options">추가 옵션</string>
     <string name="cd_scroll_to_bottom">맨 아래로 스크롤</string>
     <string name="cd_select_model">모델 선택</string>
-    <string name="cd_librechat">LibreChat</string>
+    <string name="cd_librechat">Switchboard</string>
     <string name="cd_comparison_enabled">비교 사용</string>
 
     <!-- Content descriptions - Messages -->
@@ -64,7 +64,6 @@
     <string name="cd_generating_response">응답 생성 중</string>
 
     <!-- Content descriptions - Images -->
-    <string name="cd_fullscreen_image">전체 화면 이미지</string>
     <string name="cd_close">닫기</string>
     <string name="cd_save_to_device">기기에 저장</string>
     <string name="cd_share_image">이미지 공유</string>
@@ -236,7 +235,6 @@
     <string name="preset_model">모델: %1$s</string>
 
     <!-- Feedback dialog -->
-    <string name="dialog_title_feedback">피드백 제공</string>
     <string name="feedback_question">이 응답의 문제점은 무엇이었나요?</string>
     <string name="hint_optional_comment">선택 사항 의견…</string>
 
@@ -260,6 +258,7 @@
     <string name="cd_previous_version">이전 버전</string>
     <string name="cd_next_version">다음 버전</string>
     <string name="artifact_version">v%1$d/%2$d</string>
+    <string name="artifact_incomplete">미완성</string>
     <!-- Prompts -->
     <string name="prompts_library">프롬프트 라이브러리</string>
     <string name="use_in_chat">채팅에서 사용</string>

@@ -1,5 +1,6 @@
 package com.garfiec.librechat.feature.chat.viewmodel
 
+import com.garfiec.librechat.core.model.EndpointConfig
 import com.garfiec.librechat.core.model.ParameterType
 import com.garfiec.librechat.core.ui.components.EndpointParameterRegistry
 import com.garfiec.librechat.core.ui.components.ModelParameters
@@ -31,15 +32,18 @@ object ModelParamPayload {
         model: String?,
         extendedEffortSupported: Boolean,
         params: ModelParameters,
+        endpointConfig: EndpointConfig? = null,
     ): JsonObject {
         val definitions = EndpointParameterRegistry.getDefinitions(
             endpoint = endpoint,
             extendedEffortSupported = extendedEffortSupported,
             provider = provider,
             model = model,
+            endpointConfig = endpointConfig,
         )
         val out = LinkedHashMap<String, JsonElement>()
         for (definition in definitions) {
+            if (definition.readOnly) continue
             val key = definition.key
             val raw = params.getValueForKey(key)
             // Skip any value the server would apply on its own: a blank (unset), the composer baseline
@@ -49,6 +53,9 @@ object ModelParamPayload {
             // presence in `dynamicValues` is not "changed": the sheet seeds default-valued entries on open.
             if (raw.isBlank() || raw == ModelParameters.DEFAULT.getValueForKey(key) || raw == definition.default) continue
             out[key] = encode(definition.type, raw)
+        }
+        if (endpointConfig?.provider == "anthropic" && endpointConfig.extendedCacheTTL != true) {
+            out.remove("promptCacheTtl")
         }
         return JsonObject(out)
     }

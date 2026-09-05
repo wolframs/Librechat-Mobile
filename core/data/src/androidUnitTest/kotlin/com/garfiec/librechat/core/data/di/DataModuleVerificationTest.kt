@@ -5,7 +5,13 @@ package com.garfiec.librechat.core.data.di
 import android.app.Application
 import android.content.Context
 import androidx.datastore.core.DataStore
+import com.garfiec.librechat.core.common.conversation.OpenConversationRegistry
+import com.garfiec.librechat.core.common.lifecycle.DeferredWorkWindow
+import com.garfiec.librechat.core.common.lifecycle.ForegroundSignal
 import com.garfiec.librechat.core.common.network.ConnectivityObserver
+import com.garfiec.librechat.core.common.network.NetworkConditionObserver
+import com.garfiec.librechat.core.common.network.RequestActivityTracker
+import com.garfiec.librechat.core.common.power.PowerStateObserver
 import com.garfiec.librechat.core.network.api.AgentToolsApi
 import com.garfiec.librechat.core.network.api.AgentsApi
 import com.garfiec.librechat.core.network.api.ApiKeysApi
@@ -55,6 +61,13 @@ class DataModuleVerificationTest {
                 CoroutineDispatcher::class,
                 CoroutineScope::class,
                 ConnectivityObserver::class,
+                // The prefetcher's inputs, all bound in :core:common.
+                NetworkConditionObserver::class,
+                PowerStateObserver::class,
+                ForegroundSignal::class,
+                DeferredWorkWindow::class,
+                OpenConversationRegistry::class,
+                RequestActivityTracker::class,
                 SseClient::class,
                 AuthApi::class,
                 UserApi::class,
@@ -80,6 +93,7 @@ class DataModuleVerificationTest {
                 KeysApi::class,
                 ApiKeysApi::class,
                 McpApi::class,
+                com.garfiec.librechat.core.network.api.MarketApi::class,
                 MemoriesApi::class,
                 SpeechApi::class,
                 BannerApi::class,

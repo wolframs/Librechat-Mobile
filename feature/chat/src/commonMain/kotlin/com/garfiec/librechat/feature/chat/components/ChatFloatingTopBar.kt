@@ -164,6 +164,8 @@ internal fun ChatFloatingTopBar(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
+            MarketPriceButton(uiState.serverUrl, uiState.selectedEndpoint, uiState.selectedModel)
+
             Box {
                 FloatingBarIconButton(
                     icon = Icons.Default.MoreVert,

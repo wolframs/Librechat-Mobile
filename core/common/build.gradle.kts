@@ -72,11 +72,24 @@ val generateBackendCommitMap = tasks.register("generateBackendCommitMap") {
         var gitCalls = 0
         fun git(vararg args: String): String {
             gitCalls++
-            val proc = ProcessBuilder(listOf("git", *args)).directory(upstreamDir).start()
+            // TZ=UTC so --date=format-local renders committer dates in UTC regardless of the
+            // build machine's timezone — the emitted dates must be machine-independent.
+            val proc = ProcessBuilder(listOf("git", *args)).directory(upstreamDir)
+                .also { it.environment()["TZ"] = "UTC" }.start()
             val out = proc.inputStream.bufferedReader().readText()
             val err = proc.errorStream.bufferedReader().readText()
             if (proc.waitFor() != 0) error("git ${args.joinToString(" ")} failed: $err")
             return out.trim()
+        }
+
+        // A shallow submodule clone silently truncates rev-list, shrinking the dev window
+        // (and often the tag set) without any error — fail loudly instead of emitting a map
+        // that resolves hundreds of real upstream builds to null.
+        if (git("rev-parse", "--is-shallow-repository") == "true") {
+            error(
+                "upstream/ submodule is a shallow clone; the commit map would be silently " +
+                    "truncated. Run: git -C upstream fetch --unshallow",
+            )
         }
 
         val versionTagRegex = Regex("""^v?\d+\.\d+""")
@@ -85,12 +98,15 @@ val generateBackendCommitMap = tasks.register("generateBackendCommitMap") {
         fun versionAt(commit: String): String? =
             versionLineRegex.find(git("show", "$commit:package.json"))?.groupValues?.get(1)?.let(::normalize)
 
-        // prefix -> version, plus the subset of prefixes that are exact tag commits (classification).
+        // prefix -> version, plus the subset of prefixes that are exact tag commits (classification)
+        // and each prefix's full SHA so commit dates can be batch-resolved after collection.
         val prefixToVersion = linkedMapOf<String, String>()
         val tagPrefixes = linkedSetOf<String>()
+        val prefixToFullSha = hashMapOf<String, String>()
         fun add(version: String, commit: String, isTag: Boolean) {
             val prefix = commit.take(hashPrefixLen).lowercase()
             prefixToVersion[prefix] = version // idempotent: a given commit always reports one version
+            prefixToFullSha[prefix] = commit
             if (isTag) tagPrefixes.add(prefix)
         }
 
@@ -112,6 +128,13 @@ val generateBackendCommitMap = tasks.register("generateBackendCommitMap") {
             ?.takeIf { it.isNotEmpty() } ?: git("rev-parse", "HEAD")
         val revList = git("rev-list", "-n", devCommitCount.toString(), pinnedHead)
             .lineSequence().filter { it.isNotBlank() }.toList() // newest -> oldest
+        if (revList.size < devCommitCount) {
+            error(
+                "rev-list returned only ${revList.size} of $devCommitCount dev commits from " +
+                    "$pinnedHead — the upstream/ history is truncated (partial fetch?). " +
+                    "Run: git -C upstream fetch --unshallow",
+            )
+        }
         var boundaryShows = 0
         if (revList.isNotEmpty()) {
             val oldest = revList.last()
@@ -127,11 +150,28 @@ val generateBackendCommitMap = tasks.register("generateBackendCommitMap") {
             }
         }
 
-        // Emit a flat prefix→version table as one packed string constant, parsed once into hash
+        // Commit dates (ISO committer date, rendered in UTC): the disambiguator for DEV builds,
+        // whose package.json still reports the previous release. UTC — NOT %cs — because %cs renders
+        // in each committer's own timezone, and upstream's mixed +0900/-0400 committers produce
+        // date-order inversions on a history that is monotonic in real time (GitHub squash-merge
+        // stamps commit times at merge). A single timezone restores monotonic dates. landedDate
+        // values in gates must be derived the same way (see VERSION_GATES.md). Batch-resolved in
+        // chunks — one git call per 500 commits, not one per commit.
+        val prefixToDate = hashMapOf<String, String>()
+        val utcDateArgs = arrayOf("-c", "core.pager=cat", "show", "-s", "--date=format-local:%Y-%m-%d", "--format=%H %cd")
+        prefixToVersion.keys.chunked(500).forEach { chunk ->
+            git(*utcDateArgs, *chunk.map { prefixToFullSha.getValue(it) }.toTypedArray())
+                .lineSequence().filter { it.isNotBlank() }.forEach { line ->
+                    val (sha, date) = line.split(' ')
+                    prefixToDate[sha.take(hashPrefixLen).lowercase()] = date
+                }
+        }
+
+        // Emit a flat prefix→version→date table as one packed string constant, parsed once into hash
         // structures at class init → O(1) lookup, and far more compact in the class file than a
         // 1000+-entry mapOf literal (which also risks the 64 KB JVM method-size limit as N grows).
-        // The string constant itself is capped at 64 KB by the class-file format; at ~22 bytes/line
-        // that leaves headroom to ~2800 entries before the string would need to be split.
+        // The string constant itself is capped at 64 KB by the class-file format; at ~33 bytes/line
+        // that leaves headroom to ~1900 entries before the string would need to be split.
         val sortedPrefixes = prefixToVersion.keys.sorted() // deterministic regardless of git enum order
         val body = buildString {
             appendLine("// GENERATED by ./gradlew generateBackendCommitMap — do not edit by hand.")
@@ -143,35 +183,42 @@ val generateBackendCommitMap = tasks.register("generateBackendCommitMap") {
             appendLine("package com.garfiec.librechat.core.common.generated")
             appendLine()
             appendLine("/**")
-            appendLine(" * Upstream build-commit prefix → reported version. Backed by one packed-string")
-            appendLine(" * constant parsed once at init into a [Map] + [Set], so lookups are O(1). rc/dev")
-            appendLine(" * versions keep their suffix and map to their release line at the gate via")
-            appendLine(" * BackendVersion.parse(). Classification is diagnostics-only.")
+            appendLine(" * Upstream build-commit prefix → reported version + commit date. Backed by one")
+            appendLine(" * packed-string constant parsed once at init into hash structures, so lookups are")
+            appendLine(" * O(1). rc/dev versions keep their suffix and map to their release line at the gate")
+            appendLine(" * via BackendVersion.parse(). The commit date (ISO committer date) disambiguates DEV")
+            appendLine(" * builds, whose package.json still reports the previous release — see")
+            appendLine(" * BackendVersion.supportsFeature(). Classification is diagnostics + date-gating.")
             appendLine(" */")
             appendLine("object BackendCommitMap {")
             appendLine("    private const val PREFIX_LEN = $hashPrefixLen")
             appendLine()
-            appendLine("    // One entry per line: \"<$hashPrefixLen-char-prefix> <version> [T]\"; 'T' = exact release/rc tag commit.")
+            appendLine("    // One entry per line: \"<$hashPrefixLen-char-prefix> <version> <yyyy-MM-dd> [T]\"; 'T' = exact release/rc tag commit.")
             appendLine("    private val ENTRIES: String = \"\"\"")
             sortedPrefixes.forEach { prefix ->
                 val tag = if (prefix in tagPrefixes) " T" else ""
-                appendLine("$prefix ${prefixToVersion.getValue(prefix)}$tag")
+                val date = prefixToDate[prefix] ?: error("no commit date resolved for $prefix")
+                appendLine("$prefix ${prefixToVersion.getValue(prefix)} $date$tag")
             }
             appendLine("\"\"\"")
             appendLine()
             appendLine("    private val prefixToVersion: Map<String, String>")
+            appendLine("    private val prefixToDate: Map<String, String>")
             appendLine("    private val tagPrefixes: Set<String>")
             appendLine()
             appendLine("    init {")
             appendLine("        val versions = HashMap<String, String>(${prefixToVersion.size} * 4 / 3 + 1)")
+            appendLine("        val dates = HashMap<String, String>(${prefixToVersion.size} * 4 / 3 + 1)")
             appendLine("        val tags = HashSet<String>(${tagPrefixes.size} * 4 / 3 + 1)")
             appendLine("        for (line in ENTRIES.lineSequence()) {")
             appendLine("            if (line.isEmpty()) continue")
             appendLine("            val parts = line.split(' ')")
             appendLine("            versions[parts[0]] = parts[1]")
-            appendLine("            if (parts.size > 2) tags.add(parts[0])")
+            appendLine("            dates[parts[0]] = parts[2]")
+            appendLine("            if (parts.size > 3) tags.add(parts[0])")
             appendLine("        }")
             appendLine("        prefixToVersion = versions")
+            appendLine("        prefixToDate = dates")
             appendLine("        tagPrefixes = tags")
             appendLine("    }")
             appendLine()
@@ -179,6 +226,12 @@ val generateBackendCommitMap = tasks.register("generateBackendCommitMap") {
             appendLine("    fun versionForCommit(sha: String): String? {")
             appendLine("        if (sha.length < PREFIX_LEN) return null")
             appendLine("        return prefixToVersion[sha.substring(0, PREFIX_LEN).lowercase()]")
+            appendLine("    }")
+            appendLine()
+            appendLine("    /** ISO committer date (yyyy-MM-dd) of a build commit, or null if unknown. */")
+            appendLine("    fun dateForCommit(sha: String): String? {")
+            appendLine("        if (sha.length < PREFIX_LEN) return null")
+            appendLine("        return prefixToDate[sha.substring(0, PREFIX_LEN).lowercase()]")
             appendLine("    }")
             appendLine()
             appendLine("    /** OFFICIAL (release tag), RC (prerelease tag), or DEV (untagged); null if unknown. */")
@@ -224,6 +277,10 @@ kotlin {
                 implementation(libs.coroutines.core)
                 implementation(libs.okio)
                 api(libs.kotlinx.datetime)
+                // Kermit only — :core:logging depends on this module, so `Diag` is unreachable here.
+                // Its PersistentLogWriter is a Kermit LogWriter, so plain Kermit still reaches the
+                // diagnostic export.
+                implementation(libs.kermit)
             }
         }
         commonTest.dependencies {
@@ -232,6 +289,9 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.coroutines.android)
             implementation(libs.koin.android)
+            // ContextCompat.registerReceiver, for the exported/not-exported flag the power-save
+            // receiver needs. Declared rather than relied on transitively through koin-android.
+            implementation(libs.androidx.core.ktx)
         }
         named("androidUnitTest").dependencies {
             implementation(libs.koin.test)

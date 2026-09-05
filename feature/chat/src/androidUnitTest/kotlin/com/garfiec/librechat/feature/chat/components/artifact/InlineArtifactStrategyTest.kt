@@ -1,7 +1,9 @@
 package com.garfiec.librechat.feature.chat.components.artifact
 
+import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class InlineArtifactStrategyTest {
@@ -99,5 +101,49 @@ class InlineArtifactStrategyTest {
             cachedMermaidSvg = null,
         )
         assertEquals(InlineArtifactStrategy.WebViewSlot, result)
+    }
+
+    @Test
+    fun `empty content dispatches without throwing for every type`() {
+        // Leaf directives (`::artifact{…}`, no body) make empty content reachable for the first
+        // time. The ladder must stay total — in particular isCacheableMermaid("") must not throw
+        // and must not claim a cache hit.
+        val expected = ArtifactType.entries.associateWith { type ->
+            when (type) {
+                ArtifactType.MARKDOWN -> InlineArtifactStrategy.NativeMarkdown
+                ArtifactType.SVG -> InlineArtifactStrategy.IntrinsicSvg
+                else -> InlineArtifactStrategy.WebViewSlot
+            }
+        }
+        val actual = ArtifactType.entries.associateWith { type ->
+            selectInlineArtifactStrategy(type = type, content = "", cachedMermaidSvg = null)
+        }
+        assertEquals(expected, actual)
+    }
+
+    @Test
+    fun `empty mermaid content does not take the cached-svg path`() {
+        val result = selectInlineArtifactStrategy(
+            type = ArtifactType.MERMAID,
+            content = "",
+            cachedMermaidSvg = "<svg/>",
+        )
+        assertEquals(InlineArtifactStrategy.WebViewSlot, result)
+    }
+
+    @Test
+    fun `streaming gates inline rendering off for every type`() {
+        val allOn = InlineArtifactPrefs(mermaid = true, svg = true, html = true, react = true, markdown = true)
+        val types = listOf(
+            "application/vnd.mermaid",
+            "image/svg+xml",
+            "text/html",
+            "application/vnd.react",
+            "text/markdown",
+        )
+        types.forEach { type ->
+            assertTrue(shouldRenderInlineArtifact(allOn, type, streaming = false), type)
+            assertFalse(shouldRenderInlineArtifact(allOn, type, streaming = true), type)
+        }
     }
 }

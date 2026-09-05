@@ -6,7 +6,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.LayoutCoordinates
 import com.garfiec.librechat.core.common.ChatLayoutConstants
 import com.garfiec.librechat.core.model.Attachment
+import com.garfiec.librechat.core.model.FeedbackRating
 import com.garfiec.librechat.core.model.Message
+import com.garfiec.librechat.core.model.MinimalFeedback
 import com.garfiec.librechat.core.model.content.MessageContentPart
 
 /** Platform-specific message bubble. */
@@ -20,14 +22,14 @@ expect fun MessageBubble(
     onEdit: (() -> Unit)? = null,
     onRegenerate: (() -> Unit)? = null,
     onCopy: (() -> Unit)? = null,
-    onFeedback: ((String?) -> Unit)? = null,
+    onFeedback: ((MinimalFeedback?) -> Unit)? = null,
     onContinue: (() -> Unit)? = null,
     onReadAloud: (() -> Unit)? = null,
     onFork: (() -> Unit)? = null,
     baseUrl: String = "",
     fontSizeMultiplier: Float = 1.0f,
     isReading: Boolean = false,
-    currentFeedback: String? = null,
+    currentFeedback: FeedbackRating? = null,
     isEditing: Boolean = false,
     editText: String = "",
     onEditTextChange: ((String) -> Unit)? = null,
@@ -63,6 +65,14 @@ expect fun ContentPartRenderer(
     searchQuery: String? = null,
     searchFocusedOccurrence: Int = -1,
     onFocusedOccurrencePosition: ((LayoutCoordinates, Rect) -> Unit)? = null,
+    // Registry key for this part's collapse state. Positional `remember` state migrates to the
+    // wrong part once grouping wraps parts, and is dropped outright when the lazy item scrolls
+    // out of the viewport.
+    stateKey: String = "",
+    // True while rendering inside an activity group, whose tool calls' files are hoisted out and
+    // rendered below the collapsible instead. Without it they render twice while the block is
+    // open, and vanish with it when it folds.
+    hideAttachments: Boolean = false,
 )
 
 /** Platform-specific markdown content rendering. */
@@ -77,4 +87,6 @@ expect fun MarkdownContent(
     onFocusedOccurrencePosition: ((LayoutCoordinates, Rect) -> Unit)? = null,
     immediate: Boolean = false,
     streaming: Boolean = false,
+    // Renders the live streaming cursor at the end of this content — see StreamingCursor.kt.
+    trailingCursor: Boolean = false,
 )

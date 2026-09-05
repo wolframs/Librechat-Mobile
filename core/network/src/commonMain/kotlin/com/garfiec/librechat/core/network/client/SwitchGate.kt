@@ -27,7 +27,20 @@ data class RequestIdentity(
     val accountId: String?,
     val bearer: String?,
     val isPending: Boolean = false,
-)
+    val customHeaders: Map<String, String> = emptyMap(),
+) {
+    /**
+     * Explicit, not the generated one: both [bearer] and [customHeaders] are credentials, and the
+     * generated `toString` would put them verbatim into any log line, exception message, or debugger
+     * frame that renders the snapshot. Header *names* are kept — they are what makes a
+     * misconfiguration diagnosable — values never are.
+     */
+    override fun toString(): String =
+        "RequestIdentity(baseUrl=$baseUrl, accountId=$accountId, bearer=${redact(bearer)}, " +
+            "isPending=$isPending, customHeaders=${customHeaders.keys})"
+
+    private fun redact(value: String?): String = if (value == null) "null" else "<redacted>"
+}
 
 /**
  * Coroutine-scoped override of the request identity, for the **add-account** flow: run the flow's
@@ -40,15 +53,29 @@ data class RequestIdentity(
  *
  * [bearer] is read per request (not captured once) because the staged token only exists after the
  * flow's sign-in call succeeds; earlier calls (config validation, the login POST itself) carry none.
+ *
+ * [headers] sits **before** [bearer] on purpose. Several call sites pass the bearer as a trailing
+ * lambda; a new parameter appended after it would silently re-bind that lambda to the new slot and
+ * compile clean while sending no token at all. It also has to resolve the warm-up itself:
+ * [SwitchGate.captureSnapshot] short-circuits to this identity *before* any of its own awaits, so the
+ * add-account probe would otherwise race the header store's first read — and losing the gateway
+ * credential on the probe is exactly the failure this feature exists to fix.
  */
 class PendingRequestIdentity(
     private val baseUrl: String,
+    private val headers: suspend () -> Map<String, String> = { emptyMap() },
     private val bearer: suspend () -> String?,
 ) : AbstractCoroutineContextElement(PendingRequestIdentity) {
     companion object Key : CoroutineContext.Key<PendingRequestIdentity>
 
     suspend fun identity(): RequestIdentity =
-        RequestIdentity(baseUrl = baseUrl, accountId = null, bearer = bearer(), isPending = true)
+        RequestIdentity(
+            baseUrl = baseUrl,
+            accountId = null,
+            bearer = bearer(),
+            isPending = true,
+            customHeaders = headers(),
+        )
 }
 
 /** Attribute carrying the per-request [RequestIdentity] snapshot from the barrier to the URL/auth phases. */
@@ -77,6 +104,9 @@ class SwitchGate(
     private val serverUrlProvider: ServerUrlProvider,
     private val tokenManager: TokenManager,
     private val accountReadyGate: AccountReadyGate?,
+    // Trailing + defaulted so the one positional construction (the account-switcher test harness)
+    // keeps compiling, and so tests that don't care about gateway headers need not wire a fake.
+    private val serverHeadersProvider: ServerHeadersProvider = EmptyServerHeadersProvider,
 ) {
     private val lock = Mutex()
     private val open = MutableStateFlow(true)
@@ -92,19 +122,32 @@ class SwitchGate(
      * A caller running under a [PendingRequestIdentity] (the add-account flow) short-circuits to the
      * pending identity: no gates, no live-provider reads — the pending flow is self-contained and a
      * concurrent switch doesn't affect it.
+     *
+     * [renewIfStale] opts this snapshot into proactive token renewal
+     * ([TokenManager.ensureFreshAccessToken]) — only the transports pass it. It is **not** the default
+     * because `captureSnapshot` has non-transport callers for which a renewal is wrong rather than
+     * merely wasteful: logout pins an identity before revoking the session, and refreshing a session
+     * we are about to destroy adds a round trip to it and rotates a token nobody will use.
      */
-    suspend fun captureSnapshot(): RequestIdentity {
+    suspend fun captureSnapshot(renewIfStale: Boolean = false): RequestIdentity {
         coroutineContext[PendingRequestIdentity]?.let { return it.identity() }
         accountReadyGate?.awaitReady()
         serverUrlProvider.awaitBaseUrl()
+        // Warm the gateway-header store here, OUTSIDE [lock]: the lock below is the same mutex
+        // [withSwitch] takes, so suspending inside it would stall every account switch behind a
+        // DataStore read. The await is URL-free precisely so it can happen out here — the base URL is
+        // only resolved inside the lock, and keying the await on a URL read before it could await the
+        // wrong server's headers.
+        serverHeadersProvider.awaitWarm()
         // The gate is open >99.9% of the time (a switch is rare and user-initiated); reading the value
         // directly avoids allocating a flow collector on every request and only suspends when a switch
         // is actually mid-flip.
         if (!open.value) open.first { it }
-        return lock.withLock {
+        val snapshot = lock.withLock {
             val accountId = activeAccountProvider.currentAccountId()?.value
+            val baseUrl = serverUrlProvider.getBaseUrl()
             RequestIdentity(
-                baseUrl = serverUrlProvider.getBaseUrl(),
+                baseUrl = baseUrl,
                 accountId = accountId,
                 // Explicit branch (not `?: fallback`): a resolved account with an empty keyed slot
                 // must yield a null bearer, never fall through to the live cache — during sign-in
@@ -114,8 +157,31 @@ class SwitchGate(
                 } else {
                     tokenManager.getAccessToken()
                 },
+                // Read against the snapshot's own base URL, under the same lock, so the headers can't
+                // pair with a different server than the URL and bearer did.
+                customHeaders = serverHeadersProvider.headersFor(baseUrl),
             )
         }
+        if (!renewIfStale) return snapshot
+        // Renew AFTER the snapshot and OUTSIDE [lock], and feed it the snapshot's own values.
+        //
+        // Outside the lock because it is the same mutex [withSwitch] takes, and a refresh POST
+        // suspended inside it would stall every account switch — the rule the header warm-up above
+        // follows too. Off the *snapshot* rather than re-reading the providers because those two reads
+        // would not be atomic with each other: a switch publishes the new server URL before the new
+        // account, so an unguarded pair can be (old account, new URL), and refreshing against that
+        // POSTs one account's refresh token to another deployment — the exact tearing this class
+        // exists to prevent. Reusing the snapshot also keeps the triple to one read per request.
+        //
+        // A switch landing between the snapshot and the renewal is harmless: this request is already
+        // pinned to that account, refreshAccessTokenFor writes only that account's keyed slot, and a
+        // switched-away account's tokens are retained.
+        val renewed = tokenManager.ensureFreshAccessToken(
+            accountId = snapshot.accountId,
+            baseUrl = snapshot.baseUrl,
+            currentAccessToken = snapshot.bearer,
+        )
+        return if (renewed == snapshot.bearer) snapshot else snapshot.copy(bearer = renewed)
     }
 
     /**

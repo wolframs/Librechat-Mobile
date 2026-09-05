@@ -1,6 +1,11 @@
 # Gradle Warning Audit
 
-Last refreshed: **2026-07-27**
+Last refreshed: **2026-09-05**
+
+September upstream merge: debug APK, 2,399 Android/JVM tests, Detekt (including
+common metadata), and app lint pass. App lint reports 9 warnings and 3 hints,
+with no errors. The detailed July compiler-warning inventory below is historical;
+the Kotlin/AGP and platform limitations still apply.
 
 This records the warning baseline for the Android build so that intentional
 compatibility debt is distinguishable from warnings that can be removed mechanically.

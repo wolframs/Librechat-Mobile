@@ -81,4 +81,6 @@
     <string name="restore_http_warning">Erneut warnen</string>
     <string name="use_saved_login">Gespeicherte Anmeldung verwenden</string>
     <string name="password_manager_note">Passwörter werden vom Passwortmanager deines Geräts gespeichert, nicht von LibreChat.</string>
+    <!-- Custom server headers (issue #287) -->
+    <string name="server_headers_advanced">Erweitert</string>
 </resources>
