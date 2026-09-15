@@ -46,3 +46,4 @@ Thumbs.db
 .claude/*.lock
 # Bytecode from the Python helpers bundled with .claude skills
 __pycache__/
+gradle/gradle-daemon-jvm.properties
