@@ -11,6 +11,11 @@ android {
     namespace = "com.garfiec.librechat.fork"
 }
 
+// A `fork` package inside a feature module reads these strings and icons.
+compose.resources {
+    publicResClass = true
+}
+
 kotlin {
     sourceSets {
         commonMain.dependencies {

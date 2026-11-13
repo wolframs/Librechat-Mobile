@@ -17,20 +17,26 @@ reported by a script instead of found on a phone.
 1. **Fork code lives in `:fork`**, package `com.garfiec.librechat.fork.<feature>`. Every feature
    module gets it through the feature convention plugin. `:fork` depends on `:core:*` only, never on
    a feature module, so fork UI takes plain values and lambdas, not a feature's state classes.
-2. **Code a core module must call** sits in a `fork` package inside that core module, as fork-only
-   files (a core module cannot depend on `:fork`).
+2. **Code that needs a module's own types** sits in a `fork` package inside that module, as
+   fork-only files: a core module cannot depend on `:fork`, and `:fork` cannot see a feature
+   module's state classes. This is also where a fork surface lives that replaces one of that
+   module's own (a sheet, a menu): it takes the same arguments as the one it replaces, and the hook
+   is the swapped name at the call site.
 3. **A hook is the only edit in an upstream file**: a call, an argument or a dependency line, with
    `FORK-HOOK(<feature>)` and a few words on what it is for. Use fully-qualified names so no import
    line changes. No reformatting, renaming or moving of upstream code.
 4. **The hook registry is `fork/hooks.txt`.** Run `fork/scripts/fork-hooks.py --write` in the commit
    that adds or removes a hook, and `fork/scripts/fork-hooks.py` after every merge from upstream.
-5. **Strings** go into `fork/src/commonMain/composeResources/values*/strings.xml`, English and German.
-6. **Preferences** go into fork-only classes over the shared DataStore file. A feature that existed
+5. **Strings** go into `fork/src/commonMain/composeResources/values*/strings_<feature>.xml`, English
+   and German. `:fork`'s generated `Res` is public, so a `fork` package in another module reads them.
+6. **Icons** for fork surfaces come from `ForkIcons` (Lucide line icons). Add one with
+   `fork/scripts/gen-icons.py --add <lucide-name>`; the SVGs are vendored in `fork/icons/lucide`.
+7. **Preferences** go into fork-only classes over the shared DataStore file. A feature that existed
    before November 2026 keeps its old key names, so values on the phone survive.
-7. **No changes to upstream's Room entities, schema files or database version.** State that needs a
+8. **No changes to upstream's Room entities, schema files or database version.** State that needs a
    table goes into a row of an existing table under a fork key prefix, or into DataStore.
-8. **Tests** for fork code live in `fork/src/androidUnitTest`.
-9. **Library versions**: fork entries are appended to `gradle/libs.versions.toml` in one marked
+9. **Tests** for fork code live in `fork/src/androidUnitTest`.
+10. **Library versions**: fork entries are appended to `gradle/libs.versions.toml` in one marked
    block; upstream's pins are never changed.
 
 ## Merging from upstream

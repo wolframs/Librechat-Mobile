@@ -1,0 +1,134 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 14px; }
+  figure { margin: 0; }
+  figcaption { font: 600 13px var(--font-sans); color: var(--foreground); margin: 0 0 6px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  figcaption span { font-weight: 400; color: var(--muted-foreground, var(--foreground)); opacity: .75; }
+  .phone { --bg:#FAF9FF; --surf:#E8E7F1; --surf2:#F1F0F8; --ink:#1B1B21; --dim:#5E5E6B; --pri:#0058C0; --line:#D5D4DF;
+    background: var(--bg); color: var(--ink); border-radius: 22px; border: 1px solid var(--line);
+    font: 12px/1.35 Roboto, var(--font-sans); height: 440px; position: relative; overflow: hidden; }
+  .top { display:flex; align-items:center; gap:6px; padding: 12px 10px 6px; }
+  .rb { width:28px; height:28px; border-radius:50%; background:var(--surf); display:grid; place-items:center; font-size:13px; flex:none; }
+  .title { background:var(--surf); border-radius:14px; padding:6px 10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .grow { flex:1; }
+  .msg { display:flex; gap:7px; padding:5px 10px 5px 26px; }
+  .av { width:18px; height:18px; border-radius:50%; background:#7B8CFF; flex:none; }
+  .av.a { background:#9A5B3C; }
+  .msg b { display:block; font-weight:600; }
+  .rail { position:absolute; left:5px; top:52px; width:15px; height:58px; border-radius:8px; background:var(--surf);
+    writing-mode: vertical-rl; transform: rotate(180deg); text-align:center; font-size:8.5px; color:var(--dim); line-height:15px; }
+  .rail i { display:inline-block; width:4px; height:4px; border-radius:50%; background:#1E9E62; margin-bottom:3px; }
+  .dollar { position:absolute; left:5px; top:114px; width:15px; height:15px; border-radius:50%; background:var(--surf); font-size:8.5px; display:grid; place-items:center; color:var(--dim); }
+  .composer { position:absolute; left:8px; right:8px; bottom:10px; background:var(--surf); border-radius:18px; padding:9px 9px 7px; border:1px solid var(--line); }
+  .composer .ph { color:var(--dim); padding: 0 4px 9px; }
+  .row { display:flex; align-items:center; gap:6px; }
+  .ib { width:24px; height:24px; border-radius:50%; background:var(--bg); display:grid; place-items:center; font-size:14px; flex:none; position:relative; }
+  .ib em { position:absolute; top:-3px; right:-4px; background:var(--pri); color:#fff; font: 600 8px/12px Roboto, sans-serif; min-width:12px; height:12px; border-radius:6px; text-align:center; font-style:normal; }
+  .chip { background:var(--bg); border-radius:12px; padding:5px 9px; display:flex; gap:5px; align-items:center; white-space:nowrap; }
+  .chip .dot { width:12px; height:12px; border-radius:50%; background:#9A5B3C; }
+  .chip small { color:var(--dim); font-size:10.5px; }
+  .hl { outline: 2px solid var(--pri); outline-offset: 2px; }
+  .scrim { position:absolute; inset:0; background:rgba(20,20,30,.38); }
+  .sheet { position:absolute; left:0; right:0; bottom:0; background:var(--surf2); border-radius:20px 20px 0 0; padding:8px 10px 12px; }
+  .grab { width:30px; height:3px; border-radius:2px; background:#A9A8B4; margin:0 auto 8px; }
+  .sheet h4 { margin:0 0 8px; font: 600 12.5px Roboto, sans-serif; text-align:center; }
+  .card { background:var(--surf); border-radius:12px; overflow:hidden; margin-bottom:7px; }
+  .li { display:flex; align-items:center; gap:7px; padding:7px 9px; border-top:1px solid var(--surf2); }
+  .li:first-child { border-top:0; }
+  .li .sub { color:var(--dim); font-size:9.5px; display:block; }
+  .li .r { margin-left:auto; color:var(--dim); white-space:nowrap; }
+  .li .ok { margin-left:auto; color:var(--pri); font-weight:700; }
+  .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:7px; }
+  .tile { background:var(--surf); border-radius:11px; padding:8px 0 6px; text-align:center; font-size:9.5px; }
+  .tile i { display:block; font-style:normal; font-size:14px; margin-bottom:2px; }
+  .sw { margin-left:auto; width:24px; height:13px; border-radius:7px; background:#B9B8C4; position:relative; flex:none; }
+  .sw::after { content:""; position:absolute; top:2px; left:2px; width:9px; height:9px; border-radius:50%; background:#fff; }
+  .sw.on { background:var(--pri); } .sw.on::after { left:13px; }
+  .menu { position:absolute; right:10px; top:44px; background:var(--surf2); border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,.18); padding:4px 0; width:150px; }
+  .menu div { padding:7px 12px; } .menu hr { border:0; border-top:1px solid var(--line); margin:3px 0; }
+  .gone { color:#A33; text-decoration: line-through; opacity:.7; }
+  .note { font: 12px/1.45 var(--font-sans); color: var(--foreground); opacity:.8; margin: 4px 4px 0; }
+</style>
+<div class="grid">
+  <figure>
+    <figcaption>1 · Composer <span>the model moves in</span></figcaption>
+    <div class="phone">
+      <div class="top"><div class="rb">☰</div><div class="title">Single Word Reply Request</div><div class="grow"></div><div class="rb">⋮</div></div>
+      <div class="rail"><i></i> 4:14</div><div class="dollar">$</div>
+      <div class="msg"><div class="av"></div><div><b>Claude Test</b>meow?</div></div>
+      <div class="msg"><div class="av a"></div><div><b>Surplus (Claude)</b>Meow! 🐱</div></div>
+      <div class="composer">
+        <div class="ph">Message</div>
+        <div class="row">
+          <div class="ib">＋<em>3</em></div>
+          <div class="chip hl"><span class="dot"></span>haiku-5.5 <small>High</small></div>
+          <div class="grow"></div>
+          <div class="ib">🎙</div>
+        </div>
+      </div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>2 · Tap the model chip <span>all model matters</span></figcaption>
+    <div class="phone">
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="grab"></div><h4>Model</h4>
+        <div class="card">
+          <div class="li"><div>claude-fable-5.2<span class="sub">Surplus (Claude)</span></div></div>
+          <div class="li"><div>claude-opus-5.5<span class="sub">Surplus (Claude)</span></div></div>
+          <div class="li"><div>claude-haiku-5.5<span class="sub">Surplus (Claude)</span></div><span class="ok">✓</span></div>
+          <div class="li"><div>deepseek-v4.1-flash<span class="sub">Surplus</span></div></div>
+        </div>
+        <div class="card">
+          <div class="li">Effort<span class="r">High ›</span></div>
+          <div class="li">Parameters<span class="r">cache 5m ›</span></div>
+          <div class="li">Presets<span class="r">›</span></div>
+        </div>
+        <div class="card">
+          <div class="li">More models<span class="r">320 ›</span></div>
+          <div class="li">Compare with a second model<span class="r">›</span></div>
+        </div>
+      </div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>3 · Tap ＋ <span>what goes into this chat</span></figcaption>
+    <div class="phone">
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="grab"></div><h4>Add to chat</h4>
+        <div class="tiles">
+          <div class="tile"><i>📷</i>Camera</div><div class="tile"><i>🖼</i>Photos</div><div class="tile"><i>📎</i>Files</div><div class="tile"><i>☁</i>Server</div>
+        </div>
+        <div class="card">
+          <div class="li">Web search<span class="sw on"></span></div>
+          <div class="li">File search<span class="sw"></span></div>
+          <div class="li">Artifacts<span class="sw"></span></div>
+        </div>
+        <div class="card">
+          <div class="li">Connectors<span class="r">web, imager ›</span></div>
+          <div class="li">Skills<span class="r">›</span></div>
+          <div class="li">Memory<span class="sw on"></span></div>
+        </div>
+        <div class="card"><div class="li">Prompts library<span class="r">›</span></div></div>
+      </div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>4 · Tap ⋮ <span>this conversation only</span></figcaption>
+    <div class="phone">
+      <div class="top"><div class="rb">☰</div><div class="title">Single Word Reply Request</div><div class="grow"></div><div class="rb hl">⋮</div></div>
+      <div class="menu">
+        <div>Search in chat</div><div>Show all media</div>
+        <div class="gone">Load Preset</div><div class="gone">Save as Preset</div><div class="gone">Prompts Library</div><div class="gone">Compare Models</div>
+        <hr><div>Share</div><div>Bookmarks</div><div>Rename</div><div>Duplicate</div><div>Archive</div><div>Delete</div>
+      </div>
+    </div>
+  </figure>
+</div>
+<p class="note">Struck-through entries leave the ⋮ menu: presets and compare go to the model sheet, the prompts library to ＋. The model list at the top of sheet 2 is your starred models; “More models” is today’s full picker with search.</p>
