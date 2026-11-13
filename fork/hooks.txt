@@ -33,7 +33,7 @@ fonts	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/comp
 fonts	feature/chat/src/commonTest/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowSectionsTest.kt	1
 fonts	feature/chat/src/iosMain/kotlin/com/garfiec/librechat/feature/chat/components/IosChatInput.kt	1
 fonts	feature/chat/src/iosMain/kotlin/com/garfiec/librechat/feature/chat/components/PlatformChatComponents.ios.kt	1
-fonts	feature/settings/src/commonMain/kotlin/com/garfiec/librechat/feature/settings/screen/AppearanceSettingsScreen.kt	1
+fonts	feature/settings/src/commonMain/kotlin/com/garfiec/librechat/feature/settings/screen/AppearanceSettingsScreen.kt	8
 fonts	shared/src/commonMain/kotlin/com/garfiec/librechat/shared/app/LibreChatApp.kt	2
 legacy-db	core/data/src/androidMain/kotlin/com/garfiec/librechat/core/data/di/DataPlatformModule.android.kt	1
 legacy-debug-id	app/build.gradle.kts	1

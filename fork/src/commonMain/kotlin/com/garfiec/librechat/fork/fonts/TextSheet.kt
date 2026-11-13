@@ -76,10 +76,11 @@ fun rememberTextSheet(): () -> Unit {
     return { open = true }
 }
 
+/** The reply face by name, for a settings row that opens the sheet. */
 @Composable
-fun TextSettingsRow(modifier: Modifier = Modifier) {
-    val open = rememberTextSheet()
-    AdaptiveTextButton(onClick = open, modifier = modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text(textLabel()) }
+fun textSummary(): String = when (val face = LocalReadingPreferences.current.resolved(FontSlot.MODEL)) {
+    ReadingFont.SYSTEM -> stringResource(Res.string.fonts_system)
+    else -> face.displayName
 }
 
 /**

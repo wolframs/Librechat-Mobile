@@ -99,7 +99,6 @@ fun AppearanceSettingsPage(
     val usesSidebar = windowUsesSidebarLayout()
 
     SettingsListPage(contentPadding = contentPadding, modifier = modifier) {
-        item(key = "fork_text") { com.garfiec.librechat.fork.fonts.TextSettingsRow() } // FORK-HOOK(fonts): reading settings
         item(key = "theme_header") {
             AdaptiveSectionHeader(stringResource(Res.string.appearance_section_theme))
         }
@@ -176,6 +175,14 @@ fun AppearanceSettingsPage(
                     onClick = onNavigateToChatLayout,
                 )
             }
+            row(key = "fork_text") { // FORK-HOOK(fonts): reading settings
+                SettingsRow( // FORK-HOOK(fonts)
+                    icon = com.garfiec.librechat.fork.icons.ForkIcons.ALargeSmall, // FORK-HOOK(fonts)
+                    title = com.garfiec.librechat.fork.fonts.textLabel(), // FORK-HOOK(fonts)
+                    summary = com.garfiec.librechat.fork.fonts.textSummary(), // FORK-HOOK(fonts)
+                    onClick = com.garfiec.librechat.fork.fonts.rememberTextSheet(), // FORK-HOOK(fonts)
+                ) // FORK-HOOK(fonts)
+            } // FORK-HOOK(fonts)
         }
         if (usesSidebar) {
             item(key = "tablet_header") {
