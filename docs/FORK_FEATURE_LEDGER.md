@@ -104,7 +104,7 @@ module, `fork/README.md` wins.
 | Guard for a cache database with the fork's old schema (Android) | in; run on the emulator 2026-11-13: old fork build signed in, new build installed over it, the app opened signed in on upstream's schema v15 | `legacy-db` |
 | Build under the old debug app id | in, not yet built that way | `legacy-debug-id` |
 | Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. The emulator has no password manager, so no credential was actually saved or picked: that needs the Pixel. iOS has no-op actuals. | `saved-login` |
-| Cache TTL rail | in. On the emulator 2026-11-13, native Anthropic: countdown from the server's marker on an old chat, the cycle 1h, 5m, off, and one send with 1h armed that the server stored as `1h` and the rail showed as 60m. Not run: a gateway row, OpenRouter, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
+| Cache TTL rail | in. On the emulator 2026-11-13, native Anthropic: countdown from the server's marker on an old chat, the cycle 1h, 5m, off, and one send with 1h armed that the server stored as `1h` and the rail showed as 60m. Same day on `Surplus (Claude)`: armed send stored as `1h`, the next unarmed send as `5m`, and the explanation carried the marketplace note. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
 
 ### Saved login: what differs from the old fork
 
