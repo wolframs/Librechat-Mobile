@@ -56,9 +56,10 @@ built itself are dropped.
       emulator signed in as the test account:
   - [x] 6a. Scaffold: `:fork` module, hook check, the guard that drops a cache
         database with the fork's old schema, the old debug app id switch.
-  - [ ] 6b. Saved login and server address (system password manager; servers
-        remembered without an account).
-  - [ ] 6c. Cache TTL rail, at parity with the web pill of 2026-11-11
+  - [x] 6b. Saved login and server address: in, checked on the emulator as far
+        as it goes without a password manager. Real save and pick: step 8.
+  - [x] 6c. Cache TTL rail (in; native Anthropic run for real, the rest listed
+        in the ledger), at parity with the web pill of 2026-11-11
         (Claude on OpenRouter rows, `extendedCacheTTL` from the server, the
         marketplace caveat, arm cycle 1h, 5m, off).
   - [ ] 6d. Prices and costs panel, if the new chat header takes it cleanly.

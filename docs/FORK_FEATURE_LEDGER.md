@@ -100,11 +100,36 @@ module, `fork/README.md` wins.
 
 | Feature | State | Hooks (`fork/scripts/fork-hooks.py --list`) |
 |---|---|---|
-| Saved login: Android Credential Manager and remembered server addresses | implemented; device acceptance pending; required 2FA setup discards save intent | `saved-login` |
 | `:fork` module | in | `module` |
-| Cache TTL rail, one-shot direct-send arm, branch markers and marketplace caveat | in; Android build/unit checks recorded in `docs/CACHE_TTL_IMPLEMENTATION.md`; device and iOS acceptance pending | `cache-ttl` |
 | Guard for a cache database with the fork's old schema (Android) | in; run on the emulator 2026-11-13: old fork build signed in, new build installed over it, the app opened signed in on upstream's schema v15 | `legacy-db` |
 | Build under the old debug app id | in, not yet built that way | `legacy-debug-id` |
+| Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. The emulator has no password manager, so no credential was actually saved or picked: that needs the Pixel. iOS has no-op actuals. | `saved-login` |
+| Cache TTL rail | in. On the emulator 2026-11-13, native Anthropic: countdown from the server's marker on an old chat, the cycle 1h, 5m, off, and one send with 1h armed that the server stored as `1h` and the rail showed as 60m. Not run: a gateway row, OpenRouter, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
+
+### Saved login: what differs from the old fork
+
+- Required two-factor setup discards the pending save; the next password sign-in offers it again.
+- The pending save lives in memory only and crosses the two-factor step there.
+- `credentials-play-services-auth` is on the classpath of every flavor, `foss` included. Fine for
+  this fork; it would matter for an F-Droid build.
+
+### Cache TTL rail: how it is built
+
+- The contract is the web pill's, as of the backend of 2026-11-11: shown for the built-in
+  `anthropic` endpoint, a custom row with `provider: anthropic`, or an OpenRouter row
+  (`customParams.defaultParamsEndpoint: openrouter`) on a Claude model, while prompt caching is on;
+  it can arm where the endpoint is `anthropic` or its config says `extendedCacheTTL: true`.
+- Messages paint from Room and refresh from the network, and Room has no column for the marker. A
+  fork store in `core/data` (`fork/cachettl/CacheTtlMarkerStore`) records each reply's `cacheTTL`
+  as it arrives (fetch, refresh, stream final) under `acct:<id>:cache_ttl_markers` in DataStore, at
+  most 2,000 per account; the account purge removes it. The rail takes the last marked reply on the
+  displayed branch.
+- The arm is in memory, per chat view model. Only a normal send from the composer consumes it, as
+  the top-level request field `cacheTTL`. Regenerate, continue, edit and a queued message leave it
+  in place.
+- The rail is a sideways pill, 28 x 104 dp, in the thread's left gutter below the header, as the
+  fork had it before. A tap cycles; a hold opens the explanation, with the marketplace caveat when
+  the server's `/cost/markets/endpoints` lists the endpoint.
 
 ---
 
