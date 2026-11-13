@@ -55,11 +55,12 @@ Left for 9, ticked as done and seen on the emulator:
       sits with the typeface row and reads Replies / Yours / App; "Use app font"; spacing glyphs
       are two plain paragraphs with a label under each; thinner selection outline; line spacing in
       three steps; reset.
-- [ ] All models: provider names at body weight and colour, counts secondary, rounded search
+- [x] All models: provider names at body weight and colour, counts secondary, rounded search
       field with an icon, "Set up providers" set apart, no "(0)" counts there.
-- [ ] Temporary chat: a labelled control with a visible on state, not a bare eye.
-- [ ] The plus badge quieter; a reply's time not hidden behind the composer's fade.
-- [ ] The critic's capture shows a tapped reply with its actions in view.
+- [x] Temporary chat: a labelled control with a visible on state, not a bare eye.
+- [x] The plus badge quieter; a message's time sits beside its action row (it was hidden behind
+      the composer on the last message).
+- [x] The critic's capture shows a tapped reply with its actions in view.
 
 Working choice of mine, to argue in round 2: the slot choice stays under a "Typeface" heading, not
 at the top of the sheet, because size and spacing are not per slot.
