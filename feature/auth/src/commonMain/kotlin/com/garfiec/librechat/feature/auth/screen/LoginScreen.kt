@@ -74,9 +74,13 @@ fun LoginScreen(
     val currentOnNavigateToTwoFactor by rememberUpdatedState(onNavigateToTwoFactor)
     val currentOnNavigateToTwoFactorSetup by rememberUpdatedState(onNavigateToTwoFactorSetup)
 
+    val loginSave = com.garfiec.librechat.fork.login.rememberLoginBridge() // FORK-HOOK(saved-login) memory-only login controller
+    val passwordManager = com.garfiec.librechat.fork.login.rememberPasswordCredentialManager() // FORK-HOOK(saved-login) platform provider
+
     LaunchedEffect(uiState.twoFactorSetupTempToken) {
         val tempToken = uiState.twoFactorSetupTempToken
         if (tempToken != null) {
+            loginSave.discard() // FORK-HOOK(saved-login) enrollment has no real session yet
             currentOnNavigateToTwoFactorSetup(tempToken)
             viewModel.consumeTwoFactorSetupNavigation()
         }
@@ -92,13 +96,16 @@ fun LoginScreen(
 
     LaunchedEffect(uiState.isLoggedIn) {
         if (uiState.isLoggedIn) {
-            currentOnLoginSuccess()
+            // FORK-HOOK(saved-login) offer save after session success
+            loginSave.saveThen(passwordManager, uiState.email, uiState.password) { currentOnLoginSuccess() }
         }
     }
 
     LaunchedEffect(uiState.twoFactorTempToken) {
         val tempToken = uiState.twoFactorTempToken
         if (tempToken != null) {
+            // FORK-HOOK(saved-login) carry intent until code acceptance
+            loginSave.stageForTwoFactor(tempToken, uiState.email, uiState.password)
             currentOnNavigateToTwoFactor(tempToken)
             // Consume the signal so backing out of the 2FA screen returns here instead of
             // re-triggering this effect against the retained ViewModel's stale token.
@@ -161,7 +168,8 @@ fun LoginScreen(
                 val usernameLogin = uiState.usernameLogin
                 AdaptiveOutlinedTextField(
                     value = uiState.email,
-                    onValueChange = viewModel::onEmailChanged,
+                    // FORK-HOOK(saved-login) edits invalidate selection
+                    onValueChange = { loginSave.editUsername(it, viewModel::onEmailChanged) },
                     label = { Text(stringResource(if (usernameLogin) Res.string.username_label else Res.string.email_label)) },
                     modifier = Modifier.fillMaxWidth().testTag("login_email")
                         .semantics {
@@ -184,7 +192,8 @@ fun LoginScreen(
                 LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { passwordRevealed = false }
                 AdaptiveOutlinedTextField(
                     value = uiState.password,
-                    onValueChange = viewModel::onPasswordChanged,
+                    // FORK-HOOK(saved-login) edits invalidate selection
+                    onValueChange = { loginSave.editPassword(it, viewModel::onPasswordChanged) },
                     label = { Text(stringResource(Res.string.password_label)) },
                     modifier = Modifier.fillMaxWidth().testTag("login_password"),
                     singleLine = true,
@@ -204,6 +213,13 @@ fun LoginScreen(
                         autoCorrectEnabled = false,
                     ),
                     enabled = !uiState.isLoading,
+                )
+            }
+
+            // FORK-HOOK(saved-login) fill for review
+            if (uiState.emailLoginEnabled) {
+                com.garfiec.librechat.fork.login.SavedLoginButton(
+                    loginSave, !uiState.isLoading, viewModel::onEmailChanged, viewModel::onPasswordChanged,
                 )
             }
 

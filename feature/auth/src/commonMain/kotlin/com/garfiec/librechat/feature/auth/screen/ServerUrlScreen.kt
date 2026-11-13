@@ -85,8 +85,12 @@ fun ServerUrlScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val currentOnServerValidated by rememberUpdatedState(onServerValidate)
 
+    val savedLoginStore = com.garfiec.librechat.fork.login.rememberedServerStore() // FORK-HOOK(saved-login) shared device preferences
+
     LaunchedEffect(uiState.isValidated) {
         if (uiState.isValidated) {
+            // FORK-HOOK(saved-login) remember only the resolved successful address
+            com.garfiec.librechat.fork.login.rememberConnectedServer(uiState.url, savedLoginStore)
             currentOnServerValidated()
             // Consume it, or backing out of the next screen lands here and is immediately thrown
             // forward again — this entry's ViewModel outlives the forward navigation.
@@ -202,6 +206,10 @@ fun ServerUrlScreen(
                 servers = uiState.knownServers,
                 enabled = !uiState.isLoading,
                 onSelect = viewModel::connectTo,
+            )
+
+            com.garfiec.librechat.fork.login.RememberedServers( // FORK-HOOK(saved-login) no-account shortcuts
+                uiState.knownServers.map { it.url }, !uiState.isLoading, viewModel::connectTo,
             )
 
             UseAnotherAccountButton(onUseAnotherAccount, modifier = Modifier.padding(top = 8.dp))
