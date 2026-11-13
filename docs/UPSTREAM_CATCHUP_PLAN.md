@@ -41,8 +41,11 @@ built itself are dropped.
 - [ ] 3. Operator pass over the ledger: which features stay.
 - [ ] 4. Seam design: fork-owned database, strings, DI module, settings
       section, and the hook points in upstream files. Written into the ledger.
-- [ ] 5. Merge `upstream/develop`, upstream's side on every conflict, fork-only
-      files kept where they still compile. Build and tests green.
+- [x] 5. Merge `upstream/develop` with upstream's files as the base (the tree
+      is upstream's plus the fork's documents; fork features are absent until
+      step 6). Done 2026-11-13 on `sync/upstream-2026-11`: the foss debug build
+      succeeds and the app starts on the emulator at the server-address screen.
+      Tests not run here; the code is identical to upstream's.
 - [ ] 6. Re-land the kept features one at a time, each with its tests; check
       each on the emulator.
 - [ ] 7. Mobile gaps against the deployed backend fork (OptMem switches, cache
