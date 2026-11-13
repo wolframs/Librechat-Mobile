@@ -46,10 +46,11 @@ saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/aut
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/ServerUrlScreen.kt	3
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/TwoFactorScreen.kt	3
 saved-login	gradle/libs.versions.toml	1
-thread	feature/chat/src/androidMain/kotlin/com/garfiec/librechat/feature/chat/components/MarkdownContent.kt	1
+thread	feature/chat/src/androidMain/kotlin/com/garfiec/librechat/feature/chat/components/MarkdownContent.kt	3
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatFloatingTopBar.kt	3
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/LandingContent.kt	5
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/MessageList.kt	10
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/StreamingMessageBubble.kt	4
+thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/TextArtifactContentPart.kt	1
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatContent.kt	3
 thread	feature/chat/src/iosMain/kotlin/com/garfiec/librechat/feature/chat/components/PlatformChatComponents.ios.kt	1

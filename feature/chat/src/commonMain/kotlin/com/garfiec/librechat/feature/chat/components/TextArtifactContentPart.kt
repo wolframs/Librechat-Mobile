@@ -117,7 +117,7 @@ internal fun TextContentPart(
                             onFocusedOccurrencePosition = onFocusedOccurrencePosition,
                             streaming = streaming,
                             trailingCursor = trailingCursor && index == segments.lastIndex,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = com.garfiec.librechat.fork.thread.threadTextWidth(), // FORK-HOOK(thread): a user bubble hugs its text
                         )
                     }
                     is ArtifactSegment.ArtifactReference -> {

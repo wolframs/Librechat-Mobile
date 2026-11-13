@@ -114,7 +114,7 @@ actual fun MarkdownContent(
 
     Column(
         modifier = modifier
-            .fillMaxWidth()
+            .then(com.garfiec.librechat.fork.thread.threadTextWidth()) // FORK-HOOK(thread): a user bubble hugs its text
             .semantics {
                 contentDescription = spokenText
             },
@@ -316,7 +316,7 @@ private fun MarkdownTextSegment(
             content = content,
             colors = colors,
             typography = typography,
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier.then(com.garfiec.librechat.fork.thread.threadTextWidth()), // FORK-HOOK(thread): a user bubble hugs its text
             immediate = immediate,
             streaming = streaming,
             trailingCursor = trailingCursor,
