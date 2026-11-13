@@ -5,11 +5,12 @@ Native mobile client for LibreChat (Android & iOS). Connects to existing LibreCh
 ## This fork
 
 This checkout is a fork of the community app (`upstream` = garfiec/Librechat-Mobile); everything
-below this section is upstream's text. The fork's own features, where each one lives and how it
-hooks into upstream's files are in `docs/FORK_FEATURE_LEDGER.md`: read it before changing a fork
-feature, and update it in the same commit. While `docs/UPSTREAM_CATCHUP_PLAN.md` exists, a catch-up
-with upstream is open: read it first. A fork feature goes into fork-only files with a few hook lines
-in upstream's files, so the next merge stays small. `docs/SURPLUS_MCP_UPSTREAM_SYNC.md` and
+below this section is upstream's text. Fork code lives in the `:fork` module, and upstream's files
+carry only hook lines marked `FORK-HOOK(<feature>)`: read `fork/README.md` before adding or changing
+a fork feature, and before merging from upstream. Which features exist and where each hooks in is in
+`docs/FORK_FEATURE_LEDGER.md`; update it in the same commit as a feature. While
+`docs/UPSTREAM_CATCHUP_PLAN.md` exists, a catch-up with upstream is open: read it first.
+`docs/SURPLUS_MCP_UPSTREAM_SYNC.md` and
 `UX_GAP_WORKLOG.md` describe the fork as it was before November 2026. The deployed backend on the
 Mac is an independent working tree; mobile work does not imply deployment there.
 

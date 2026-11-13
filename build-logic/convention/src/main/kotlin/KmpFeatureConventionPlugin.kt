@@ -17,6 +17,7 @@ class KmpFeatureConventionPlugin : Plugin<Project> {
                     implementation(project(":core:data"))
                     implementation(project(":core:model"))
                     implementation(project(":core:common"))
+                    implementation(project(":fork")) // FORK-HOOK(module)
                     implementation(libs.findLibrary("koin-compose").get())
                     implementation(libs.findLibrary("koin-compose-viewmodel").get())
                     implementation(libs.findLibrary("koin-compose-viewmodel-navigation").get())

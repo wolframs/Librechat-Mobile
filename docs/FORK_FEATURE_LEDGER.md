@@ -89,19 +89,20 @@ Size: S under an hour of focused work, M a few hours, L a day or more.
 | Fork database numbering and its migration | The phone's local cache, once. |
 | Deprecation and DSL cleanups, import ordering | Compiler warnings only. |
 
-## Seam rules for the re-landing
+## Seam rules
 
-- Fork code lives in fork-only files. A hook into an upstream file is a call or
-  a parameter, a few lines, with nothing else changed in that file.
-- Fork strings go into `strings_fork.xml` beside upstream's `strings.xml`, per
-  locale.
-- Fork preferences go into fork-only classes over the same DataStore file, with
-  the key names the fork already uses, so values on the phone survive.
-- No fork changes to upstream's Room entities, schema files or version number.
-- `gradle/libs.versions.toml`: append fork entries, never take the fork's old
-  pins (they would downgrade upstream's Compose). `credentials-play-services-auth`
-  would pull Google Play Services into the `foss` flavor; scope it to `play` or
-  leave the password manager out of `foss`.
+The rules for where fork code goes and how it hooks into upstream's files are in
+`fork/README.md`. The appendices below were written before those rules existed;
+where they suggest `strings_fork.xml` or fork-only files inside a feature
+module, `fork/README.md` wins.
+
+## State of the re-landing
+
+| Feature | State | Hooks (`fork/scripts/fork-hooks.py --list`) |
+|---|---|---|
+| `:fork` module | in | `module` |
+| Guard for a cache database with the fork's old schema (Android) | in, not yet run against an old install | `legacy-db` |
+| Build under the old debug app id | in, not yet built that way | `legacy-debug-id` |
 
 ---
 

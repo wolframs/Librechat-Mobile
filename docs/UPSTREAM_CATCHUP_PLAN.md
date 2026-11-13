@@ -38,17 +38,35 @@ built itself are dropped.
 - [x] 2. Fork feature ledger: per feature, where it lives, upstream's
       counterpart, verdict (drop / keep clean / port behind a seam), size.
       Result: `docs/FORK_FEATURE_LEDGER.md`.
-- [ ] 3. Operator pass over the ledger: which features stay.
-- [ ] 4. Seam design: fork-owned database, strings, DI module, settings
-      section, and the hook points in upstream files. Written into the ledger.
+- [x] 3. Operator pass (2026-11-13). His words: saving the login data and
+      server URL is "an absolute must have, if no one upstream has implemented
+      that"; the cache TTL rail too, "but it needs an upgrade to take the fixes
+      i made on the host and web ui side into account"; the prices and costs
+      panel "is nice if the UI lets us implement it without us going slightly
+      insane". He named no other feature. He also asked to modularize the fork's
+      code while re-landing it, so later merges need no detail edits.
+- [x] 4. Seam design: the `:fork` module, marked hook lines, a hook registry
+      and its check script. Rules in `fork/README.md`.
 - [x] 5. Merge `upstream/develop` with upstream's files as the base (the tree
       is upstream's plus the fork's documents; fork features are absent until
       step 6). Done 2026-11-13 on `sync/upstream-2026-11`: the foss debug build
       succeeds and the app starts on the emulator at the server-address screen.
       Tests not run here; the code is identical to upstream's.
-- [ ] 6. Re-land the kept features one at a time, each with its tests; check
-      each on the emulator.
-- [ ] 7. Mobile gaps against the deployed backend fork (OptMem switches, cache
-      TTL setting, routing and cost data, PDFs as text, web fetch, Markdown
-      import): compare with the app code, then decide per item.
+- [ ] 6. Re-land, each in `:fork` with marked hooks, each checked on the
+      emulator signed in as the test account:
+  - [ ] 6a. Scaffold: `:fork` module, hook check, the guard that drops a cache
+        database with the fork's old schema, the old debug app id switch.
+  - [ ] 6b. Saved login and server address (system password manager; servers
+        remembered without an account).
+  - [ ] 6c. Cache TTL rail, at parity with the web pill of 2026-11-11
+        (Claude on OpenRouter rows, `extendedCacheTTL` from the server, the
+        marketplace caveat, arm cycle 1h, 5m, off).
+  - [ ] 6d. Prices and costs panel, if the new chat header takes it cleanly.
+  - [ ] 6e. Upgrade test: old fork build with data, then the new build over it.
+- [ ] 7. Mobile gaps against the deployed backend fork (OptMem switches,
+      routing and cost data, PDFs as text, web fetch, Markdown import): compare
+      with the app code, then decide per item.
 - [ ] 8. Device acceptance on the Pixel, then push.
+
+Fork features the operator did not name on 2026-11-13 stay out for now; they
+are listed in the ledger with sizes.

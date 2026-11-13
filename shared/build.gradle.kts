@@ -53,6 +53,7 @@ kotlin {
             implementation(project(":feature:files"))
             implementation(project(":feature:schedules"))
             implementation(project(":feature:skills"))
+            implementation(project(":fork")) // FORK-HOOK(module)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)

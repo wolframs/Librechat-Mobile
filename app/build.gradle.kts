@@ -37,7 +37,11 @@ android {
     buildTypes {
         debug {
             // Release must keep the bare id — Obtainium tracks updates by package name.
-            applicationIdSuffix = ".debug"
+            // FORK-HOOK(legacy-debug-id): -PlegacyDebugApplicationId=true builds under the bare id, to
+            // update a debug install from before the suffix existed without losing its data.
+            if (providers.gradleProperty("legacyDebugApplicationId").orNull != "true") {
+                applicationIdSuffix = ".debug"
+            }
             versionNameSuffix = "-debug"
         }
     }

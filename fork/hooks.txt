@@ -1,0 +1,7 @@
+# feature<TAB>file<TAB>hook lines. Written by fork/scripts/fork-hooks.py --write.
+legacy-db	core/data/src/androidMain/kotlin/com/garfiec/librechat/core/data/di/DataPlatformModule.android.kt	1
+legacy-debug-id	app/build.gradle.kts	1
+module	build-logic/convention/src/main/kotlin/KmpFeatureConventionPlugin.kt	1
+module	settings.gradle.kts	1
+module	shared/build.gradle.kts	1
+module	shared/src/commonMain/kotlin/com/garfiec/librechat/shared/di/SharedKoinModules.kt	1

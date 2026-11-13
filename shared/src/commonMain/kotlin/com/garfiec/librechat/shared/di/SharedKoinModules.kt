@@ -47,4 +47,5 @@ val sharedKoinModules: List<Module> = listOf(
     schedulesFeatureModule,
     skillsFeatureModule,
     sharedAppModule,
+    com.garfiec.librechat.fork.di.forkModule, // FORK-HOOK(module)
 )
