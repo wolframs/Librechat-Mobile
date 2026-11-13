@@ -108,10 +108,10 @@ module, `fork/README.md` wins.
 | Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. The emulator has no password manager, so no credential was actually saved or picked: that needs the Pixel. iOS has no-op actuals. | `saved-login` |
 | Cache window control | in. Run on the emulator on native Anthropic and on `Surplus (Claude)` (2026-11-13): countdown from the server's marker, the cycle 1h, 5m, off, an armed send stored as `1h`, arming from the model sheet's Cache window page. Since the composer regrouping it is a quiet "Cache 4:47" in the composer, shown only while a window runs or is armed. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
 | Prices sheet | in. Run on the emulator on `Surplus (Claude)` and the plain `Surplus` row with live data. Opened from the model sheet (More options, Prices) since the composer regrouping. Not run: the dashboard button, Retry, a saved agent, a server without the sidecar, iOS. | none of its own |
-| Default-on connectors and first-send selection | implemented; unit tests and Android build, device acceptance pending | `mcp-default-on` |
+| Default-on connectors and first-send selection | in. On the emulator against the live server (2026-11-13): a new chat starts with the default-on servers on; one switched off stays off for that chat across a reopen and a cold start while other chats keep it on; the model named the picked servers on the first message. Not run: offline reopen, a switch-off made in the web UI arriving on the phone. | `mcp-default-on` |
 | Composer regrouping (model capsule, model sheet, Add to chat, conversation-only menu, Lucide icons) | in. Five rounds against a design critic (GPT-6 Astra) from device screenshots, 5.5 to 9 out of 10, light, dark and font scale 1.3. Not seen: the composer with the keyboard open (the emulator's test keyboard is invisible), the Liquid Glass style, iOS. | `composer` |
-| Reading fonts and paragraph spacing | in; Android build, aggregate detekt, fork tests and upstream overflow tests checked in the implementation commit; device review pending | `fonts` |
-| Thread and header restyle | in; build, aggregate detekt and focused unit checks recorded in the implementation commit. Device review is pending (light, dark, font scale 1.3); no device or server used here. Native iOS controls and wide headers retain upstream behavior. | `thread` |
+| Reading settings: fonts in three slots, text size, line and paragraph spacing | in. Three rounds against the design critic (GPT-6 Astra) from emulator screenshots, 8 to 9 out of 10, light, dark and font scale 1.3. Not seen: Liquid Glass, iOS (never compiled here), the faces on the Pixel's screen. | `fonts` |
+| Thread, header, landing and full model list restyle | in. Same three critic rounds, 8 to 9. Not seen: a streaming reply and tool cards under the critic, comparison panes (they keep upstream's look), Liquid Glass, iOS. | `thread` |
 
 ### Reading settings: how it is built
 
@@ -128,10 +128,20 @@ success layout was a plain Column and paragraphs added no vertical padding. Extr
 the old `chat_paragraph_spacing` strings remain readable, with `wide` added.
 
 Text is first in the overflow's tools section, using its typed action and both menu renderers,
-and a row on Appearance. The sheet shares composer chrome, applies each tap immediately,
-previews both message slots and spacing, and reads/writes upstream's existing text-size setting.
-English/German strings and six OFL notices are bundled. Device acceptance in both styles and iOS
-compilation remain for the owner; this implementation uses no device or server.
+and a row in Appearance (upstream's `SettingsRow`, named by the reply face). The sheet
+(`fonts/TextSheet.kt`) pins a sample above its controls: a user bubble, a heading, a paragraph
+with bold and italic and a second paragraph, all following every control. The slot choice
+(Replies / Yours / App) sits under "Typeface" with the row of faces, because it governs the face
+only; a rule and one line then say that size and spacing are shared. Below: text size (upstream's
+setting), line spacing (`fork_line_spacing`: tight 1.35, regular 1.5, relaxed 1.65 times the text
+size; regular is the type scale's own) and paragraph spacing, each a row of tiles with a glyph and
+a name, and a reset.
+
+`readingTypography` (chat fork package) builds the Markdown styles from the body text: the slot's
+face and line spacing on running text, and headings sized against the body (`headingStyle` in
+`fork/thread/ThreadRules.kt`: 1.4, 1.25, 1.125 times, semibold, line height 1.2), not from the
+display scale, so a reply's title stays in proportion at every font scale.
+English/German strings and six OFL notices are bundled.
 
 ### Thread restyle: how it is built
 
@@ -150,10 +160,20 @@ upstream. The landing hides its hero and redundant identity lines without replac
 temporary-chat transition, positioning or starters. `ComposerAllModels` partitions whole upstream
 picker groups into usable then key-blocked groups, with one localized setup heading; upstream
 still builds the rows. Provider names and counts have separate contrast; key-blocked groups omit
-counts below a separated setup heading, and search uses a rounded filled adaptive field. The landing
+counts below a separated setup heading, a usable provider's count has its own column before the
+chevron, and search uses a rounded filled adaptive field. The landing
 uses a labelled Ghost switch with an on-state capsule; server enforcement disables switching.
-The tools count badge uses neutral roles, and revealed timestamps have 12 dp bottom spacing.
+The tools count badge uses neutral roles.
 English and German day/setup/temporary-label strings live in `:fork`.
+
+Four things reach into upstream's message code by hook. A user bubble hugs its text: three
+`fillMaxWidth` calls on the text path take `threadTextWidth()` instead (Android renderer and the
+shared text part; iOS still fills). The thread fades out above the composer and is hidden under
+it (`threadComposerBackdrop()` on the composer's box; off under Liquid Glass, which samples the
+thread). A reply's action row keeps feedback, copy, regenerate and read aloud, and puts edit and
+fork behind a named menu (`ThreadActions` wraps upstream's `ActionButtons`; a user's row stays
+whole). A tapped message's time sits beside that row, not under it, where the last message's
+would open behind the composer; with a branch navigator on that side it goes below.
 
 Font work: `userMessageTextStyle` and `modelReplyTextStyle` in `fork/thread/ThreadRules.kt` resolve
 the You and Model reading slots. Both platform markdown renderers route their body style through them;
@@ -162,7 +182,7 @@ existing 16/24 sp typography and the user's size multiplier remain in force.
 ### Default-on connectors: how it is built
 
 - `mcp-default-on`: plain selection, toggle and request rules in `:fork` `mcp/`; the chat fork package bridges the chat slices. All connector surfaces and the plus badge read the same effective set.
-- Conversation detail is the truth. An open chat holds nullable opt-outs in memory; null sends no `mcpOff`. A bounded DataStore sidecar (`acct:<id>:mcp_off`, last 100 chats, removed by account purge) seeds cached offline opens. Each open revalidates detail. Room is unchanged. Picker edits outrank an in-flight read; new landings start with no opt-outs, and the new-chat handoff carries them.
+- Conversation detail is the truth. An open chat holds nullable opt-outs in memory; null sends no `mcpOff`. A bounded DataStore sidecar (`acct:<id>:mcp_off`, last 100 chats, removed by account purge) seeds cached offline opens. A chat's detail is read again once per process and whenever its `updatedAt` moved (upstream's own backfill gate, widened by one hook), not on every open. Room is unchanged. Picker edits outrank an in-flight read; new landings start with no opt-outs, and the new-chat handoff carries them.
 - First-send readiness now includes selection restoration; a late startup snapshot cannot replace a connector pick made while loading. These are marked upstream hooks; the navigation handoff itself runs after the first request.
 
 ### Saved login: what differs from the old fork
@@ -225,17 +245,6 @@ The agreed mock is `fork/design/composer-regroup.html`.
   line) or 64 dp and up (two lines), titles 16 sp, second lines 13 sp, medium weight only for a
   sheet title, a model's name and a tool's name. System back on a sub-page returns to its sheet.
 - Memory and web default-on switches now use the per-chat connector opt-outs described above.
-
-### Open look and feel proposals (with the operator since 2026-11-13)
-
-The critic's standing remarks about the chat screen outside the composer work, most damaging
-first; the mock for all four is `fork/design/thread-header-restyle.html`.
-
-1. Thread text shows through behind the status bar and the floating header.
-2. The thread reads like a log: avatar, bold name and timestamp on every short message.
-3. The header is a row of outlined pills; the title looks like a button; the landing screen's
-   eye icon is unexplained and the landing repeats the model under a brown "An" circle.
-4. The full model list opens on providers without a key.
 
 ---
 
