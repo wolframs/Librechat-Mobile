@@ -14,6 +14,7 @@ android {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(libs.datastore.preferences)
             implementation(project(":core:ui"))
             implementation(project(":core:data"))
             implementation(project(":core:model"))
@@ -28,6 +29,8 @@ kotlin {
             implementation(libs.kermit)
         }
         androidMain.dependencies {
+            implementation(libs.fork.credentials)
+            implementation(libs.fork.credentials.play.services.auth)
             implementation(libs.koin.android)
         }
         getByName("androidUnitTest").dependencies {

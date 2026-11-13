@@ -1,0 +1,6 @@
+<resources>
+    <string name="saved_login_use">Gespeicherte Anmeldung verwenden</string>
+    <string name="saved_login_servers">Gemerkte Server</string>
+    <string name="saved_login_forget">Vergessen</string>
+    <string name="saved_login_storage_error">Gespeicherte Anmeldedaten konnten nicht aktualisiert werden. Bitte erneut versuchen.</string>
+</resources>

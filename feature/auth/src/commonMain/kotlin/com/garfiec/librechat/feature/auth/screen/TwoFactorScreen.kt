@@ -60,8 +60,13 @@ fun TwoFactorScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val currentOnVerify by rememberUpdatedState(onVerify)
 
+    // FORK-HOOK(saved-login) clear pending secret when screen owner ends
+    val loginSave = com.garfiec.librechat.fork.login.rememberTwoFactorSaveBridge(tempToken)
+    val passwordManager = com.garfiec.librechat.fork.login.rememberPasswordCredentialManager() // FORK-HOOK(saved-login) platform provider
+
     LaunchedEffect(uiState.isVerified) {
-        if (uiState.isVerified) currentOnVerify()
+        // FORK-HOOK(saved-login) consume once after real session
+        if (uiState.isVerified) loginSave.complete(passwordManager) { currentOnVerify() }
     }
 
     AdaptiveScaffold(

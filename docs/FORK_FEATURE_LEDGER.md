@@ -100,6 +100,7 @@ module, `fork/README.md` wins.
 
 | Feature | State | Hooks (`fork/scripts/fork-hooks.py --list`) |
 |---|---|---|
+| Saved login: Android Credential Manager and remembered server addresses | implemented; device acceptance pending; required 2FA setup discards save intent | `saved-login` |
 | `:fork` module | in | `module` |
 | Guard for a cache database with the fork's old schema (Android) | in; run on the emulator 2026-11-13: old fork build signed in, new build installed over it, the app opened signed in on upstream's schema v15 | `legacy-db` |
 | Build under the old debug app id | in, not yet built that way | `legacy-debug-id` |

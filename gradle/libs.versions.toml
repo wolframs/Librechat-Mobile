@@ -281,3 +281,13 @@ skie = { id = "co.touchlab.skie", version.ref = "skie" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
+
+# FORK-HOOK(saved-login) Android password provider bridge
+[libraries.fork-credentials]
+group = "androidx.credentials"
+name = "credentials"
+version = "1.6.0"
+[libraries.fork-credentials-play-services-auth]
+group = "androidx.credentials"
+name = "credentials-play-services-auth"
+version = "1.6.0"
