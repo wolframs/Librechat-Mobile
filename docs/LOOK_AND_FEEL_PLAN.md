@@ -26,10 +26,14 @@ Delete this file when the last step is ticked.
       (`defaultOn`, `mcpOff`), and the first-message bug. Feature id `mcp-default-on`.
 - [ ] 2. Restyle: header, thread, landing, order of the full model list.
       Feature id `thread`.
-- [ ] 3. Fonts: three slots as on the web UI (interface, you, model), six
-      bundled families plus the system font. Feature id `fonts`. The font
-      files are in `fork/src/commonMain/composeResources/font`, licenses in
-      `fork/fonts-licenses`.
+- [ ] 3. Reading settings, feature id `fonts`: fonts in three slots as on the
+      web UI (interface, you, model), six bundled families plus the system
+      font; and paragraph spacing, configurable (operator, 2026-11-13: "in some
+      contexts, I wished that I could tighten paragraphs in the past, in
+      others, the larger space made more sense"). One sheet for both, reachable
+      from the chat in two taps and from Settings. The old spacing key
+      `chat_paragraph_spacing` and its values stay. Font files:
+      `fork/src/commonMain/composeResources/font`, licenses `fork/fonts-licenses`.
 - [ ] 4. Critic rounds on 2 and 3 from device screenshots, until 9.
 - [ ] 5. Full checks, ledger, merge to `develop`, push to both remotes.
 
