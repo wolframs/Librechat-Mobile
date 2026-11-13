@@ -64,3 +64,12 @@ Left for 9, ticked as done and seen on the emulator:
 
 Working choice of mine, to argue in round 2: the slot choice stays under a "Typeface" heading, not
 at the top of the sheet, because size and spacing are not per slot.
+
+### L2, 2026-11-13: 8.5/10
+
+Thread 8.5, header 9, landing 9, Text sheet 8.5, All models 8.5, dark 9, large font 8.5. All of
+round 1's list counted as fixed or mostly fixed. Left, and done before round 3:
+
+- [x] A reply's action row: edit and branch behind a named menu (a user's own row stays whole).
+- [x] Text sheet: a rule and one line after the faces say that size and spacing are shared.
+- [x] All models: the count in its own column before the chevron.
