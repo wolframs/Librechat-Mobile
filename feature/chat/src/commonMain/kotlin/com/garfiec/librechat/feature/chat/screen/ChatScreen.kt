@@ -753,7 +753,8 @@ fun ChatScreen(
                                     reaction = VeilReaction.NUDGE,
                                     swell = COMPOSER_SWELL,
                                 )
-                                Box(composerVeil.modifier) {
+                                // FORK-HOOK(thread): the thread fades out behind the composer
+                                Box(composerVeil.modifier.then(com.garfiec.librechat.fork.thread.threadComposerBackdrop())) {
                                     val codeWorkspace = uiState.codeWorkspace
                                     val codeWorkspaceComposer = remember(codeWorkspace, viewModel) {
                                         CodeWorkspaceComposer(

@@ -69,4 +69,5 @@ thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/com
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/StreamingMessageBubble.kt	4
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/TextArtifactContentPart.kt	1
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatContent.kt	3
+thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatScreen.kt	1
 thread	feature/chat/src/iosMain/kotlin/com/garfiec/librechat/feature/chat/components/PlatformChatComponents.ios.kt	1
