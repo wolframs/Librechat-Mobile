@@ -6,6 +6,16 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class NewChatSelectionHandoffTest {
+    @Test
+    fun connectorOptOutsMoveWithCreatedChatAndNextLandingStartsEmpty() {
+        val handoff = NewChatSelectionHandoff()
+        handoff.put("chat", ModelChoice.Raw("anthropic", "claude"), mcpOff = setOf("web"))
+        val carried = handoff.take("chat")!!
+        val initial = com.garfiec.librechat.feature.chat.fork.initialConnectorState("chat")
+        val seeded = com.garfiec.librechat.feature.chat.fork.seedConnectorHandoff(initial, carried.mcpOff)
+        assertThat(seeded.selection.connectors.off).containsExactly("web")
+        assertThat(com.garfiec.librechat.feature.chat.fork.initialConnectorState(null).selection.connectors.off).isEmpty()
+    }
 
     @Test
     fun takeWithMatchingIdReturnsAndClears() {

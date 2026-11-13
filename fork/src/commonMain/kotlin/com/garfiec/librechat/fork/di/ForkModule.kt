@@ -8,6 +8,7 @@ expect val forkPlatformModule: Module
 /** Everything the fork adds to the Koin graph. Listed once in `sharedKoinModules`. */
 val forkModule = module {
     includes(forkPlatformModule)
+    single { com.garfiec.librechat.fork.mcp.ConnectorStore(get()) }
     includes(com.garfiec.librechat.fork.login.di.savedLoginModule)
     includes(com.garfiec.librechat.fork.cachettl.di.cacheTtlModule)
     includes(com.garfiec.librechat.fork.market.di.marketModule)

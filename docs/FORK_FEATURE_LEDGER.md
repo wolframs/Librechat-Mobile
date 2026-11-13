@@ -108,6 +108,7 @@ module, `fork/README.md` wins.
 | Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. The emulator has no password manager, so no credential was actually saved or picked: that needs the Pixel. iOS has no-op actuals. | `saved-login` |
 | Cache window control | in. Run on the emulator on native Anthropic and on `Surplus (Claude)` (2026-11-13): countdown from the server's marker, the cycle 1h, 5m, off, an armed send stored as `1h`, arming from the model sheet's Cache window page. Since the composer regrouping it is a quiet "Cache 4:47" in the composer, shown only while a window runs or is armed. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
 | Prices sheet | in. Run on the emulator on `Surplus (Claude)` and the plain `Surplus` row with live data. Opened from the model sheet (More options, Prices) since the composer regrouping. Not run: the dashboard button, Retry, a saved agent, a server without the sidecar, iOS. | none of its own |
+| Default-on connectors and first-send selection | implemented; unit tests and Android build, device acceptance pending | `mcp-default-on` |
 | Composer regrouping (model capsule, model sheet, Add to chat, conversation-only menu, Lucide icons) | in. Five rounds against a design critic (GPT-6 Astra) from device screenshots, 5.5 to 9 out of 10, light, dark and font scale 1.3. Not seen: the composer with the keyboard open (the emulator's test keyboard is invisible), the Liquid Glass style, iOS. | `composer` |
 | Thread and header restyle | in; build, aggregate detekt and focused unit checks recorded in the implementation commit. Device review is pending (light, dark, font scale 1.3); no device or server used here. Native iOS controls and wide headers retain upstream behavior. | `thread` |
 
@@ -132,6 +133,12 @@ still builds the rows. English and German day/setup strings live in `:fork`.
 Font work: `userMessageTextStyle` and `modelReplyTextStyle` in `fork/thread/ThreadRules.kt` return
 the input style unchanged. Both platform markdown renderers route their body style through them;
 existing 16/24 sp typography and the user's size multiplier remain in force.
+
+### Default-on connectors: how it is built
+
+- `mcp-default-on`: plain selection, toggle and request rules in `:fork` `mcp/`; the chat fork package bridges the chat slices. All connector surfaces and the plus badge read the same effective set.
+- Conversation detail is the truth. An open chat holds nullable opt-outs in memory; null sends no `mcpOff`. A bounded DataStore sidecar (`acct:<id>:mcp_off`, last 100 chats, removed by account purge) seeds cached offline opens. Each open revalidates detail. Room is unchanged. Picker edits outrank an in-flight read; new landings start with no opt-outs, and the new-chat handoff carries them.
+- First-send readiness now includes selection restoration; a late startup snapshot cannot replace a connector pick made while loading. These are marked upstream hooks; the navigation handoff itself runs after the first request.
 
 ### Saved login: what differs from the old fork
 
@@ -192,8 +199,7 @@ The agreed mock is `fork/design/composer-regroup.html`.
   close icon on a root sheet and a back arrow on a sub-page, 16 dp side margins, rows 56 dp (one
   line) or 64 dp and up (two lines), titles 16 sp, second lines 13 sp, medium weight only for a
   sheet title, a model's name and a tool's name. System back on a sub-page returns to its sheet.
-- Not built: a Memory switch. The backend runs memory and web in every chat unless the chat opts
-  out, and the app cannot send that opt-out yet (see the app check, B5).
+- Memory and web default-on switches now use the per-chat connector opt-outs described above.
 
 ### Open look and feel proposals (with the operator since 2026-11-13)
 

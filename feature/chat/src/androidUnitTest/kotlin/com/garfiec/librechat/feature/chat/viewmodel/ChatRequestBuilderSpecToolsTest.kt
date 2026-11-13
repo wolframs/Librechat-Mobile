@@ -20,6 +20,51 @@ import kotlin.test.assertTrue
  * what the user added on top, never the user's global toggles; under `hideBadgeRow`, the spec's alone.
  */
 class ChatRequestBuilderSpecToolsTest {
+    @Test
+    fun `default toggle is per chat and ordinary toggle leaves opt outs alone`() {
+        val web = com.garfiec.librechat.feature.chat.model.McpServerDisplayData(
+            "web", null, null, com.garfiec.librechat.core.model.mcp.McpDisplayStatus.CONNECTED, defaultOn = true,
+        )
+        val initial = state(ModelChoice.Raw("anthropic", "claude")).let {
+            it.copy(selection = it.selection.copy(
+                mcpServers = listOf(web), connectors = it.selection.connectors.copy(off = emptySet()),
+            ))
+        }
+        val flow = kotlinx.coroutines.flow.MutableStateFlow(initial)
+        val handle = ModelSelectionHandle(ChatStateHandle(flow, kotlinx.coroutines.test.TestScope()))
+        assertTrue(com.garfiec.librechat.feature.chat.fork.toggleDefaultConnector(handle, "web"))
+        assertEquals(setOf("web"), flow.value.selection.connectors.off)
+        assertEquals(initial.selectedMcpServerNames, flow.value.selectedMcpServerNames)
+        assertFalse(com.garfiec.librechat.feature.chat.fork.toggleDefaultConnector(handle, "mine"))
+        assertEquals(setOf("web"), flow.value.selection.connectors.off)
+        assertEquals(emptySet(), initial.selection.connectors.off)
+        assertEquals(listOf("web"), ChatRequestBuilder { flow.value }.buildEphemeralAgent()?.mcpOff)
+        assertTrue(com.garfiec.librechat.feature.chat.fork.toggleDefaultConnector(handle, "web"))
+        assertEquals(emptySet(), flow.value.selection.connectors.off)
+    }
+
+    @Test
+    fun `first send waits for saved connectors and carries the selection on anthropic`() {
+        val initial = com.garfiec.librechat.feature.chat.fork.initialConnectorState(null).copy(
+            selection = com.garfiec.librechat.feature.chat.fork.initialConnectorState(null).selection.copy(
+                choice = ModelChoice.Raw("anthropic", "claude-sonnet-4-5"),
+                availableModels = mapOf("anthropic" to listOf("claude-sonnet-4-5")),
+            ),
+        )
+        assertFalse(initial.isSendReady)
+        val restored = com.garfiec.librechat.feature.chat.fork.restoreConnectors(initial, setOf("imager", "web", "audio-ears"), emptySet())
+        assertTrue(restored.isSendReady)
+        val request = assertNotNull(ChatRequestBuilder { restored }.buildEphemeralAgent())
+        assertEquals(setOf("imager", "web", "audio-ears"), request.mcp?.toSet())
+        assertEquals(emptyList(), request.mcpOff)
+        val picked = initial.copy(selection = initial.selection.copy(
+            selectedMcpServerNames = setOf("audio-ears"), connectors = initial.selection.connectors.copy(touched = true),
+        ))
+        val late = com.garfiec.librechat.feature.chat.fork.restoreConnectors(picked, setOf("web"), emptySet())
+        assertEquals(setOf("audio-ears"), late.selectedMcpServerNames)
+        val unknown = restored.copy(selection = restored.selection.copy(connectors = restored.selection.connectors.copy(off = null)))
+        assertNull(ChatRequestBuilder { unknown }.buildEphemeralAgent()?.mcpOff)
+    }
 
     private val tools = ModelSpec(
         name = "tools",

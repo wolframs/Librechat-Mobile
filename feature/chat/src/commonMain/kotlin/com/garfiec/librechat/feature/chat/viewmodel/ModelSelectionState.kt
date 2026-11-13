@@ -92,6 +92,8 @@ data class ModelSelectionState(
     val enabledTools: Set<String> = emptySet(),
     val mcpServers: List<McpServerDisplayData> = emptyList(),
     val selectedMcpServerNames: Set<String> = emptySet(),
+    val connectors: com.garfiec.librechat.fork.mcp.ConnectorState = // FORK-HOOK(mcp-default-on)
+        com.garfiec.librechat.fork.mcp.ConnectorState(), // FORK-HOOK(mcp-default-on)
     /**
      * Tools added on top of the selected spec in this chat ([SpecTools]); another spec's count as
      * none. Under a spec the toolbar reads [effectiveTools] and [effectiveMcpServerNames] instead of
@@ -172,11 +174,7 @@ data class ModelSelectionState(
 
     /** The MCP servers in use, by the same rule as [effectiveTools]. */
     val effectiveMcpServerNames: Set<String>
-        get() = if (selectedSpec == null) {
-            selectedMcpServerNames
-        } else {
-            lockedMcpServers + activeSpecTools?.addedMcp.orEmpty()
-        }
+        get() = com.garfiec.librechat.feature.chat.fork.effectiveConnectors(this) // FORK-HOOK(mcp-default-on)
 
     /**
      * The parameters the chat shows: [modelParameters], with web search and URL context taken from

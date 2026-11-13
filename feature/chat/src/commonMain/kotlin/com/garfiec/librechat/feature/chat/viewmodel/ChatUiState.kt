@@ -1147,7 +1147,7 @@ data class ChatUiState(
      * orthogonal to the cold-start race we're guarding against.
      */
     val isSendReady: Boolean
-        get() = if (selectedEndpoint == EndpointConstants.AGENTS) {
+        get() = selection.connectors.ready && if (selectedEndpoint == EndpointConstants.AGENTS) { // FORK-HOOK(mcp-default-on)
             agentsEnabled && (availableModels.isNotEmpty() || EndpointConstants.AGENTS in endpointConfigs)
         } else {
             availableModels.isNotEmpty()

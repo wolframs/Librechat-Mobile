@@ -326,6 +326,7 @@ internal fun McpServer.toDisplayData(
     signInBusy: Boolean,
 ) = McpServerDisplayData(
     name = name,
+    defaultOn = defaultOn, // FORK-HOOK(mcp-default-on): preserve server default
     title = title,
     description = description,
     status = status,

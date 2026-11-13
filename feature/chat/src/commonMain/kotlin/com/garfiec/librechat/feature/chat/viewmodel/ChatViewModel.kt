@@ -239,9 +239,11 @@ class ChatViewModel(
     private val replyWatchScheduler: ReplyWatchScheduler? = null,
     /** The wall clock key expiries are held against; a test moves it to stand in for a sleep. */
     clock: Clock = Clock.System,
+    private val connectorStore: com.garfiec.librechat.fork.mcp.ConnectorStore? = null, // FORK-HOOK(mcp-default-on): bounded offline sidecar
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ChatUiState())
+    private val _uiState =
+        MutableStateFlow(com.garfiec.librechat.feature.chat.fork.initialConnectorState(initialConversationId)) // FORK-HOOK(mcp-default-on)
 
     /** Set once the role confirms PROMPTS.USE, so a denied user's screen issues no prompt fetch. */
     private var promptsUseAllowed = false
@@ -410,6 +412,10 @@ class ChatViewModel(
         selectionHandoff = selectionHandoff,
         reloadConversation = { id -> conversationLoadDelegate.loadConversation(id) },
         newChatDraftKey = newChatDraftKey,
+        onMcpFinal = { record, account -> // FORK-HOOK(mcp-default-on)
+            com.garfiec.librechat.feature.chat.fork.rememberConnectorFinal( // FORK-HOOK(mcp-default-on)
+                connectorStore, record, account?.value) // FORK-HOOK(mcp-default-on)
+        }, // FORK-HOOK(mcp-default-on)
         carrySkillsToggle = { conversationId, isTemporary ->
             skillsToggleDelegate.carryToCreatedConversation(conversationId, isTemporary)
             if (!isTemporary) rememberWebSearch(conversationId)
@@ -673,6 +679,10 @@ class ChatViewModel(
         // A handed-off new chat already holds what its first turn was sent with.
         wantsStoredParameters = { !isHandedOffNewChat },
         rememberedWebSearch = conversationWebSearchStore::get,
+        onMcpConversation = { // FORK-HOOK(mcp-default-on)
+            com.garfiec.librechat.feature.chat.fork.receiveConnectorState( // FORK-HOOK(mcp-default-on)
+                _uiState, it, connectorStore, activeAccountProvider.currentAccountId()?.value, viewModelScope) // FORK-HOOK(mcp-default-on)
+        }, // FORK-HOOK(mcp-default-on)
         restoreParameters = { conversation, remembered ->
             // This device's last switch for this chat decides, unless the server's `web_search` is true
             // (built-in search, turned on in web since). Not under a spec (see rememberWebSearch).
@@ -946,6 +956,8 @@ class ChatViewModel(
                     ),
                 ) { "handoff applied for $conversationId" }
                 modelDelegate.applyResolvedConversationModel(handoff.choice.endpoint, handoff.choice.model, handoff.choice.spec)
+                _uiState.update { // FORK-HOOK(mcp-default-on)
+                    com.garfiec.librechat.feature.chat.fork.seedConnectorHandoff(it, handoff.mcpOff) } // FORK-HOOK(mcp-default-on)
                 handoff.modelParameters?.let { modelDelegate.updateModelParameters(it, restoring = true) }
                 handoff.specTools?.let { tools ->
                     _uiState.update {
@@ -1221,16 +1233,8 @@ class ChatViewModel(
         viewModelScope.launch {
             val mcpServers = settingsDataStore.selectedMcpServers.first()
             val tools = settingsDataStore.enabledTools.first()
-            if (mcpServers.isNotEmpty() || tools.isNotEmpty()) {
-                _uiState.update {
-                    it.copy(
-                        selection = it.selection.copy(
-                            selectedMcpServerNames = mcpServers,
-                            enabledTools = tools,
-                        ),
-                    )
-                }
-            }
+            _uiState.update { // FORK-HOOK(mcp-default-on)
+                com.garfiec.librechat.feature.chat.fork.restoreConnectors(it, mcpServers, tools) } // FORK-HOOK(mcp-default-on)
         }
 
         viewModelScope.launch {
@@ -1794,6 +1798,7 @@ class ChatViewModel(
                     agentsLoaded = current.agentsLoaded,
                     mcpServers = current.mcpServers,
                     selectedMcpServerNames = current.selectedMcpServerNames,
+                    connectors = com.garfiec.librechat.fork.mcp.ConnectorState(off = emptySet()), // FORK-HOOK(mcp-default-on)
                     enabledTools = current.enabledTools,
                     // App-wide, behind distinctUntilChanged: dropped here it would never come back.
                     artifactsMode = current.selection.artifactsMode,

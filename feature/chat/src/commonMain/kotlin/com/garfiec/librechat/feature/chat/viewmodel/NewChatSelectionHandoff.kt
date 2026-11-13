@@ -75,6 +75,7 @@ class NewChatSelectionHandoff {
         val modelParameters: ModelParameters? = null,
         /** The tools added on top of the spec the first turn was sent on, so the chat keeps them. */
         val specTools: SpecTools? = null,
+        val mcpOff: Set<String>? = null, // FORK-HOOK(mcp-default-on): per-chat state
     )
 
     private var pending: Selection? = null
@@ -89,9 +90,11 @@ class NewChatSelectionHandoff {
         sentWithoutWorkspaceNotice: Boolean = false,
         modelParameters: ModelParameters? = null,
         specTools: SpecTools? = null,
+        mcpOff: Set<String>? = null, // FORK-HOOK(mcp-default-on)
     ) {
         pending = Selection(
             conversationId = conversationId,
+            mcpOff = mcpOff, // FORK-HOOK(mcp-default-on)
             choice = choice,
             optimisticUserMessage = optimisticUserMessage,
             skillsToggle = skillsToggle,
