@@ -141,6 +141,15 @@ object ForkIcons {
         )
     }
 
+    val EllipsisVertical: ImageVector by lazy {
+        lucide(
+            "EllipsisVertical",
+            "M11 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+            "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+            "M11 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        )
+    }
+
     val FileSearch: ImageVector by lazy {
         lucide(
             "FileSearch",
@@ -210,6 +219,13 @@ object ForkIcons {
             "M12 6v14",
             "M8 8v12",
             "M4 4v16",
+        )
+    }
+
+    val Menu: ImageVector by lazy {
+        lucide(
+            "Menu",
+            "M4 6h16M4 12h16M4 18h16",
         )
     }
 

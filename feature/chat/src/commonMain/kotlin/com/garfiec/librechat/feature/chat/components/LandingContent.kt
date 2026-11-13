@@ -124,9 +124,16 @@ fun LandingContent(
     // The lines under the heading change with it, as the band crosses the heading. A temporary chat
     // is never filed (SendDispatchDelegate), so it claims no project.
     val showsTemporary = headingVeil.crossed
-    val agentLine = if (showsTemporary) temporaryAgentName else selectedAgentName
-    val modelLine = if (showsTemporary) temporaryModel else selectedModel
-    val shownProject = projectName?.takeIf { !showsTemporary }
+    // FORK-HOOK(thread): composer owns identity
+    val agentLine = com.garfiec.librechat.feature.chat.fork.hiddenLandingIdentity(
+        if (showsTemporary) temporaryAgentName else selectedAgentName,
+    )
+    // FORK-HOOK(thread): composer owns model
+    val modelLine = com.garfiec.librechat.feature.chat.fork.hiddenLandingIdentity(
+        if (showsTemporary) temporaryModel else selectedModel,
+    )
+    // FORK-HOOK(thread): keep the landing to greeting and subtitle
+    val shownProject = com.garfiec.librechat.feature.chat.fork.hiddenLandingIdentity(projectName?.takeIf { !showsTemporary })
     val selectModelLabel = stringResource(Res.string.cd_select_model)
     val selectableModifier = Modifier
         .clip(RoundedCornerShape(8.dp))
@@ -177,7 +184,8 @@ fun LandingContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            when (val hero = landingHero(compact = compact, temporary = showsTemporary, heroIcon = heroIcon)) {
+            // FORK-HOOK(thread): text-only greeting
+            when (val hero = landingHero(compact = true, temporary = showsTemporary, heroIcon = heroIcon)) {
                 LandingHero.None -> Unit
                 LandingHero.Temporary -> LandingTile(
                     background = ChatInputDefaults.temporaryWash,
@@ -201,7 +209,8 @@ fun LandingContent(
                 )
             }
 
-            if (!compact) Spacer(modifier = Modifier.height(24.dp))
+            // FORK-HOOK(thread): no orphan hero gap
+            if (!compact && com.garfiec.librechat.feature.chat.fork.ShowLandingHero) Spacer(modifier = Modifier.height(24.dp))
 
             AnimatedContent(
                 targetState = headingVeil.crossed,

@@ -109,6 +109,29 @@ module, `fork/README.md` wins.
 | Cache window control | in. Run on the emulator on native Anthropic and on `Surplus (Claude)` (2026-11-13): countdown from the server's marker, the cycle 1h, 5m, off, an armed send stored as `1h`, arming from the model sheet's Cache window page. Since the composer regrouping it is a quiet "Cache 4:47" in the composer, shown only while a window runs or is armed. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
 | Prices sheet | in. Run on the emulator on `Surplus (Claude)` and the plain `Surplus` row with live data. Opened from the model sheet (More options, Prices) since the composer regrouping. Not run: the dashboard button, Retry, a saved agent, a server without the sidecar, iOS. | none of its own |
 | Composer regrouping (model capsule, model sheet, Add to chat, conversation-only menu, Lucide icons) | in. Five rounds against a design critic (GPT-6 Astra) from device screenshots, 5.5 to 9 out of 10, light, dark and font scale 1.3. Not seen: the composer with the keyboard open (the emulator's test keyboard is invisible), the Liquid Glass style, iOS. | `composer` |
+| Thread and header restyle | in; build, aggregate detekt and focused unit checks recorded in the implementation commit. Device review is pending (light, dark, font scale 1.3); no device or server used here. Native iOS controls and wide headers retain upstream behavior. | `thread` |
+
+### Thread restyle: how it is built
+
+The primary thread uses `fork/ThreadMessage` for layout over upstream's
+`MessageContentAndActions`: user bubbles, unboxed replies, identity-change captions, day breaks,
+and tap-revealed timestamps. Upstream still owns editing, selection, collapsed long messages,
+actions, branches, attachments, tools, steers and feedback. The send-flight header and body slots
+stay attached. `ThreadIdentityScope` supplies the selected live identity and endpoint display
+config; comparison panes opt out and retain upstream labels. Live text still uses upstream's
+streaming renderer, with its quiet caption and aligned sibling cards.
+
+`ThreadTopBar` replaces only narrow Compose chrome, with an opaque background through the status
+inset, plain title (tap to rename), 48 dp controls and the existing overflow/search. A core-ui fork
+helper preserves native iOS bar dispatch and supplies its opaque common underlay; wide bars stay
+upstream. The landing hides its hero and redundant identity lines without replacing its greeting,
+temporary-chat transition, positioning or starters. `ComposerAllModels` partitions whole upstream
+picker groups into usable then key-blocked groups, with one localized setup heading; upstream
+still builds the rows. English and German day/setup strings live in `:fork`.
+
+Font work: `userMessageTextStyle` and `modelReplyTextStyle` in `fork/thread/ThreadRules.kt` return
+the input style unchanged. Both platform markdown renderers route their body style through them;
+existing 16/24 sp typography and the user's size multiplier remain in force.
 
 ### Saved login: what differs from the old fork
 

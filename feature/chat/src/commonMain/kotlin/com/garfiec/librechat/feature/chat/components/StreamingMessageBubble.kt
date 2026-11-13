@@ -116,6 +116,8 @@ private fun ThreadStreamingBubble(
                 vertical = 8.dp,
             ),
     ) {
+        // FORK-HOOK(thread): omit repeated live model caption, keep flight slot
+        if (senderName.isNotBlank()) {
         // Sender row with avatar
         Row(
             modifier = sendFlightReplyHeader(),
@@ -133,15 +135,13 @@ private fun ThreadStreamingBubble(
             }
             Text(
                 text = senderName,
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontWeight = FontWeight.SemiBold,
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelSmall, // FORK-HOOK(thread): quiet live model line
+                color = MaterialTheme.colorScheme.onSurfaceVariant, // FORK-HOOK(thread): quiet live model line
             )
         }
 
         Spacer(modifier = Modifier.height(4.dp))
-
+        } // FORK-HOOK(thread): live caption
         // Streaming content with blinking cursor
         val contentStartPadding = if (showAvatars) 36.dp else 0.dp
         Column(

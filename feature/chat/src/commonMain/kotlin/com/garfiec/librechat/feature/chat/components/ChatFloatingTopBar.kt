@@ -220,7 +220,13 @@ internal fun ChatFloatingTopBar(
         viewModel.closeSearch()
     }
 
-    if (isLiquidGlass) {
+    if (!widePane && com.garfiec.librechat.core.ui.fork.thread.useThreadHeader()) { // FORK-HOOK(thread): plain narrow common bar
+        // FORK-HOOK(thread): retain upstream menu actions
+        com.garfiec.librechat.feature.chat.fork.ThreadTopBar(
+            uiState, barActions, overflowSections, onOverflowItem, onOpenDrawer, showTempChatToggle,
+            openApps, onRename, modifier,
+        )
+    } else if (isLiquidGlass) {
         GlassChatTopBar(
             uiState = uiState,
             actions = barActions,
@@ -324,7 +330,8 @@ private fun GlassChatTopBar(
     )
     AdaptiveTopBar(
         spec = spec,
-        modifier = modifier,
+        // FORK-HOOK(thread): opaque native common underlay
+        modifier = com.garfiec.librechat.core.ui.fork.thread.opaqueThreadHeader(modifier),
         belowBar = {
             AnimatedVisibility(
                 visible = uiState.isSearchOpen,
