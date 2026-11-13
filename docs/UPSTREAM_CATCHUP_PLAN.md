@@ -68,6 +68,9 @@ built itself are dropped.
 - [ ] 7. Mobile gaps against the deployed backend fork (OptMem switches,
       routing and cost data, PDFs as text, web fetch, Markdown import): compare
       with the app code, then decide per item.
+- [ ] 7a. The app check of 2026-11-13 (`docs/APP_CHECK_2026-11-13.md`): decide
+      per bug and improvement whether it is fixed here, behind a hook, or
+      reported upstream. B5 (default-on servers) belongs to step 7.
 - [ ] 8. Device acceptance on the Pixel, then push.
 
 Fork features the operator did not name on 2026-11-13 stay out for now; they
