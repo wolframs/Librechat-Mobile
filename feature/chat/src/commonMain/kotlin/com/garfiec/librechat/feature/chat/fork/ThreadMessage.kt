@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.common.datetime.parseIsoInstantOrNull
@@ -177,7 +178,13 @@ internal fun ThreadMessage(
                             userAvatarUrl = userAvatarUrl, alignImagesEnd = isUser,
                         )
                     }
-                    if (showActions) message.createdAt?.let { MessageTimestamp(it, Modifier.padding(bottom = 12.dp)) }
+                    // Beside the action row, not under it: the row is the last line the thread's rest position
+                    // keeps clear of the composer. With a branch navigator on that side the time goes below.
+                    if (showActions) {
+                        message.createdAt?.let {
+                            MessageTimestamp(it, if (siblingCount > 1) Modifier else Modifier.besideActionRow())
+                        }
+                    }
                 }
             }
         }
@@ -200,3 +207,11 @@ internal fun replyLabel(model: String, endpoint: String?): String {
         com.garfiec.librechat.core.model.endpoint.endpointDisplayName(it, configs[it])
     }).joinToString(" · ")
 }
+
+/** Takes no height and sits on the action row's centre line, at its start. */
+private fun Modifier.besideActionRow(): Modifier = layout { measurable, constraints ->
+    val time = measurable.measure(constraints)
+    layout(time.width, 0) { time.place(0, -(ActionRowHeight.roundToPx() + time.height) / 2) }
+}
+
+private val ActionRowHeight = 40.dp
