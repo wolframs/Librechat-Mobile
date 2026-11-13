@@ -2,6 +2,7 @@ package com.garfiec.librechat.fork.market
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -15,8 +16,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.ui.components.AdaptiveButton
 import com.garfiec.librechat.core.ui.components.AdaptiveDivider
@@ -59,9 +63,16 @@ fun MarketPriceSheet(server: String, model: String, onDismiss: () -> Unit) {
 
 @Composable
 private fun MarketQuote(quote: MarketPrice) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         val unknown = stringResource(Res.string.market_unknown)
-        Text(stringResource(Res.string.market_units), style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(Res.string.market_units), style = MaterialTheme.typography.bodySmall, color = muted())
+        TableRow(
+            "",
+            stringResource(Res.string.market_col_key),
+            stringResource(Res.string.market_col_list),
+            stringResource(Res.string.market_col_off),
+            header = true,
+        )
         PriceLane.entries.forEach { lane ->
             val price = quote.price(lane)
             if (lane != PriceLane.REASONING || price != null) {
@@ -74,35 +85,73 @@ private fun MarketQuote(quote: MarketPrice) {
                 }
                 val estimated = quote.effective?.cacheEstimated == true &&
                     lane in listOf(PriceLane.CACHE_READ, PriceLane.CACHE_WRITE)
-                Text(stringResource(label), style = MaterialTheme.typography.titleSmall)
-                Text(stringResource(Res.string.market_lane, (if (estimated) "≈" else "") + marketUsd(price, unknown),
-                    marketUsd(quote.listPrice(lane), unknown), marketDiscount(price, quote.listPrice(lane), unknown)))
+                val list = quote.listPrice(lane)
+                TableRow(
+                    stringResource(label),
+                    (if (estimated) "≈" else "") + marketUsd(price, unknown),
+                    if (list == null) "–" else marketUsd(list, unknown),
+                    if (list == null) "–" else marketDiscount(price, list, unknown),
+                )
             }
         }
         if (quote.routing?.trustedOnly == true) {
-            Text(stringResource(Res.string.market_routing, quote.hiddenSellers?.toString() ?: unknown))
+            Text(
+                stringResource(Res.string.market_routing, quote.hiddenSellers?.toString() ?: unknown),
+                style = MaterialTheme.typography.bodySmall,
+                color = muted(),
+            )
         }
-        AdaptiveDivider()
-        Text(stringResource(Res.string.market_sellers), style = MaterialTheme.typography.titleMedium)
-        quote.sellers.orEmpty().forEach { seller ->
-            val trust = stringResource(when (seller.trusted) {
-                true -> Res.string.market_trusted
-                false -> Res.string.market_untrusted
-                null -> Res.string.market_unknown
-            })
-            Text(seller.provider ?: unknown, style = MaterialTheme.typography.titleSmall)
-            Text(stringResource(Res.string.market_seller, trust, seller.healthy?.toString() ?: unknown,
-                marketUsd(seller.input, unknown), marketUsd(seller.output, unknown)))
+        val sellers = quote.sellers.orEmpty()
+        if (sellers.isNotEmpty()) {
+            AdaptiveDivider(Modifier.padding(vertical = 6.dp))
+            TableRow(
+                stringResource(Res.string.market_sellers),
+                stringResource(Res.string.market_col_offers),
+                stringResource(Res.string.market_input),
+                stringResource(Res.string.market_output),
+                header = true,
+            )
+            sellers.forEach { seller ->
+                val name = seller.provider ?: unknown
+                TableRow(
+                    if (seller.trusted == false) "$name (${stringResource(Res.string.market_untrusted)})" else name,
+                    seller.healthy?.toString() ?: unknown,
+                    marketUsd(seller.input, unknown),
+                    marketUsd(seller.output, unknown),
+                )
+            }
         }
-        quote.stats?.let { stats ->
-            stats.ttftP50Ms?.let { Text(stringResource(Res.string.market_ttft, marketNumber(it))) }
-            stats.tpsP50?.let { Text(stringResource(Res.string.market_tps, marketNumber(it))) }
-            stats.uptimePct?.let { Text(stringResource(Res.string.market_uptime, marketNumber(it))) }
-            stats.cacheHitRatePct?.let { Text(stringResource(Res.string.market_hits, marketNumber(it))) }
+        val stats = buildList {
+            quote.stats?.ttftP50Ms?.let { add(stringResource(Res.string.market_ttft, marketNumber(it))) }
+            quote.stats?.tpsP50?.let { add(stringResource(Res.string.market_tps, marketNumber(it))) }
+            quote.stats?.uptimePct?.let { add(stringResource(Res.string.market_uptime, marketNumber(it))) }
+            quote.stats?.cacheHitRatePct?.let { add(stringResource(Res.string.market_hits, marketNumber(it))) }
+            (quote.stats?.requests24h ?: quote.requests24h)?.let {
+                add(stringResource(Res.string.market_requests, it.toString()))
+            }
         }
-        (quote.stats?.requests24h ?: quote.requests24h)?.let {
-            Text(stringResource(Res.string.market_requests, it.toString()))
+        if (stats.isNotEmpty()) {
+            AdaptiveDivider(Modifier.padding(vertical = 6.dp))
+            Text(stats.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = muted())
         }
-        Text(stringResource(Res.string.market_quote_note), style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(Res.string.market_quote_note), style = MaterialTheme.typography.bodySmall, color = muted())
     }
 }
+
+@Composable
+private fun muted() = MaterialTheme.colorScheme.onSurfaceVariant
+
+/** One row of four cells: a name, then three right-aligned figures. */
+@Composable
+private fun TableRow(name: String, first: String, second: String, third: String, header: Boolean = false) {
+    val style = if (header) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium
+    val color = if (header) muted() else MaterialTheme.colorScheme.onSurface
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(name, Modifier.weight(NAME_WEIGHT), style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        listOf(first, second, third).forEach { cell ->
+            Text(cell, Modifier.weight(1f), style = style, color = color, textAlign = TextAlign.End, maxLines = 1)
+        }
+    }
+}
+
+private const val NAME_WEIGHT = 1.5f

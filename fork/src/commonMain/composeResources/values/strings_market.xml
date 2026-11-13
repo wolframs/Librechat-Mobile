@@ -13,16 +13,18 @@
     <string name="market_cache_read">Cache read</string>
     <string name="market_cache_write">Cache write</string>
     <string name="market_reasoning">Reasoning</string>
-    <string name="market_lane">Your key: %1$s · List: %2$s · Discount: %3$s</string>
-    <string name="market_routing">Trusted sellers only · Hidden seller families: %1$s</string>
+    <string name="market_routing">Trusted sellers only; %1$s seller families hidden.</string>
     <string name="market_sellers">Seller families</string>
     <string name="market_trusted">trusted</string>
     <string name="market_untrusted">not trusted</string>
-    <string name="market_seller">%1$s · Healthy offers: %2$s · Input: %3$s · Output: %4$s</string>
-    <string name="market_ttft">Time to first token (median): %1$s ms</string>
-    <string name="market_tps">Tokens per second (median): %1$s</string>
-    <string name="market_uptime">Uptime: %1$s%%</string>
-    <string name="market_hits">Cache hit rate: %1$s%%</string>
-    <string name="market_requests">Requests in 24 hours: %1$s</string>
+    <string name="market_ttft">First token %1$s ms</string>
+    <string name="market_tps">%1$s tokens/s</string>
+    <string name="market_uptime">Uptime %1$s%</string>
+    <string name="market_hits">Cache hits %1$s%</string>
+    <string name="market_requests">%1$s requests in 24 h</string>
     <string name="market_quote_note">Current offers, not settled charges. Routing and cache hits may vary per request.</string>
+    <string name="market_col_key">Your key</string>
+    <string name="market_col_list">List</string>
+    <string name="market_col_off">Off</string>
+    <string name="market_col_offers">Offers</string>
 </resources>

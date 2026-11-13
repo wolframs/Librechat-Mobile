@@ -107,5 +107,5 @@ fun marketUsd(value: Double?, unknown: String): String = when {
 fun marketDiscount(price: Double?, list: Double?, unknown: String): String {
     if (price == null || list == null) return unknown
     if (!price.isFinite() || !list.isFinite() || price < 0 || list <= 0) return unknown
-    return "${marketNumber((1 - price / list) * 100)}%"
+    return "${round((1 - price / list) * 100).toLong()}%"
 }

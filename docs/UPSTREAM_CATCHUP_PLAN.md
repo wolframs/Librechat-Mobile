@@ -62,7 +62,8 @@ built itself are dropped.
         in the ledger), at parity with the web pill of 2026-11-11
         (Claude on OpenRouter rows, `extendedCacheTTL` from the server, the
         marketplace caveat, arm cycle 1h, 5m, off).
-  - [ ] 6d. Prices and costs panel, if the new chat header takes it cleanly.
+  - [x] 6d. Prices and costs: a sheet opened from the fork's gutter, no header
+        or menu hook needed.
   - [x] 6e. Upgrade test on the emulator (2026-11-13): old fork build signed in,
         new build over it, opens signed in, database on upstream's v15. Still
         to do on the Pixel, with the build under the old debug app id.

@@ -13,16 +13,18 @@
     <string name="market_cache_read">Cache lesen</string>
     <string name="market_cache_write">Cache schreiben</string>
     <string name="market_reasoning">Denken</string>
-    <string name="market_lane">Dein Schlüssel: %1$s · Liste: %2$s · Rabatt: %3$s</string>
-    <string name="market_routing">Nur vertrauenswürdige Anbieter · Ausgeblendete Anbieterfamilien: %1$s</string>
+    <string name="market_routing">Nur vertrauenswürdige Anbieter; %1$s Anbieterfamilien ausgeblendet.</string>
     <string name="market_sellers">Anbieterfamilien</string>
     <string name="market_trusted">vertrauenswürdig</string>
     <string name="market_untrusted">nicht vertrauenswürdig</string>
-    <string name="market_seller">%1$s · Intakte Angebote: %2$s · Eingabe: %3$s · Ausgabe: %4$s</string>
-    <string name="market_ttft">Zeit bis zum ersten Token (Median): %1$s ms</string>
-    <string name="market_tps">Token pro Sekunde (Median): %1$s</string>
-    <string name="market_uptime">Verfügbarkeit: %1$s%%</string>
-    <string name="market_hits">Cache-Trefferrate: %1$s%%</string>
-    <string name="market_requests">Anfragen in 24 Stunden: %1$s</string>
+    <string name="market_ttft">Erstes Token %1$s ms</string>
+    <string name="market_tps">%1$s Tokens/s</string>
+    <string name="market_uptime">Verfügbar %1$s%</string>
+    <string name="market_hits">Cache-Treffer %1$s%</string>
+    <string name="market_requests">%1$s Anfragen in 24 h</string>
     <string name="market_quote_note">Aktuelle Angebote, keine abgerechneten Kosten. Routing und Cache-Treffer können je Anfrage variieren.</string>
+    <string name="market_col_key">Dein Key</string>
+    <string name="market_col_list">Liste</string>
+    <string name="market_col_off">Rabatt</string>
+    <string name="market_col_offers">Angebote</string>
 </resources>

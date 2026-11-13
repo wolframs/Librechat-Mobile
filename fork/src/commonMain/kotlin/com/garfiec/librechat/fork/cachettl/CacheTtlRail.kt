@@ -28,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -43,6 +42,7 @@ import com.garfiec.librechat.core.model.EndpointConfig
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
 import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
+import com.garfiec.librechat.core.ui.theme.statusColors
 import com.garfiec.librechat.fork.resources.Res
 import com.garfiec.librechat.fork.resources.cache_ttl_armed
 import com.garfiec.librechat.fork.resources.cache_ttl_close
@@ -132,9 +132,6 @@ fun <T> CacheTtlRail(
 
 private enum class PillTone { IDLE, RUNNING, ARMED_SHORT, ARMED_LONG }
 
-private val ArmedLong = Color(0xFFF59E0B)
-private val ArmedShort = Color(0xFF38A8F8)
-private val Running = Color(0xFF10B981)
 private val RailWidth = 28.dp
 private val RailLength = 104.dp
 
@@ -151,9 +148,9 @@ private fun CacheTtlPill(
     modifier: Modifier = Modifier,
 ) {
     val accent = when (tone) {
-        PillTone.ARMED_LONG -> ArmedLong
-        PillTone.ARMED_SHORT -> ArmedShort
-        PillTone.RUNNING -> Running
+        PillTone.ARMED_LONG -> statusColors().warning
+        PillTone.ARMED_SHORT -> statusColors().info
+        PillTone.RUNNING -> statusColors().success
         PillTone.IDLE -> MaterialTheme.colorScheme.outline
     }
     val armed = tone == PillTone.ARMED_LONG || tone == PillTone.ARMED_SHORT
