@@ -810,7 +810,9 @@ class ChatViewModel(
         surfaceModelSheet = { reason -> surfaceModelSheet(reason) },
     )
 
+    val cacheTtl = com.garfiec.librechat.fork.cachettl.CacheTtlSession() // FORK-HOOK(cache-ttl): conversation-local arm
     private val sendDispatchDelegate = SendDispatchDelegate(
+        cacheTtl = cacheTtl, // FORK-HOOK(cache-ttl): share rail arm with direct sends
         handle = SendDispatchHandle(stateHandle),
         chatRepository = chatRepository,
         draftRepository = draftRepository,

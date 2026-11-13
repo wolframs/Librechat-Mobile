@@ -561,6 +561,7 @@ val dataModule = module {
 
     single<MessageRepository> {
         MessageRepositoryImpl(
+            cacheTtlStore = get(), // FORK-HOOK(cache-ttl): fork-owned marker store
             messagesApi = get(),
             messageDao = get(),
             toolCallPartDao = get(),

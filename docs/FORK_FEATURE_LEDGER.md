@@ -101,6 +101,7 @@ module, `fork/README.md` wins.
 | Feature | State | Hooks (`fork/scripts/fork-hooks.py --list`) |
 |---|---|---|
 | `:fork` module | in | `module` |
+| Cache TTL rail, one-shot direct-send arm, branch markers and marketplace caveat | in; Android build/unit checks recorded in `docs/CACHE_TTL_IMPLEMENTATION.md`; device and iOS acceptance pending | `cache-ttl` |
 | Guard for a cache database with the fork's old schema (Android) | in, not yet run against an old install | `legacy-db` |
 | Build under the old debug app id | in, not yet built that way | `legacy-debug-id` |
 

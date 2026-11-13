@@ -558,6 +558,15 @@ fun ChatScreen(
                         )
                     }
 
+                    com.garfiec.librechat.fork.cachettl.CacheTtlRail( // FORK-HOOK(cache-ttl)
+                        viewModel.cacheTtl, uiState.selectedEndpoint, uiState.selectedModel, // FORK-HOOK(cache-ttl)
+                        uiState.endpointConfigs, uiState.modelParameters.dynamicValues, // FORK-HOOK(cache-ttl)
+                        uiState.selectedAgentProvider, uiState.selection.selectedAgentModel, // FORK-HOOK(cache-ttl)
+                        uiState.selection.selectedAgentReasoning, viewModel.uiState, // FORK-HOOK(cache-ttl)
+                        { it.displayMessages.map { node -> node.message } }, // FORK-HOOK(cache-ttl)
+                        Modifier.align(Alignment.TopStart).padding(top = topContentPadding, start = 8.dp), // FORK-HOOK(cache-ttl)
+                    ) // FORK-HOOK(cache-ttl)
+
                     // ChatInput overlays at the bottom so gradient shows content behind
                     val isAnyStreaming = uiState.isStreaming ||
                         uiState.comparisonState.primaryIsStreaming ||

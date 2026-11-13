@@ -8,6 +8,8 @@ import kotlinx.serialization.json.JsonPrimitive
 
 @Serializable
 data class EndpointConfig(
+    val provider: String? = null, // FORK-HOOK(cache-ttl): Anthropic wire format
+    val extendedCacheTTL: Boolean? = null, // FORK-HOOK(cache-ttl): measured 1h support
     val type: String? = null,
     val order: Int? = null,
     val iconURL: String? = null,

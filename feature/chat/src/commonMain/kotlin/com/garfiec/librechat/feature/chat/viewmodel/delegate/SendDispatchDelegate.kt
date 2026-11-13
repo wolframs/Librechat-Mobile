@@ -97,6 +97,8 @@ class SendDispatchDelegate(
     private val codeWorkspace: () -> CodeWorkspaceSubmission? = { CodeWorkspaceSubmission.NONE },
     /** `CodeWorkspaceDelegate.sendsWithoutWorkspace`: this send seals the chat "No workspace". */
     private val sendsWithoutWorkspace: () -> Boolean = { false },
+    private val cacheTtl: com.garfiec.librechat.fork.cachettl.CacheTtlSession = // FORK-HOOK(cache-ttl): staged one-shot
+        com.garfiec.librechat.fork.cachettl.CacheTtlSession(), // FORK-HOOK(cache-ttl): default for isolated callers
 ) {
     /**
      * Staged chips a new chat's first send already held back, handed to this chat
@@ -444,6 +446,7 @@ class SendDispatchDelegate(
      * Returns whether the turn was sent.
      */
     @OptIn(ExperimentalUuidApi::class)
+    @Suppress("LongMethod") // FORK-HOOK(cache-ttl): the marked request argument adds lines to the upstream method
     fun doSendWithSpec(baseSpec: QueuedMessage, fromComposer: Boolean = false): Boolean {
         val fileRefs = baseSpec.attachments.map { it.toFileReference() }
         val hasFiles = fileRefs.isNotEmpty()
@@ -555,7 +558,15 @@ class SendDispatchDelegate(
             addedConvo = effectiveAddedConvo,
             ephemeralAgent = spec.ephemeralAgent,
             isTemporary = spec.isTemporary,
-            modelParams = spec.modelParamsPayload,
+            modelParams = cacheTtl.payload( // FORK-HOOK(cache-ttl)
+                spec.modelParamsPayload, // FORK-HOOK(cache-ttl)
+                com.garfiec.librechat.fork.cachettl.cacheTtlRoute( // FORK-HOOK(cache-ttl)
+                    spec.endpoint, spec.model, handle.state.endpointConfigs, // FORK-HOOK(cache-ttl)
+                    handle.state.modelParameters.dynamicValues, handle.state.selectedAgentProvider, // FORK-HOOK(cache-ttl)
+                    handle.state.selection.selectedAgentModel, handle.state.selection.selectedAgentReasoning, // FORK-HOOK(cache-ttl)
+                ), // FORK-HOOK(cache-ttl)
+                fromComposer, // FORK-HOOK(cache-ttl)
+            ), // FORK-HOOK(cache-ttl)
             quotes = spec.quotes.takeIf { it.isNotEmpty() },
             manualSkills = spec.manualSkills.takeIf { it.isNotEmpty() },
             reasoningOverride = spec.reasoningOverride,
