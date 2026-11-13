@@ -3,8 +3,8 @@
     <string name="fonts_interface">Interface</string>
     <string name="fonts_you">You</string>
     <string name="fonts_model">Model</string>
-    <string name="fonts_same">Same as interface</string>
-    <string name="fonts_system">System font</string>
+    <string name="fonts_same">As interface</string>
+    <string name="fonts_system">System</string>
     <string name="fonts_spacing">Paragraph spacing</string>
     <string name="fonts_compact">Compact</string>
     <string name="fonts_comfortable">Comfortable</string>

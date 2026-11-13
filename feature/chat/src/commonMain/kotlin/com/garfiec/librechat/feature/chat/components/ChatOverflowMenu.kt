@@ -117,9 +117,8 @@ internal fun ChatOverflowMenu(
                 val dragTarget = Modifier.menuDragTarget(dragSelection, select)
                 when (item) {
                     // FORK-HOOK(fonts): text entry
-                    ChatOverflowItem.TEXT -> DropdownMenuItem(
-                        text = { Text(com.garfiec.librechat.fork.fonts.textLabel()) }, onClick = select, modifier = dragTarget,
-                    )
+                    ChatOverflowItem.TEXT -> OverflowItem(com.garfiec.librechat.fork.fonts.textLabel(),
+                        com.garfiec.librechat.fork.icons.ForkIcons.ALargeSmall, select, dragTarget)
                     ChatOverflowItem.OPEN_APPS ->
                         OverflowItem(stringResource(Res.string.mcp_app_open_apps, openApps), Icons.Outlined.Apps, select, dragTarget)
                     ChatOverflowItem.SEARCH ->
