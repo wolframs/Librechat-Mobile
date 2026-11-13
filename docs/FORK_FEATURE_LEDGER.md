@@ -4,8 +4,10 @@ Read before re-landing a fork feature on upstream's code, and before the next
 upstream catch-up. Update it in the same commit that re-lands, drops or changes
 a fork feature. The plan this belongs to is `docs/UPSTREAM_CATCHUP_PLAN.md`.
 
-What it compares: the fork's `develop` at `e8acf946` against `upstream/develop`
-at `08bca78f`, merge base `7b2311af`. The three appendices are the area reports
+What it compares: the fork's `develop` as it was at `e8acf946` (tag
+`fork-before-catchup-2026-11`; the old implementation of every feature below is
+readable there with `git show fork-before-catchup-2026-11:<path>`) against
+`upstream/develop` at `08bca78f`, merge base `7b2311af`. The three appendices are the area reports
 (chat; auth, settings and shell; data and the rest) with file paths, symbols and
 the hook points per feature. They were written by three sub agents reading both
 trees; the database section was re-checked by comparing the schema files.
@@ -123,7 +125,7 @@ module, `fork/README.md` wins.
 - Messages paint from Room and refresh from the network, and Room has no column for the marker. A
   fork store in `core/data` (`fork/cachettl/CacheTtlMarkerStore`) records each reply's `cacheTTL`
   as it arrives (fetch, refresh, stream final) under `acct:<id>:cache_ttl_markers` in DataStore, at
-  most 2,000 per account; the account purge removes it. The rail takes the last marked reply on the
+  most 500 per account; the account purge removes it. The rail takes the last marked reply on the
   displayed branch.
 - The arm is in memory, per chat view model. Only a normal send from the composer consumes it, as
   the top-level request field `cacheTTL`. Regenerate, continue, edit and a queued message leave it

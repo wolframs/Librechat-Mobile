@@ -73,7 +73,9 @@ built itself are dropped.
 - [ ] 7a. The app check of 2026-11-13 (`docs/APP_CHECK_2026-11-13.md`): decide
       per bug and improvement whether it is fixed here, behind a hook, or
       reported upstream. B5 (default-on servers) belongs to step 7.
-- [ ] 8. Device acceptance on the Pixel, then push.
+- [ ] 8. Device acceptance on the Pixel (real password manager; the build under
+      the old debug app id over the existing install). Pushed to both remotes
+      on 2026-11-13 at the operator's word, before this step.
 
 Fork features the operator did not name on 2026-11-13 stay out for now; they
 are listed in the ledger with sizes.

@@ -9,6 +9,7 @@ cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/
 cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/SendDispatchDelegate.kt	12
 legacy-db	core/data/src/androidMain/kotlin/com/garfiec/librechat/core/data/di/DataPlatformModule.android.kt	1
 legacy-debug-id	app/build.gradle.kts	1
+module	.gitignore	1
 module	build-logic/convention/src/main/kotlin/KmpFeatureConventionPlugin.kt	1
 module	settings.gradle.kts	1
 module	shared/build.gradle.kts	1

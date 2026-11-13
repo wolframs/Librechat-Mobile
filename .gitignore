@@ -48,5 +48,5 @@ Thumbs.db
 __pycache__/
 # Build-file backups the small-screens render harness keeps while it is applied
 .small-screens-render.bak*
-# Local Android Studio / toolchain state (fork)
+# FORK-HOOK(module): local Android Studio / toolchain state
 gradle/gradle-daemon-jvm.properties

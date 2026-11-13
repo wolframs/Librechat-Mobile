@@ -29,6 +29,9 @@ class CacheTtlMarkerStore(private val dataStore: DataStore<Preferences>) {
         suspendRunCatching {
             dataStore.edit { prefs ->
                 val previous = decode(prefs[key(accountId)]).associateBy { it.messageId }
+                // The preferences file is shared with every setting and is rewritten whole, so a fetch
+                // that brings nothing new must leave it untouched.
+                if (candidates.all { previous[it.messageId]?.ttl == it.cacheTTL }) return@edit
                 val now = Clock.System.now().toEpochMilliseconds()
                 val incoming = candidates.map { message ->
                     val created = message.createdAt?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
@@ -36,7 +39,7 @@ class CacheTtlMarkerStore(private val dataStore: DataStore<Preferences>) {
                         previous[message.messageId]?.anchorMillis ?: created?.takeIf { it <= now } ?: now)
                 }
                 val merged = (previous.values + incoming).associateBy { it.messageId }.values
-                    .sortedByDescending { it.anchorMillis }.take(2000)
+                    .sortedByDescending { it.anchorMillis }.take(MAX_MARKERS)
                 prefs[key(accountId)] = Json.encodeToString(merged)
             }
         }
@@ -45,4 +48,9 @@ class CacheTtlMarkerStore(private val dataStore: DataStore<Preferences>) {
     private fun key(account: String) = stringPreferencesKey("acct:$account:cache_ttl_markers")
     private fun decode(raw: String?): List<CacheTtlMarker> =
         raw?.let { runCatching { Json.decodeFromString<List<CacheTtlMarker>>(it) }.getOrNull() }.orEmpty()
+
+    private companion object {
+        /** Newest first. An older chat gets its markers back when it is opened and refetched. */
+        const val MAX_MARKERS = 500
+    }
 }
