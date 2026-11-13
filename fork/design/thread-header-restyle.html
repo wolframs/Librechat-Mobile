@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 14px; }
+  figure { margin: 0; }
+  figcaption { font: 600 13px var(--font-sans); color: var(--foreground); margin: 0 0 6px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  figcaption span { font-weight: 400; opacity: .7; }
+  .phone { --bg:#FBFAFD; --surf:#EFEEF4; --ink:#1B1B21; --dim:#6A6A77; --pri:#0058C0; --line:#DEDDE6;
+    background: var(--bg); color: var(--ink); border-radius: 22px; border: 1px solid var(--line);
+    font: 12.5px/1.45 Roboto, var(--font-sans); height: 460px; position: relative; overflow: hidden; }
+  .old { --bg:#FAF9FF; --surf:#E8E7F1; }
+  .bar { display:flex; align-items:center; gap:10px; padding: 14px 14px 8px; }
+  .bar .t { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ic { width:20px; text-align:center; font-size:15px; color:var(--ink); flex:none; }
+  .grow { flex:1; }
+  .pillbtn { width:30px; height:30px; border-radius:50%; background:var(--surf); border:1px solid var(--line); display:grid; place-items:center; font-size:13px; flex:none; }
+  .pilltitle { background:var(--surf); border:1px solid var(--line); border-radius:15px; padding:6px 11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .thread { padding: 4px 14px; display:flex; flex-direction:column; gap:14px; }
+  .me { align-self:flex-end; background:var(--surf); border-radius:16px 16px 4px 16px; padding:8px 12px; max-width:78%; }
+  .ai { max-width:100%; }
+  .ai .who { font-size:10.5px; color:var(--dim); margin-bottom:2px; }
+  .day { align-self:center; font-size:10px; color:var(--dim); }
+  .oldmsg { display:flex; gap:8px; }
+  .av { width:22px; height:22px; border-radius:50%; background:#7B8CFF; flex:none; }
+  .av.a { background:#9A5B3C; }
+  .oldmsg b { font-weight:600; } .oldmsg small { color:var(--dim); margin-left:6px; font-size:10px; }
+  .composer { position:absolute; left:10px; right:10px; bottom:12px; background:var(--surf); border-radius:20px; padding:10px 10px 8px; }
+  .composer .ph { color:var(--dim); padding: 0 4px 10px; }
+  .row { display:flex; align-items:center; gap:8px; }
+  .chip { background:var(--bg); border-radius:13px; padding:5px 10px; white-space:nowrap; }
+  .chip small { color:var(--dim); }
+  .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#1E9E62; margin-right:4px; vertical-align:middle; }
+  .hero { position:absolute; left:0; right:0; top:150px; text-align:center; }
+  .hero h3 { margin:0 0 4px; font: 600 21px Roboto, sans-serif; }
+  .hero p { margin:0; color:var(--dim); }
+  .circle { width:46px; height:46px; border-radius:50%; background:#9A5B3C; color:#fff; font-weight:700; display:grid; place-items:center; margin:0 auto 10px; }
+  .sheet { position:absolute; inset:38px 0 0 0; background:var(--bg); border-radius:20px 20px 0 0; padding:10px 12px; border-top:1px solid var(--line); }
+  .sheet h4 { margin:2px 0 10px; font: 600 13px Roboto, sans-serif; text-align:center; }
+  .search { background:var(--surf); border-radius:12px; padding:8px 11px; color:var(--dim); margin-bottom:10px; }
+  .sec { font-size:10.5px; color:var(--dim); margin: 8px 4px 4px; }
+  .card { background:var(--surf); border-radius:12px; overflow:hidden; }
+  .li { display:flex; align-items:center; padding:8px 11px; border-top:1px solid var(--bg); }
+  .li:first-child { border-top:0; }
+  .li .r { margin-left:auto; color:var(--dim); }
+  .li .ok { margin-left:auto; color:var(--pri); font-weight:700; }
+  .note { font: 12px/1.45 var(--font-sans); color: var(--foreground); opacity:.8; margin: 4px 4px 0; }
+</style>
+<div class="grid">
+  <figure>
+    <figcaption>Now <span>pills, avatars, a name and time on every line</span></figcaption>
+    <div class="phone old">
+      <div class="bar"><div class="pillbtn">☰</div><div class="pilltitle">Single Word Reply Request</div><div class="grow"></div><div class="pillbtn">⋮</div></div>
+      <div class="thread" style="gap:9px">
+        <div class="oldmsg"><div class="av"></div><div><b>Claude Test</b><small>1h ago</small><br>Reply with the single word: pong</div></div>
+        <div class="oldmsg"><div class="av a"></div><div><b>Surplus (Claude)</b><small>1h ago</small><br>pong</div></div>
+        <div class="oldmsg"><div class="av"></div><div><b>Claude Test</b><small>1h ago</small><br>meow?</div></div>
+        <div class="oldmsg"><div class="av a"></div><div><b>Surplus (Claude)</b><small>1h ago</small><br>Meow! 🐱</div></div>
+      </div>
+      <div class="composer"><div class="ph">Message</div><div class="row"><span>＋</span><div class="chip">Haiku 5.5 <small>High</small></div><div class="chip"><span class="dot"></span>4:47</div><div class="grow"></div><span>🎙</span></div></div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed thread and header <span>the words carry it</span></figcaption>
+    <div class="phone">
+      <div class="bar"><div class="ic">☰</div><div class="t">Single Word Reply Request</div><div class="grow"></div><div class="ic">⋮</div></div>
+      <div class="thread">
+        <div class="day">Today</div>
+        <div class="me">Reply with the single word: pong</div>
+        <div class="ai"><div class="who">Haiku 5.5 · Surplus (Claude)</div>pong</div>
+        <div class="me">meow?</div>
+        <div class="ai">Meow! 🐱</div>
+      </div>
+      <div class="composer"><div class="ph">Message</div><div class="row"><span>＋</span><div class="chip">Haiku 5.5 <small>High</small></div><div class="chip"><span class="dot"></span>4:47</div><div class="grow"></div><span>🎙</span></div></div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed landing <span>no brown circle, no repeated model</span></figcaption>
+    <div class="phone">
+      <div class="bar"><div class="ic">☰</div><div class="grow"></div><div class="ic" title="Temporary chat">◌</div></div>
+      <div class="hero"><h3>Good evening</h3><p>How can I help you today?</p></div>
+      <div class="composer"><div class="ph">Message</div><div class="row"><span>＋</span><div class="chip">Haiku 5.5 <small>High</small></div><div class="grow"></div><span>🎙</span></div></div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed "All models" <span>what you can use comes first</span></figcaption>
+    <div class="phone">
+      <div class="sheet">
+        <h4>All models</h4>
+        <div class="search">Search 320 models</div>
+        <div class="sec">Surplus (Claude) · 20</div>
+        <div class="card"><div class="li">Fable 5.2<span class="r">☆</span></div><div class="li">Opus 5.5<span class="r">☆</span></div><div class="li">Haiku 5.5<span class="ok">✓</span></div></div>
+        <div class="sec">Anthropic · 11</div>
+        <div class="card"><div class="li">Fable 5<span class="r">☆</span></div><div class="li">Haiku 4.5<span class="r">☆</span></div></div>
+        <div class="sec">Surplus · 285</div>
+        <div class="card"><div class="li">deepseek-v4.1-flash<span class="r">★</span></div></div>
+        <div class="sec">Set up providers</div>
+        <div class="card"><div class="li">OpenAI, Google, xAI, Assistants<span class="r">Add key ›</span></div></div>
+      </div>
+    </div>
+  </figure>
+</div>
+<p class="note">In the proposed thread a reply names its model once, when it changes; the time shows at day breaks and on a tap. Avatars and the title pill are gone. All of this is upstream's own screen, so it means more and larger hooks than the composer work.</p>
