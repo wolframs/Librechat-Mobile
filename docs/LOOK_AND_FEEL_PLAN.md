@@ -22,9 +22,9 @@ Delete this file when the last step is ticked.
 - [x] 0. Pixel: the build under the old app id installed over his app
       (same signing key), it starts, the database is on upstream's v15.
       His part: sign in, save and fill a login with his password manager.
-- [ ] 1. Connectors: default-on servers shown and switchable per chat
+- [x] 1. Connectors: default-on servers shown and switchable per chat
       (`defaultOn`, `mcpOff`), and the first-message bug. Feature id `mcp-default-on`.
-- [ ] 2. Restyle: header, thread, landing, order of the full model list.
+- [x] 2. Restyle: header, thread, landing, order of the full model list.
       Feature id `thread`.
 - [ ] 3. Reading settings, feature id `fonts`: fonts in three slots as on the
       web UI (interface, you, model), six bundled families plus the system
