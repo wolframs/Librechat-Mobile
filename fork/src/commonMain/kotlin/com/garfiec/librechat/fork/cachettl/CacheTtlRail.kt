@@ -37,14 +37,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import com.garfiec.librechat.core.common.identity.AccountState.Resolved
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.data.fork.cachettl.CacheTtlMarkerStore
 import com.garfiec.librechat.core.model.EndpointConfig
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
 import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
-import com.garfiec.librechat.fork.market.MarketApi
 import com.garfiec.librechat.fork.resources.Res
 import com.garfiec.librechat.fork.resources.cache_ttl_armed
 import com.garfiec.librechat.fork.resources.cache_ttl_close
@@ -77,21 +75,16 @@ fun <T> CacheTtlRail(
     state: StateFlow<T>,
     path: (T) -> List<Message>,
     modifier: Modifier = Modifier,
+    marketplace: Boolean = false,
 ) {
     val route = cacheTtlRoute(endpoint, model, configs, parameters, agentProvider, agentModel, agentParameters)
     LaunchedEffect(route.canExtend) { session.reconcile(route.canExtend) }
     if (!route.shown) return
     val store = koinInject<CacheTtlMarkerStore>()
     val accounts = koinInject<ActiveAccountProvider>()
-    val market = koinInject<MarketApi>()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val markers by remember(store, accounts) { store.observe(accounts) }.collectAsState(emptyList())
     val currentPath by remember(state) { state.map(path).distinctUntilChanged() }.collectAsState(path(state.value))
-    val account by accounts.state.collectAsState()
-    var marketplaces by remember(account) { mutableStateOf(emptySet<String>()) }
-    LaunchedEffect(account) {
-        marketplaces = if ((account as? Resolved)?.id != null) market.endpoints() else emptySet()
-    }
     var now by remember { mutableLongStateOf(Clock.System.now().toEpochMilliseconds()) }
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -130,7 +123,7 @@ fun <T> CacheTtlRail(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(if (route.canExtend) Res.string.cache_ttl_help else Res.string.cache_ttl_readonly))
-                    if (route.endpoint in marketplaces) Text(stringResource(Res.string.cache_ttl_market))
+                    if (marketplace) Text(stringResource(Res.string.cache_ttl_market))
                 }
             },
         )

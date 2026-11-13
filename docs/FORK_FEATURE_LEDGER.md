@@ -105,6 +105,7 @@ module, `fork/README.md` wins.
 | Build under the old debug app id | in, not yet built that way | `legacy-debug-id` |
 | Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. The emulator has no password manager, so no credential was actually saved or picked: that needs the Pixel. iOS has no-op actuals. | `saved-login` |
 | Cache TTL rail | in. On the emulator 2026-11-13, native Anthropic: countdown from the server's marker on an old chat, the cycle 1h, 5m, off, and one send with 1h armed that the server stored as `1h` and the rail showed as 60m. Same day on `Surplus (Claude)`: armed send stored as `1h`, the next unarmed send as `5m`, and the explanation carried the marketplace note. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
+| Prices and costs | in; `:app:assembleFossDebug` and `:fork:testDebugUnitTest` pass (four market tests). Chat detekt passes; fork detekt reports three pre-existing cache-rail colors. Device and iOS acceptance pending. | existing `cache-ttl` gutter hook hosts `market-prices`; no new upstream hook lines |
 
 ### Saved login: what differs from the old fork
 
@@ -130,6 +131,16 @@ module, `fork/README.md` wins.
 - The rail is a sideways pill, 28 x 104 dp, in the thread's left gutter below the header, as the
   fork had it before. A tap cycles; a hold opens the explanation, with the marketplace caveat when
   the server's `/cost/markets/endpoints` lists the endpoint.
+
+### Prices and costs: how it is built
+
+- `:fork` `market/` owns the sidecar wire types, authenticated calls, sheet state and Adaptive sheet.
+- The existing gutter hook calls `ChatGutter`: cache and price controls have independent visibility;
+  marketplace discovery uses the cache route's endpoint and saved agents use their own model.
+- Opening or Retry fetches one quote, with no polling. Account/server/model changes discard the sheet;
+  absent routes hide the entry, and quote failures offer Retry. No Room changes.
+- The sheet shows effective prices with per-lane best fallback, list comparisons, sellers and available
+  stats. Its browser link adds no credentials and explains the dashboard's separate sign-in.
 
 ---
 
