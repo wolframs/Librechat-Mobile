@@ -14,7 +14,6 @@ android {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.datastore.preferences)
             implementation(project(":core:ui"))
             implementation(project(":core:data"))
             implementation(project(":core:model"))
@@ -27,6 +26,8 @@ kotlin {
             implementation(libs.lifecycle.viewmodel.compose.kmp)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kermit)
+            implementation(libs.datastore.preferences)
+            implementation(libs.ktor.client.core)
         }
         androidMain.dependencies {
             implementation(libs.fork.credentials)

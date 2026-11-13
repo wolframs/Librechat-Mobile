@@ -1277,7 +1277,8 @@ private data class AgentViewFacts(
             provider = agent.provider,
             conversationStarters = agent.conversationStarters,
             model = agent.model,
-            reasoning = reasoningParameters(agent.modelParameters),
+            reasoning = reasoningParameters(agent.modelParameters) + // FORK-HOOK(cache-ttl): saved agent caching flag
+                com.garfiec.librechat.fork.cachettl.agentCacheParameters(agent.modelParameters), // FORK-HOOK(cache-ttl): agent flag
         )
 
         /** What [selection] currently shows. */

@@ -46,6 +46,8 @@ class MessageRepositoryImpl(
     private val activeAccountProvider: ActiveAccountProvider,
     private val roster: AccountRoster,
     private val dispatcher: CoroutineDispatcher,
+    private val cacheTtlStore: // FORK-HOOK(cache-ttl): marker sidecar
+        com.garfiec.librechat.core.data.fork.cachettl.CacheTtlMarkerStore? = null, // FORK-HOOK(cache-ttl): optional in tests
 ) : MessageRepository {
 
     override fun observeMessages(conversationId: String): Flow<List<Message>> =
@@ -61,6 +63,7 @@ class MessageRepositoryImpl(
             val accountId = activeAccountProvider.currentAccountId()?.value
             val messages = messagesApi.getMessages(conversationId, toolPreviews)
             if (accountId != null) {
+                cacheTtlStore?.remember(accountId, messages) // FORK-HOOK(cache-ttl): network refresh markers
                 messageDao.upsertAllIndexed(messages.entitiesFor(accountId))
             }
             messages
@@ -179,6 +182,7 @@ class MessageRepositoryImpl(
         // null-stamped row is invisible to every account-filtered read and unreapable by the scoped
         // logout purge, and resurrecting a removed account's rows would leak purged data.
         val accountId = resolveWriteAccountId(originAccount, activeAccountProvider, roster) ?: return
+        cacheTtlStore?.remember(accountId, messages) // FORK-HOOK(cache-ttl): stream final markers
         messageDao.upsertAllIndexed(messages.entitiesFor(accountId))
     }
 
@@ -205,6 +209,7 @@ class MessageRepositoryImpl(
             val accountId = resolveWriteAccountId(originAccount, activeAccountProvider, roster)
             val messages = messagesApi.getMessages(conversationId, toolPreviews)
             if (accountId != null) {
+                cacheTtlStore?.remember(accountId, messages) // FORK-HOOK(cache-ttl): authoritative refresh markers
                 // Full replace: delete stale cache then insert fresh server data (delete leg scoped
                 // to account). NonCancellable so a cancelled caller cannot abandon the thread between
                 // the delete and the insert legs — the transaction would roll back, but this keeps the

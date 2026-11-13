@@ -1,4 +1,12 @@
 # feature<TAB>file<TAB>hook lines. Written by fork/scripts/fork-hooks.py --write.
+cache-ttl	core/data/src/commonMain/kotlin/com/garfiec/librechat/core/data/di/DataModule.kt	1
+cache-ttl	core/data/src/commonMain/kotlin/com/garfiec/librechat/core/data/repository/MessageRepositoryImpl.kt	5
+cache-ttl	core/model/src/commonMain/kotlin/com/garfiec/librechat/core/model/EndpointConfig.kt	2
+cache-ttl	core/model/src/commonMain/kotlin/com/garfiec/librechat/core/model/Message.kt	1
+cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatScreen.kt	8
+cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ChatViewModel.kt	2
+cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/ModelSelectionDelegate.kt	2
+cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/SendDispatchDelegate.kt	12
 legacy-db	core/data/src/androidMain/kotlin/com/garfiec/librechat/core/data/di/DataPlatformModule.android.kt	1
 legacy-debug-id	app/build.gradle.kts	1
 module	build-logic/convention/src/main/kotlin/KmpFeatureConventionPlugin.kt	1

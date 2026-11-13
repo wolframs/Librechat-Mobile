@@ -60,4 +60,5 @@ data class Message(
      * `POST /api/messages/:conversationId/owner-text`, valid only while this revision matches.
      */
     val privacyRevision: String? = null,
+    val cacheTTL: String? = null, // FORK-HOOK(cache-ttl): decode the server-sent TTL
 )
