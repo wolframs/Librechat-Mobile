@@ -535,7 +535,11 @@ actual fun MarkdownContent(
         inlineCodeBackground = chat.inlineCode,
         dividerColor = chat.rule,
     )
-    val bl = MaterialTheme.typography.bodyLarge
+    // FORK-HOOK(thread): separate user and reply typography
+    val bl = com.garfiec.librechat.fork.thread.threadTextStyle(
+        MaterialTheme.typography.bodyLarge,
+        com.garfiec.librechat.fork.thread.LocalThreadUserText.current,
+    )
     val bm = MaterialTheme.typography.bodyMedium
     val typography = markdownTypography(
         h1 = MaterialTheme.typography.headlineLarge.copy(color = chat.headingText).scale(fontSizeMultiplier),

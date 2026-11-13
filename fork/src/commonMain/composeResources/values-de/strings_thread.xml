@@ -1,0 +1,5 @@
+<resources>
+    <string name="thread_today">Heute</string>
+    <string name="thread_yesterday">Gestern</string>
+    <string name="thread_setup_providers">Anbieter einrichten</string>
+</resources>

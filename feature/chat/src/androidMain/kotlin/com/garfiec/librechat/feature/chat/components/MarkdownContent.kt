@@ -280,7 +280,11 @@ private fun MarkdownTextSegment(
         inlineCodeBackground = chat.inlineCode,
         dividerColor = chat.rule,
     )
-    val bodyLarge = MaterialTheme.typography.bodyLarge
+    // FORK-HOOK(thread): separate user and reply typography
+    val bodyLarge = com.garfiec.librechat.fork.thread.threadTextStyle(
+        MaterialTheme.typography.bodyLarge,
+        com.garfiec.librechat.fork.thread.LocalThreadUserText.current,
+    )
     val bodyMedium = MaterialTheme.typography.bodyMedium
     val typography = markdownTypography(
         h1 = MaterialTheme.typography.headlineLarge.copy(color = chat.headingText).scaleFontSize(fontSizeMultiplier),

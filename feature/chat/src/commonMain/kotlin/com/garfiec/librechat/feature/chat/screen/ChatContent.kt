@@ -171,7 +171,8 @@ internal fun ColumnScope.ChatContent(
     // One call site for the panes in both LANDING and ACTIVE: Start on a wide landing turns one into
     // the other, and a second call site would rebuild the panes (pane A's list included) right then.
     if (comparing) {
-        comparisonPanes()
+        // FORK-HOOK(thread): preserve compare labels
+        com.garfiec.librechat.feature.chat.fork.CompareThreadScope { comparisonPanes() }
     } else {
         when (uiState.screenState) {
             ChatScreenState.LANDING -> {
@@ -208,6 +209,8 @@ internal fun ColumnScope.ChatContent(
                     val singleDisplayMessages = remember(uiState.displayMessages) {
                         collapseParallelToPrimary(uiState.displayMessages)
                     }
+                    // FORK-HOOK(thread): model identity and endpoint captions
+                    com.garfiec.librechat.feature.chat.fork.ThreadIdentityScope(uiState) {
                     ChatMessageListPane(
                         listState = primaryListState,
                         onNearBottomChange = { primaryNearBottom = it },
@@ -232,6 +235,7 @@ internal fun ColumnScope.ChatContent(
                             .weight(1f)
                             .then(listPullUpModifier),
                     )
+                    } // FORK-HOOK(thread): primary thread identity scope
                 }
             }
         }

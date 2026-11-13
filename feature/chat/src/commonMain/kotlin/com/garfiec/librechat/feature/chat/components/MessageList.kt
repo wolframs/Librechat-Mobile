@@ -699,7 +699,9 @@ fun MessageList(
                             onFork = if (readOnly || node.message.error) null else ({ onFork(node.message.messageId) }),
                         )
                     } else {
-                    MessageBubble(
+                    // FORK-HOOK(thread): quiet message layout
+                    com.garfiec.librechat.feature.chat.fork.ThreadMessage(
+                        path = displayMessages, index = index,
                         message = node.message,
                         modifier = jumpOutline
                             .jumpFlashBackground(flash, flashColor)
@@ -768,7 +770,10 @@ fun MessageList(
                     if (resubmit && stoppedReply?.messageId == node.message.messageId) {
                         StoppedReplyFooter(
                             action = stoppedReply,
-                            modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                            // FORK-HOOK(thread): align cards with reply text
+                            modifier = com.garfiec.librechat.feature.chat.fork.threadContentPadding(
+                                chatLayoutStyle, showAvatars, showBubbles,
+                            ),
                         )
                     }
                     }
@@ -792,12 +797,18 @@ fun MessageList(
                         ProvideMarkdownMedia(liveAttachments, baseUrl) {
                             StreamingMessageBubble(
                                 streamingContent = streamingContent,
-                                senderName = streamingSenderName,
+                                // FORK-HOOK(thread): label only on a reply identity change
+                                senderName = com.garfiec.librechat.feature.chat.fork.liveReplyLabel(
+                                    streamingSenderName, streamingAvatar?.endpointName, displayMessages,
+                                ),
                                 avatar = streamingAvatar,
                                 fontSizeMultiplier = fontSizeMultiplier,
-                                chatLayoutStyle = chatLayoutStyle,
-                                showAvatars = showAvatars,
-                                showBubbles = showBubbles,
+                                // FORK-HOOK(thread): primary thread alignment
+                                chatLayoutStyle = com.garfiec.librechat.feature.chat.fork.threadLayout(chatLayoutStyle),
+                                // FORK-HOOK(thread): no primary avatars
+                                showAvatars = showAvatars && !com.garfiec.librechat.fork.thread.LocalQuietThread.current,
+                                // FORK-HOOK(thread): replies have no bubble
+                                showBubbles = showBubbles && !com.garfiec.librechat.fork.thread.LocalQuietThread.current,
                                 useKatex = useKatex,
                                 streamingThinking = streamingThinking,
                                 // Inside the reply, under its sender row, where the finalized
@@ -819,7 +830,10 @@ fun MessageList(
                                 CompositionLocalProvider(LocalExpansionScope provides replyScope) {
                                     StreamingToolCallCard(
                                         toolCall = toolCall,
-                                        modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                        // FORK-HOOK(thread): align cards with reply text
+                                        modifier = com.garfiec.librechat.feature.chat.fork.threadContentPadding(
+                                            chatLayoutStyle, showAvatars, showBubbles,
+                                        ),
                                         baseUrl = baseUrl,
                                         streamingAttachments = streamingWorkspace.inline,
                                         showImageDescriptions = showImageDescriptions,
@@ -838,7 +852,10 @@ fun MessageList(
                                         changes = streamingWorkspace.changes,
                                         baseUrl = baseUrl,
                                         stateKey = "streaming",
-                                        modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                        // FORK-HOOK(thread): align cards with reply text
+                                        modifier = com.garfiec.librechat.feature.chat.fork.threadContentPadding(
+                                            chatLayoutStyle, showAvatars, showBubbles,
+                                        ),
                                         live = true,
                                     )
                                 }
@@ -858,7 +875,10 @@ fun MessageList(
                                     attachments = streamingWorkspace.inline,
                                     renderedToolCallIds = streamingCallIds,
                                     baseUrl = baseUrl,
-                                    modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                    // FORK-HOOK(thread): align cards with reply text
+                                    modifier = com.garfiec.librechat.feature.chat.fork.threadContentPadding(
+                                        chatLayoutStyle, showAvatars, showBubbles,
+                                    ),
                                     isDarkTheme = isSurfaceDark(),
                                 )
                             }
@@ -874,7 +894,10 @@ fun MessageList(
                                 CompositionLocalProvider(LocalExpansionScope provides replyScope) {
                                     MemoryArtifactsSection(
                                         artifacts = orphanMemory,
-                                        modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                        // FORK-HOOK(thread): align cards with reply text
+                                        modifier = com.garfiec.librechat.feature.chat.fork.threadContentPadding(
+                                            chatLayoutStyle, showAvatars, showBubbles,
+                                        ),
                                         stateKey = memoryArtifactsStateKey(streamingWorkspace.inline, fallback = ""),
                                         onManage = LocalOpenMemories.current,
                                         live = true,

@@ -64,7 +64,9 @@ import com.garfiec.librechat.feature.chat.util.PickerRow
 import com.garfiec.librechat.feature.chat.util.blocksSelection
 import com.garfiec.librechat.feature.chat.util.pickerRows
 import com.garfiec.librechat.fork.icons.ForkIcons
+import com.garfiec.librechat.fork.resources.thread_setup_providers
 import org.jetbrains.compose.resources.stringResource
+import com.garfiec.librechat.fork.resources.Res as ForkRes
 
 /** Row vertical padding for grouped list items vs. the denser starred-at-top section. */
 private val ListItemVerticalPadding = 12.dp
@@ -139,7 +141,9 @@ internal fun ComposerAllModelContent(
         expandedGroups = expandedGroups.toMap(),
         endpointKeyStates = endpointKeyStates,
     )
-    val rows = remember(inputs) { pickerRows(inputs) }
+    val groups = remember(inputs) { threadPickerGroups(pickerRows(inputs)) }
+    val rows = groups.flatten()
+    val setupKey = groups.firstOrNull { (it.firstOrNull() as? PickerRow.Header)?.keyHint != null }?.firstOrNull()?.key
 
     // A spec on an endpoint without a usable key opens its key instead; its row says so first.
     val onSpecClick: (ModelSpec, String?) -> Unit = { spec, endpoint ->
@@ -198,6 +202,14 @@ internal fun ComposerAllModelContent(
                 .listDragSelection(dragSelection, holdOnly = true),
         ) {
             items(rows, key = { it.key }, contentType = { it.contentType }) { row ->
+                if (row.key == setupKey) {
+                    Text(
+                    stringResource(ForkRes.string.thread_setup_providers),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+                }
                 when (row) {
                     is PickerRow.Header -> PickerHeader(
                         row = row,
