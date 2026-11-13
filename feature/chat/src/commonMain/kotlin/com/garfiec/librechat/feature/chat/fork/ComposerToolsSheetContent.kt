@@ -405,11 +405,12 @@ private fun AttachRow(
                     .heightIn(min = AttachCardMinHeight),
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                    // Top-aligned, so the four icons stay on one line when a label wraps at a large font.
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+                    verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Top),
                 ) {
-                    Icon(icon, null, Modifier.size(24.dp))
+                    Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) { Icon(icon, null, Modifier.size(24.dp)) }
                     Text(
                         text = stringResource(labelRes),
                         style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
@@ -503,11 +504,11 @@ private fun ToolGrid(
             val subtitle = when {
                 locked && key == ToolConstants.WEB_SEARCH && searchName != null -> "$setBy · $searchName"
                 locked -> setBy
-                key == ToolConstants.WEB_SEARCH -> searchName.takeIf { checked } ?: stringResource(ForkRes.string.composer_web_detail)
+                // A second line only where it adds something the name does not say.
+                key == ToolConstants.WEB_SEARCH -> searchName.takeIf { checked }
                 key == ToolConstants.FILE_SEARCH -> stringResource(ForkRes.string.composer_files_detail)
-                key == ToolConstants.SKILLS -> stringResource(ForkRes.string.composer_skills_detail)
                 key == ToolConstants.ARTIFACTS -> artifactsModeName ?: stringResource(ForkRes.string.composer_artifacts_detail)
-                else -> stringResource(meta.titleRes)
+                else -> null
             }
             val icon = when (key) {
                 ToolConstants.WEB_SEARCH -> ForkIcons.Globe
@@ -516,7 +517,7 @@ private fun ToolGrid(
                 else -> ForkIcons.Sparkles
             }
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                Modifier.fillMaxWidth().heightIn(min = if (subtitle == null) 56.dp else 64.dp)
                     .then(focusedRow(focus == ToolsSheetFocus.Tool(key), TileShape))
                     .combinedClickable(enabled = !locked, onClick = { onToggleTool(key) },
                         onLongClick = onOpenArtifactsMode.takeIf { key == ToolConstants.ARTIFACTS },
@@ -529,8 +530,10 @@ private fun ToolGrid(
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(meta.titleRes), style = MaterialTheme.typography.bodyLarge,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, overflow = TextOverflow.Clip)
+                    if (subtitle != null) {
+                        Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, overflow = TextOverflow.Clip)
+                    }
                 }
                 AdaptiveSwitch(checked, null, enabled = !locked)
             }

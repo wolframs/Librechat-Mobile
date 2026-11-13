@@ -29,10 +29,8 @@
     <string name="composer_effort_detail">Higher effort can improve difficult answers, but may take longer and use more tokens.</string>
     <string name="composer_builtin">Built-in tools</string>
     <string name="composer_server_files">Server files</string>
-    <string name="composer_web_detail">Search the web</string>
     <string name="composer_files_detail">Search uploaded files</string>
-    <string name="composer_skills_detail">Use your saved skills</string>
-    <string name="composer_artifacts_detail">Open generated code and documents</string>
+    <string name="composer_artifacts_detail">View code and documents</string>
     <string name="composer_connector_detail">Enabled connectors connect when you send a message.</string>
     <string name="composer_none_on">None on</string>
     <string name="composer_n_on">%1$d on</string>

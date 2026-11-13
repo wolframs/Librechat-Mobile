@@ -27,4 +27,5 @@
     <string name="market_col_list">Liste</string>
     <string name="market_col_off">Rabatt</string>
     <string name="market_col_offers">Angebote</string>
+    <string name="market_against_list">Liste %1$s · %2$s Rabatt</string>
 </resources>

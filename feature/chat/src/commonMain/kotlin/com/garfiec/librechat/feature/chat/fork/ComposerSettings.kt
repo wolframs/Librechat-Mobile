@@ -1,7 +1,10 @@
 package com.garfiec.librechat.feature.chat.fork
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -9,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garfiec.librechat.feature.chat.util.SettingChip
@@ -32,9 +36,17 @@ internal fun ComposerToolsBadge(scope: BoxScope, shown: Boolean, tools: Set<Stri
     val count = composerBadgeCount(shown, tools, servers)
     if (count > 0) {
         with(scope) {
-            Text(count.toString(), Modifier.align(Alignment.TopEnd)
-                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape).padding(horizontal = 3.dp),
-                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            Box(
+                // Hangs off the icon's top corner, as a badge does, so the plus itself stays whole.
+                Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = (-2).dp)
+                    .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(count.toString(), fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onPrimary)
+            }
         }
     }
 }

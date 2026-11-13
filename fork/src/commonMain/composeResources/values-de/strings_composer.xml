@@ -29,10 +29,8 @@
     <string name="composer_effort_detail">Mehr Aufwand kann bei schwierigen Antworten helfen, aber länger dauern und mehr Tokens verbrauchen.</string>
     <string name="composer_builtin">Integrierte Werkzeuge</string>
     <string name="composer_server_files">Serverdateien</string>
-    <string name="composer_web_detail">Im Web suchen</string>
     <string name="composer_files_detail">Hochgeladene Dateien durchsuchen</string>
-    <string name="composer_skills_detail">Gespeicherte Skills verwenden</string>
-    <string name="composer_artifacts_detail">Generierten Code und Dokumente öffnen</string>
+    <string name="composer_artifacts_detail">Code und Dokumente ansehen</string>
     <string name="composer_connector_detail">Aktivierte Konnektoren verbinden sich, wenn du eine Nachricht sendest.</string>
     <string name="composer_none_on">Keine aktiv</string>
     <string name="composer_n_on">%1$d aktiv</string>
