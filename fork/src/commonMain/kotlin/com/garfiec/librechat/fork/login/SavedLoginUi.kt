@@ -25,6 +25,7 @@ fun SavedLoginButton(
     enabled: Boolean,
     onUsername: (String) -> Unit,
     onPassword: (String) -> Unit,
+    onSignIn: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val manager = rememberPasswordCredentialManager() ?: return
@@ -37,7 +38,12 @@ fun SavedLoginButton(
             failed = false
             scope.launch {
                 try {
-                    bridge.pick(manager)?.let { onUsername(it.id); onPassword(it.password) }
+                    // Choosing a saved login is the sign-in; a refused one leaves the fields filled to correct.
+                    bridge.pick(manager)?.let {
+                        onUsername(it.id)
+                        onPassword(it.password)
+                        onSignIn()
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {

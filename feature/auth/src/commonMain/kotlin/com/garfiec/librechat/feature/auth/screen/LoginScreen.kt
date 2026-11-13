@@ -216,10 +216,10 @@ fun LoginScreen(
                 )
             }
 
-            // FORK-HOOK(saved-login) fill for review
+            // FORK-HOOK(saved-login) a picked login signs in
             if (uiState.emailLoginEnabled) {
                 com.garfiec.librechat.fork.login.SavedLoginButton(
-                    loginSave, !uiState.isLoading, viewModel::onEmailChanged, viewModel::onPasswordChanged,
+                    loginSave, !uiState.isLoading, viewModel::onEmailChanged, viewModel::onPasswordChanged, viewModel::login,
                 )
             }
 
