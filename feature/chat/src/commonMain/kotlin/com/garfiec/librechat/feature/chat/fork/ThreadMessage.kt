@@ -177,7 +177,7 @@ internal fun ThreadMessage(
                             userAvatarUrl = userAvatarUrl, alignImagesEnd = isUser,
                         )
                     }
-                    if (showActions) message.createdAt?.let { MessageTimestamp(it) }
+                    if (showActions) message.createdAt?.let { MessageTimestamp(it, Modifier.padding(bottom = 12.dp)) }
                 }
             }
         }

@@ -31,7 +31,6 @@ import com.garfiec.librechat.feature.chat.components.ChatOverflowItem
 import com.garfiec.librechat.feature.chat.components.ChatOverflowMenu
 import com.garfiec.librechat.feature.chat.components.ChatTopBarActions
 import com.garfiec.librechat.feature.chat.components.InConvoSearchBar
-import com.garfiec.librechat.feature.chat.components.TempChatToggle
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.viewmodel.ChatUiState
 import com.garfiec.librechat.fork.icons.ForkIcons
@@ -74,8 +73,8 @@ internal fun ThreadTopBar(
                 modifier = Modifier.weight(1f).then(titleModifier).heightIn(min = 48.dp).wrapContentHeight(),
             )
             if (showTempChatToggle) {
-                TempChatToggle(
-                    state.isTemporaryChat, actions.onToggleTemporaryChat, Modifier.size(48.dp),
+                ThreadTempChatToggle(
+                    state.isTemporaryChat, actions.onToggleTemporaryChat,
                     enforced = state.temporaryChatEnforced,
                 )
             }
