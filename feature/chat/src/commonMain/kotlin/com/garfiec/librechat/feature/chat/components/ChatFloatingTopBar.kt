@@ -408,7 +408,8 @@ private fun MaterialChatTopBar(
                             )
                         }
 
-                    ChatHeaderContent.MODEL -> {
+                    // FORK-HOOK(composer): model lives in composer
+                    ChatHeaderContent.MODEL -> if (com.garfiec.librechat.feature.chat.fork.ShowHeaderModel) {
                         val label = rememberChatModelLabel(
                             selectedEndpoint = uiState.selectedEndpoint,
                             selectedModel = uiState.selectedModel,

@@ -1,0 +1,24 @@
+<resources>
+    <string name="composer_add">Zum Chat hinzufügen</string>
+    <string name="composer_message">Nachricht</string>
+    <string name="composer_model">Modell</string>
+    <string name="composer_effort">Aufwand</string>
+    <string name="composer_presets">Vorlagen</string>
+    <string name="composer_parameters">Parameter</string>
+    <string name="composer_load">Vorlage laden</string>
+    <string name="composer_save">Als Vorlage speichern</string>
+    <string name="composer_more">Weitere Modelle</string>
+    <string name="composer_compare">Mit einem zweiten Modell vergleichen</string>
+    <string name="composer_prompts">Prompt-Bibliothek</string>
+    <string name="composer_connectors">Konnektoren</string>
+    <string name="composer_pin_hint">Markiere ein Modell unter Weitere Modelle mit einem Stern, um es hier anzuheften.</string>
+    <string name="composer_back">Zurück</string>
+    <string name="composer_low">Niedrig</string>
+    <string name="composer_medium">Mittel</string>
+    <string name="composer_high">Hoch</string>
+    <string name="composer_xhigh">Extra hoch</string>
+    <string name="composer_max">Maximal</string>
+    <string name="composer_minimal">Minimal</string>
+    <string name="composer_none">Keiner</string>
+    <string name="composer_default">Standard</string>
+</resources>

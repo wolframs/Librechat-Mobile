@@ -1,3 +1,5 @@
+@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): keep upstream placeholder resource import
+
 package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.animation.AnimatedContent
@@ -322,7 +324,12 @@ fun CommonChatInputCore(
                 isTranscribing = state.isTranscribing,
                 isEditingQueued = state.isEditingQueued,
             )
-            val openness = rememberComposerOpenness(canFold = canFold, holdsOpen = holdsOpen, focused = boxFocused)
+            // FORK-HOOK(composer): keep the model chip below the field
+            val openness = rememberComposerOpenness(
+                canFold = com.garfiec.librechat.feature.chat.fork.composerCanFold(canFold),
+                holdsOpen = holdsOpen,
+                focused = boxFocused,
+            )
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 // Below a 360dp screen the during-run caret folds into the send button, so the
                 // settings line keeps its room.
@@ -554,7 +561,8 @@ private fun ComposerRows(
     FoldingComposerRows(
         openness = openness,
         field = textFieldContent,
-        leading = { Row(verticalAlignment = Alignment.CenterVertically) { leadingButtons(compact) } },
+        // FORK-HOOK(composer): shared Android and iOS model chip
+        leading = { com.garfiec.librechat.feature.chat.fork.ComposerLeadingButtons { leadingButtons(compact) } },
         settings = {
             Box(modifier = Modifier.padding(horizontal = 4.dp).then(hidden)) {
                 ComposerSettingsLine(
@@ -1132,7 +1140,7 @@ fun ChatInputPlaceholder(
         } else if (comparisonHint == ComposerComparisonHint.BOTH) {
             stringResource(Res.string.compare_message_both)
         } else if (!selectedModelDisplay.isNullOrBlank()) {
-            stringResource(Res.string.hint_message_model, selectedModelDisplay)
+            com.garfiec.librechat.feature.chat.fork.messagePlaceholder() // FORK-HOOK(composer): model lives in the chip
         } else {
             stringResource(Res.string.hint_message)
         },

@@ -102,5 +102,6 @@ internal fun chatOverflowSections(gates: ChatOverflowGates): List<List<ChatOverf
         }
     }
     val destructive = if (conversationId == null) emptyList() else listOf(ChatOverflowItem.DELETE)
-    listOf(tools, conversation, destructive).filter { it.isNotEmpty() }
+    // FORK-HOOK(composer): conversation actions only
+    com.garfiec.librechat.feature.chat.fork.conversationSections(listOf(tools, conversation, destructive))
 }

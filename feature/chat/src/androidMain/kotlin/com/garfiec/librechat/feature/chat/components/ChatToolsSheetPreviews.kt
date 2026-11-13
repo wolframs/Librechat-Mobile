@@ -112,7 +112,7 @@ private fun ToolsSheetHost(
     var gaugeExpanded by remember { mutableStateOf(false) }
     val lockedTools = if (everything) setOf(ToolConstants.WEB_SEARCH) else emptySet()
     val lockedServers = if (everything) setOf("company-docs") else emptySet()
-    ChatToolsSheetContent(
+    com.garfiec.librechat.feature.chat.fork.ComposerToolsSheetContent( // FORK-HOOK(composer): attachment and tools surface
         enabledTools = setOf(ToolConstants.CODE_INTERPRETER, ToolConstants.SKILLS),
         onToggleTool = {},
         mcpServers = if (everything) previewServers else previewServers.take(2),

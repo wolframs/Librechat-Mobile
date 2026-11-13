@@ -279,7 +279,8 @@ fun ChatOptionsBottomSheet(
                 label = "chatOptionsPage",
             ) { currentPage ->
                 when (currentPage) {
-                    ChatOptionsPage.Options -> ChatToolsSheetContent(
+                    // FORK-HOOK(composer): attachment and tools surface
+                    ChatOptionsPage.Options -> com.garfiec.librechat.feature.chat.fork.ComposerToolsSheetContent(
                         enabledTools = tools.enabledTools,
                         onToggleTool = tools.onToggleTool,
                         mcpServers = tools.mcpServers,

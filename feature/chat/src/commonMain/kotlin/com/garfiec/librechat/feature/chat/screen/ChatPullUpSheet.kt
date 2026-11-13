@@ -1,3 +1,5 @@
+@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): keep upstream imports at the swapped surface
+
 package com.garfiec.librechat.feature.chat.screen
 
 import androidx.compose.animation.core.tween
@@ -491,7 +493,7 @@ internal fun BoxScope.ChatPullUpSheetOverlay(
     ) {
         Column(modifier = Modifier.fillMaxWidth().predictiveBackSheetContent(back)) {
             LowProfileDragHandle()
-            ChatToolsSheetContent(
+            com.garfiec.librechat.feature.chat.fork.ComposerToolsSheetContent( // FORK-HOOK(composer): attachment and tools surface
                 enabledTools = uiState.effectiveEnabledTools,
                 onToggleTool = viewModel::toggleTool,
                 mcpServers = uiState.mcpServers,

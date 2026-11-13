@@ -438,6 +438,10 @@ fun ChatScreen(
         )
     }
 
+    // FORK-HOOK(composer): model and prompts actions
+    com.garfiec.librechat.feature.chat.fork.ComposerScope(uiState, viewModel, optionsController,
+        { viewModel.reloadPresetsIfFailed(); showPresetPicker = true },
+        { showSavePresetDialog = true }, onNavigateToPromptsLibrary) {
     ChatRoot(
         inlineArtifactPrefs = prefs.inlineArtifactPrefs,
         mermaidRenderCache = viewModel.mermaidRenderCache,
@@ -1056,6 +1060,7 @@ fun ChatScreen(
         )
     }
     }
+    } // FORK-HOOK(composer): end composer scope
 }
 
 /**

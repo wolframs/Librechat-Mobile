@@ -7,6 +7,15 @@ cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/
 cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ChatViewModel.kt	2
 cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/ModelSelectionDelegate.kt	2
 cache-ttl	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/SendDispatchDelegate.kt	12
+composer	feature/chat/src/androidMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatToolsSheetPreviews.kt	1
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatFloatingTopBar.kt	1
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatOptionsBottomSheet.kt	1
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowItem.kt	1
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatTopBarSpec.kt	2
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/CommonChatInputCore.kt	4
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatPullUpSheet.kt	2
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatScreen.kt	2
+composer	feature/chat/src/commonTest/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowSectionsTest.kt	2
 legacy-db	core/data/src/androidMain/kotlin/com/garfiec/librechat/core/data/di/DataPlatformModule.android.kt	1
 legacy-debug-id	app/build.gradle.kts	1
 module	.gitignore	1

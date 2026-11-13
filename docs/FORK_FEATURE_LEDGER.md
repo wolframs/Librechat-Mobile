@@ -1099,3 +1099,26 @@ are marked inline.
 | `.gitignore` `gradle/gradle-daemon-jvm.properties` | root | Not in upstream; keep (1 line) |
 | Fork v8/v9/v10 schema JSON, `ForkMigration9To10Test` | core/data | Drop (F3) |
 | `ConversationRepositoryImplTest` edits, `DataStoreRoundTripTest` / `ChatPayloadBuilderTest` / `MessageMapperTest` deletions | core/data tests | Take upstream's |
+
+## Composer regrouping (`composer`, November 2026)
+
+Fork-only surfaces in `feature/chat/.../chat/fork/ComposerModelSheet.kt` and
+`ComposerToolsSheetContent.kt`; English/German strings in `:fork`'s
+`strings_composer.xml`. The shared composer row serves Android and iOS: a model
+pill replaces the landing header model chip and model-specific placeholder.
+The pill opens starred picks (six maximum), falling back to account-scoped
+usage from `SettingsDataStore.topUsedModels`. Existing selector rules filter
+specs, agents, endpoint availability and keys. More models opens the unchanged
+full selector. Effort uses the registry's options and existing parameter
+read/write methods; enforced specs remain read-only. Compare retains its
+existing toggle/setup behavior. Parameters retains upstream's primary-lane rule.
+
+The plus surface keeps uploads, tool gates, search/key state, artifact hold,
+MCP status/auth/setup/locks, focus highlighting and context placement. Prompts
+moves there; presets and compare move to Model. The overflow filters only those
+four relocated actions. A chat-owned composition scope carries existing
+callbacks to both sheet hosts without adding platform parameters. The chip
+keeps the composer expanded so it remains below the field at narrow widths.
+
+Hook list and hand-check instructions: `docs/COMPOSER_REGROUP_IMPLEMENTATION.md`.
+No device use, backend requests, iOS build or visual acceptance in this change.

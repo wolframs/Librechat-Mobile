@@ -5,15 +5,11 @@ import com.garfiec.librechat.core.model.usage.ContextUsage
 import com.garfiec.librechat.core.model.usage.TokenBudgetBreakdown
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.ARCHIVE
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.BOOKMARKS
-import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.COMPARE
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.CONTEXT_USAGE
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.DELETE
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.DUPLICATE
-import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.LOAD_PRESET
-import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.PROMPTS_LIBRARY
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.PULL_REQUEST
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.RENAME
-import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.SAVE_PRESET
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.SEARCH
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.SHARE
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem.SHOW_ALL_MEDIA
@@ -69,9 +65,10 @@ class ChatOverflowSectionsTest {
 
     @Test
     fun everythingOnGivesThreeSectionsInMenuOrder() {
+        // FORK-HOOK(composer): presets, prompts and compare moved to the composer sheets.
         assertEquals(
             listOf(
-                listOf(SEARCH, SHOW_ALL_MEDIA, LOAD_PRESET, SAVE_PRESET, PROMPTS_LIBRARY, COMPARE, TRACE, CONTEXT_USAGE),
+                listOf(SEARCH, SHOW_ALL_MEDIA, TRACE, CONTEXT_USAGE),
                 listOf(SHARE, BOOKMARKS, RENAME, DUPLICATE, ARCHIVE),
                 listOf(DELETE),
             ),
@@ -88,8 +85,9 @@ class ChatOverflowSectionsTest {
 
     @Test
     fun theLandingHasNoConversationActions() {
+        // FORK-HOOK(composer): the landing menu follows the same regrouping.
         assertEquals(
-            listOf(listOf(SHOW_ALL_MEDIA, LOAD_PRESET, SAVE_PRESET, PROMPTS_LIBRARY, COMPARE, TRACE, CONTEXT_USAGE)),
+            listOf(listOf(SHOW_ALL_MEDIA, TRACE, CONTEXT_USAGE)),
             sections(conversationId = null),
         )
     }

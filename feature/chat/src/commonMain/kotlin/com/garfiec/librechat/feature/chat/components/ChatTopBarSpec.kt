@@ -1,3 +1,5 @@
+@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): keep upstream imports at the swapped surface
+
 package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.runtime.Composable
@@ -117,7 +119,7 @@ internal fun rememberChatTopBarSpec(
                 modelSpecs = uiState.modelSpecs,
             )
             BarTitle(
-                text = label.displayModel ?: stringResource(Res.string.select_model),
+                text = com.garfiec.librechat.feature.chat.fork.HeaderModelText, // FORK-HOOK(composer): model lives in composer
                 style = BarTitleStyle.CHIP,
                 alignment = alignment,
                 onClick = actions.onOpenModelSheet.takeIf { uiState.modelPickerShown },

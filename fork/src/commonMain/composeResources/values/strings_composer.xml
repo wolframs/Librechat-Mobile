@@ -1,0 +1,24 @@
+<resources>
+    <string name="composer_add">Add to chat</string>
+    <string name="composer_message">Message</string>
+    <string name="composer_model">Model</string>
+    <string name="composer_effort">Effort</string>
+    <string name="composer_presets">Presets</string>
+    <string name="composer_parameters">Parameters</string>
+    <string name="composer_load">Load preset</string>
+    <string name="composer_save">Save as preset</string>
+    <string name="composer_more">More models</string>
+    <string name="composer_compare">Compare with a second model</string>
+    <string name="composer_prompts">Prompts library</string>
+    <string name="composer_connectors">Connectors</string>
+    <string name="composer_pin_hint">Star a model in More models to pin it here.</string>
+    <string name="composer_back">Back</string>
+    <string name="composer_low">Low</string>
+    <string name="composer_medium">Medium</string>
+    <string name="composer_high">High</string>
+    <string name="composer_xhigh">Extra high</string>
+    <string name="composer_max">Maximum</string>
+    <string name="composer_minimal">Minimal</string>
+    <string name="composer_none">None</string>
+    <string name="composer_default">Default</string>
+</resources>
