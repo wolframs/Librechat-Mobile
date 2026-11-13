@@ -1,0 +1,28 @@
+<resources>
+    <string name="market_costs">Prices and costs</string>
+    <string name="market_loading">Loading prices…</string>
+    <string name="market_unavailable">No current quote is available for this model.</string>
+    <string name="market_retry">Retry</string>
+    <string name="market_unknown">unknown</string>
+    <string name="market_close">Close</string>
+    <string name="market_dashboard">Open cost dashboard</string>
+    <string name="market_dashboard_note">The cost dashboard needs its own sign-in.</string>
+    <string name="market_units">USD per million tokens</string>
+    <string name="market_input">Input</string>
+    <string name="market_output">Output</string>
+    <string name="market_cache_read">Cache read</string>
+    <string name="market_cache_write">Cache write</string>
+    <string name="market_reasoning">Reasoning</string>
+    <string name="market_lane">Your key: %1$s · List: %2$s · Discount: %3$s</string>
+    <string name="market_routing">Trusted sellers only · Hidden seller families: %1$s</string>
+    <string name="market_sellers">Seller families</string>
+    <string name="market_trusted">trusted</string>
+    <string name="market_untrusted">not trusted</string>
+    <string name="market_seller">%1$s · Healthy offers: %2$s · Input: %3$s · Output: %4$s</string>
+    <string name="market_ttft">Time to first token (median): %1$s ms</string>
+    <string name="market_tps">Tokens per second (median): %1$s</string>
+    <string name="market_uptime">Uptime: %1$s%%</string>
+    <string name="market_hits">Cache hit rate: %1$s%%</string>
+    <string name="market_requests">Requests in 24 hours: %1$s</string>
+    <string name="market_quote_note">Current offers, not settled charges. Routing and cache hits may vary per request.</string>
+</resources>

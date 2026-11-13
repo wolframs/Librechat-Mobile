@@ -558,8 +558,8 @@ fun ChatScreen(
                         )
                     }
 
-                    com.garfiec.librechat.fork.cachettl.CacheTtlRail( // FORK-HOOK(cache-ttl)
-                        viewModel.cacheTtl, uiState.selectedEndpoint, uiState.selectedModel, // FORK-HOOK(cache-ttl)
+                    com.garfiec.librechat.fork.market.ChatGutter( // FORK-HOOK(cache-ttl): cache and prices host
+                        viewModel.cacheTtl, uiState.selectedEndpoint, uiState.selectedModel, uiState.serverUrl, // FORK-HOOK(cache-ttl)
                         uiState.endpointConfigs, uiState.modelParameters.dynamicValues, // FORK-HOOK(cache-ttl)
                         uiState.selectedAgentProvider, uiState.selection.selectedAgentModel, // FORK-HOOK(cache-ttl)
                         uiState.selection.selectedAgentReasoning, viewModel.uiState, // FORK-HOOK(cache-ttl)

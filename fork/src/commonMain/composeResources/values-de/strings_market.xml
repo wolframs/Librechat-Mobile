@@ -1,0 +1,28 @@
+<resources>
+    <string name="market_costs">Preise und Kosten</string>
+    <string name="market_loading">Preise werden geladen…</string>
+    <string name="market_unavailable">Für dieses Modell ist kein aktueller Preis verfügbar.</string>
+    <string name="market_retry">Erneut versuchen</string>
+    <string name="market_unknown">unbekannt</string>
+    <string name="market_close">Schließen</string>
+    <string name="market_dashboard">Kostenübersicht öffnen</string>
+    <string name="market_dashboard_note">Die Kostenübersicht erfordert eine eigene Anmeldung.</string>
+    <string name="market_units">USD pro Million Token</string>
+    <string name="market_input">Eingabe</string>
+    <string name="market_output">Ausgabe</string>
+    <string name="market_cache_read">Cache lesen</string>
+    <string name="market_cache_write">Cache schreiben</string>
+    <string name="market_reasoning">Denken</string>
+    <string name="market_lane">Dein Schlüssel: %1$s · Liste: %2$s · Rabatt: %3$s</string>
+    <string name="market_routing">Nur vertrauenswürdige Anbieter · Ausgeblendete Anbieterfamilien: %1$s</string>
+    <string name="market_sellers">Anbieterfamilien</string>
+    <string name="market_trusted">vertrauenswürdig</string>
+    <string name="market_untrusted">nicht vertrauenswürdig</string>
+    <string name="market_seller">%1$s · Intakte Angebote: %2$s · Eingabe: %3$s · Ausgabe: %4$s</string>
+    <string name="market_ttft">Zeit bis zum ersten Token (Median): %1$s ms</string>
+    <string name="market_tps">Token pro Sekunde (Median): %1$s</string>
+    <string name="market_uptime">Verfügbarkeit: %1$s%%</string>
+    <string name="market_hits">Cache-Trefferrate: %1$s%%</string>
+    <string name="market_requests">Anfragen in 24 Stunden: %1$s</string>
+    <string name="market_quote_note">Aktuelle Angebote, keine abgerechneten Kosten. Routing und Cache-Treffer können je Anfrage variieren.</string>
+</resources>
