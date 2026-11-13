@@ -40,12 +40,12 @@ internal fun ComposerToolsBadge(scope: BoxScope, shown: Boolean, tools: Set<Stri
                 // Hangs off the icon's top corner, as a badge does, so the plus itself stays whole.
                 Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = (-2).dp)
                     .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape)
                     .padding(horizontal = 4.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(count.toString(), fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onPrimary)
+                    color = MaterialTheme.colorScheme.surface)
             }
         }
     }

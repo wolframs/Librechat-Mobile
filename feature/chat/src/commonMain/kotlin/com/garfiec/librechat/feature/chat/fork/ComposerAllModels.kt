@@ -14,12 +14,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -180,6 +184,14 @@ internal fun ComposerAllModelContent(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
             singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+            ),
+            leadingIcon = { Icon(ForkIcons.Search, contentDescription = null) },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
                     IconButton(onClick = { searchQuery = "" }) {
@@ -203,12 +215,17 @@ internal fun ComposerAllModelContent(
         ) {
             items(rows, key = { it.key }, contentType = { it.contentType }) { row ->
                 if (row.key == setupKey) {
+                    AdaptiveDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        thickness = Dp.Hairline,
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
                     Text(
-                    stringResource(ForkRes.string.thread_setup_providers),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                )
+                        stringResource(ForkRes.string.thread_setup_providers),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 12.dp),
+                    )
                 }
                 when (row) {
                     is PickerRow.Header -> PickerHeader(
@@ -289,7 +306,7 @@ internal fun EndpointGroupHeader(
     isExpanded: Boolean,
     onToggle: () -> Unit,
     dragSelection: ListDragSelection,
-    /** Non-null when the endpoint has no usable key: the group is greyed behind "Add key". */
+    /** Non-null when the endpoint has no usable key: the group offers "Add key" instead of expanding. */
     keyHint: KeyHint? = null,
     onSetApiKey: () -> Unit = {},
 ) {
@@ -298,6 +315,8 @@ internal fun EndpointGroupHeader(
     FlowRow(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .wrapContentHeight()
             // Drop the clickable modifier entirely when needsKey — Compose's
             // `clickable(enabled = false)` still consumes touch events and
             // announces "disabled" to TalkBack/VoiceOver. Only the inner
@@ -315,21 +334,29 @@ internal fun EndpointGroupHeader(
         horizontalArrangement = Arrangement.End,
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
-        // Disabled labels use Material's standard 0.38 disabled alpha. The
-        // CTA chip below stays full-opacity so the action remains discoverable.
-        val labelAlpha = if (needsKey) 0.38f else 1f
         Row(
             modifier = Modifier.weight(1f).widthIn(min = MinGroupLabelWidth),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column {
-                Text(
-                    text = "$displayLabel ($modelCount)",
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.alpha(labelAlpha),
-                )
-                // Full opacity: the reason the group is greyed is not itself disabled.
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = displayLabel,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (!needsKey) {
+                        Text(
+                            text = modelCount.toString(),
+                            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (keyHint != null) KeyHintLine(keyHint)
             }
         }
@@ -354,7 +381,7 @@ internal fun EndpointGroupHeader(
 private val MinGroupLabelWidth = 120.dp
 
 /**
- * The "Add key" action on a greyed endpoint group, web's "Set API Key" pill. Tapping navigates to
+ * The "Add key" action on a key-blocked endpoint group, web's "Set API Key" pill. Tapping navigates to
  * Settings → Provider API Keys with the endpoint pre-targeted.
  */
 @Composable

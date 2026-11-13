@@ -149,7 +149,11 @@ helper preserves native iOS bar dispatch and supplies its opaque common underlay
 upstream. The landing hides its hero and redundant identity lines without replacing its greeting,
 temporary-chat transition, positioning or starters. `ComposerAllModels` partitions whole upstream
 picker groups into usable then key-blocked groups, with one localized setup heading; upstream
-still builds the rows. English and German day/setup strings live in `:fork`.
+still builds the rows. Provider names and counts have separate contrast; key-blocked groups omit
+counts below a separated setup heading, and search uses a rounded filled adaptive field. The landing
+uses a labelled Ghost switch with an on-state capsule; server enforcement disables switching.
+The tools count badge uses neutral roles, and revealed timestamps have 12 dp bottom spacing.
+English and German day/setup/temporary-label strings live in `:fork`.
 
 Font work: `userMessageTextStyle` and `modelReplyTextStyle` in `fork/thread/ThreadRules.kt` resolve
 the You and Model reading slots. Both platform markdown renderers route their body style through them;
