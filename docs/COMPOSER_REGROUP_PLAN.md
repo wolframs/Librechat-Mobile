@@ -64,6 +64,27 @@ shit\" <- that is signal, not noise".
     row in the model sheet. This changes the operator's July placement of the
     rail; the judge called the rail the worst defect outside the regrouping.
 
+- **Round 2, 2026-11-13: 7 / 10.** Per surface: composer 6, model sheet 7,
+  effort page 8, add-to-chat 7.5, connectors page 8, three-dot menu 7.5, dark
+  theme 7. Fixed since round 1: current model marked, connector state, effort
+  navigation, connector structure, repeated "Off", sheet chrome, the floating
+  cache pill. Not fixed: the model still reads as inline text while the Tools
+  chip and the cache chip have the stronger shapes. New: a whole composer row
+  for one Tools chip; ids shown twice; an idle cache dot that explains nothing;
+  the model sheet is still a settings dashboard. Decisions for round 3:
+  - Composer: a visible model capsule; no Tools row, a count badge on the plus
+    instead (a chip row appears only for something that needs the user); the
+    cache chip only while a window runs or is armed, reading "Cache 4:47".
+  - Model sheet: first level is the model list, All models and Effort; the rest
+    (Advanced settings, Model presets, Prices, Compare models, Cache window)
+    behind one "More options" row; no leading icons; "Current model" apart from
+    "Starred"; the endpoint alone as the second line.
+  - Add to chat: lighter tiles, shorter descriptions. Connectors: one
+    explanation above the list, status only for exceptions, neutral monograms.
+  - Effort wording that does not promise. Menu label back to "Search".
+  - The price sheet (fork-owned) gets aligned columns and a stats list.
+  - Round 3 is also captured with the keyboard open and at a larger font.
+
 ## What the judge said about the rest of the app
 
 (collected across rounds)
@@ -80,3 +101,9 @@ shit\" <- that is signal, not noise".
 - Round 1: the identity looks assembled from defaults (brown "An" circles,
   purple user avatars, lavender surfaces, multicoloured connector initials); the
   landing screen repeats the model name under a generic greeting.
+- Round 2: header, thread, landing and identity unchanged and still the weak
+  part. The full picker fits the sheet family better but still opens on
+  providers without a key; "Starred" there against "Favourites" in the sheet.
+  The price sheet is dense: values run into the next column, statistics are a
+  paragraph (handled in round 3). A mock for thread, header, landing and the
+  model list is with the operator: `fork/design/thread-header-restyle.html`.
