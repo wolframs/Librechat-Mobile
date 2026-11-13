@@ -58,7 +58,8 @@ class ConversationLoadDelegate(
     private val wantsStoredParameters: () -> Boolean = { false },
     /** Writes the conversation's parameters, with the web-search switch this device remembered (if any). */
     private val restoreParameters: (Conversation, Boolean?) -> Unit = { _, _ -> },
-    private val onMcpConversation: suspend (Conversation) -> Unit = {}, // FORK-HOOK(mcp-default-on): detail owns switch-offs
+    private val onMcpConversation: suspend (Conversation?) -> Unit = {}, // FORK-HOOK(mcp-default-on): detail owns switch-offs
+    private val wantsDetail: (Boolean) -> Boolean = { it }, // FORK-HOOK(mcp-default-on): once per chat and process
     /**
      * The web-search switch this device remembered for a conversation. Read before the model is
      * applied, so nothing suspends between that and [restoreParameters] for a user change to land in.
@@ -447,7 +448,7 @@ class ConversationLoadDelegate(
         }
         handle.scope.launch {
             val result = conversationRepository.getConversation(conversationId, originAccount = null)
-            result.getOrNull()?.let { onMcpConversation(it) } // FORK-HOOK(mcp-default-on): seed offline sidecar
+            onMcpConversation(result.getOrNull()) // FORK-HOOK(mcp-default-on): seed offline sidecar
             var conversation = result.getOrNull()
             val wantsParameters = wantsStoredParameters()
             val remembered = if (wantsParameters) rememberedWebSearch(conversationId) else null
@@ -474,10 +475,8 @@ class ConversationLoadDelegate(
             // selection the cached row gave it. The row isn't read by the message observer, so the
             // write is safe mid-stream (the streaming anchor depends on the messages alone).
             val codeUnknown = cached != null && cached.isCodeConversation == null && pullRequestsAvailable()
-            if (com.garfiec.librechat.feature.chat.fork.needsConnectorDetail( // FORK-HOOK(mcp-default-on)
-                    cached, selectionIncomplete, codeUnknown) && // FORK-HOOK(mcp-default-on)
-                backfillKey != null // FORK-HOOK(mcp-default-on)
-            ) { // FORK-HOOK(mcp-default-on)
+            // FORK-HOOK(mcp-default-on): a chat's switch-offs come with its detail only
+            if ((selectionIncomplete || wantsDetail(codeUnknown)) && backfillKey != null && backfillKey !in conversationBackfillDone) {
                 val unchanged = watchSelection()
                 val fetched = conversationRepository.refreshConversation(conversationId, originAccount = null).getOrNull()
                 // A model or parameter set while the fetch was out is the user's and stays.

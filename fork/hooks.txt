@@ -45,10 +45,10 @@ mcp-default-on	feature/chat/src/androidMain/kotlin/com/garfiec/librechat/feature
 mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/model/McpServerDisplayData.kt	1
 mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ChatRequestBuilder.kt	2
 mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ChatUiState.kt	1
-mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ChatViewModel.kt	15
+mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ChatViewModel.kt	16
 mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ModelSelectionState.kt	3
 mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/NewChatSelectionHandoff.kt	3
-mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/ConversationLoadDelegate.kt	7
+mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/ConversationLoadDelegate.kt	5
 mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/McpServersDelegate.kt	1
 mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/ModelSelectionDelegate.kt	2
 mcp-default-on	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/SendCompletionDelegate.kt	4

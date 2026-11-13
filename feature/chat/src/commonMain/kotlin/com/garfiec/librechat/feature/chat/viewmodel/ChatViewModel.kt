@@ -679,6 +679,7 @@ class ChatViewModel(
         // A handed-off new chat already holds what its first turn was sent with.
         wantsStoredParameters = { !isHandedOffNewChat },
         rememberedWebSearch = conversationWebSearchStore::get,
+        wantsDetail = { it || connectorStore != null }, // FORK-HOOK(mcp-default-on)
         onMcpConversation = { // FORK-HOOK(mcp-default-on)
             com.garfiec.librechat.feature.chat.fork.receiveConnectorState( // FORK-HOOK(mcp-default-on)
                 _uiState, it, connectorStore, activeAccountProvider.currentAccountId()?.value, viewModelScope) // FORK-HOOK(mcp-default-on)

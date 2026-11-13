@@ -36,10 +36,10 @@ fun toggleDefaultConnector(handle: ModelSelectionHandle, name: String): Boolean 
 }
 
 suspend fun receiveConnectorState(
-    state: MutableStateFlow<ChatUiState>, conversation: Conversation, store: ConnectorStore?,
+    state: MutableStateFlow<ChatUiState>, conversation: Conversation?, store: ConnectorStore?,
     account: String?, scope: CoroutineScope,
 ) {
-    val chat = conversation.conversationId ?: return
+    val chat = conversation?.conversationId ?: return
     val off = conversation.mcpOff?.toSet() ?: account?.let { store?.read(it, chat) } ?: return
     state.update { current ->
         if (current.selection.connectors.edited) {
@@ -66,9 +66,6 @@ fun effectiveConnectors(selection: ModelSelectionState): Set<String> {
 fun seedConnectorHandoff(state: ChatUiState, off: Set<String>?): ChatUiState = state.copy(
     selection = state.selection.copy(connectors = state.selection.connectors.copy(off = off, edited = true)),
 )
-
-fun needsConnectorDetail(cached: Conversation?, incomplete: Boolean, codeUnknown: Boolean): Boolean =
-    incomplete || codeUnknown || cached?.mcpOff == null
 
 suspend fun rememberConnectorFinal(store: ConnectorStore?, conversation: Conversation, account: String?) {
     val chat = conversation.conversationId ?: return

@@ -7,7 +7,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 
-/** Offline hints only. Each open revalidates against conversation detail; account purge removes these. */
+/**
+ * What this device last learned of each chat's switch-offs. A chat's detail is read again once per
+ * process and whenever its `updatedAt` moved; between those, and offline, this is what the picker shows.
+ */
 class ConnectorStore(private val dataStore: DataStore<Preferences>) {
     suspend fun read(account: String, chat: String): Set<String>? = decode(dataStore.data.first()[key(account)])[chat]?.toSet()
 
