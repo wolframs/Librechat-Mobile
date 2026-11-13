@@ -93,7 +93,8 @@ internal fun ComposerSettingsLine(
     ring: ContextRingState? = null,
     leading: (@Composable () -> Unit)? = null,
 ) {
-    if (chips.isEmpty && ring == null && leading == null) return
+    // FORK-HOOK(composer): attention-only row
+    if (com.garfiec.librechat.feature.chat.fork.visibleComposerChips(chips).isEmpty() && ring == null && leading == null) return
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -109,7 +110,6 @@ internal fun ComposerSettingsLine(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             leading?.invoke()
-            com.garfiec.librechat.feature.chat.fork.ComposerToolsSummary(chips) // FORK-HOOK(composer): folded tool summary
             // FORK-HOOK(composer): keep attention chips separate
             com.garfiec.librechat.feature.chat.fork.visibleComposerChips(chips).forEach { chip ->
                 // Keyed by what the chip is, not where it sits: a chip leaving the line ahead of an MCP

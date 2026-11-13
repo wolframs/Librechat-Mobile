@@ -23,7 +23,7 @@ class ComposerModelSheetTest {
     @Test fun currentModelIsFirstWhenUnstarredAndAlwaysFits() {
         val current = pick("current")
         val pins = (1..8).map { pick("m$it", true) }
-        assertEquals(listOf(current) + pins.take(5), modelSheetPicks(pins, emptyList(), current))
+        assertEquals(listOf(current) + pins.take(6), modelSheetPicks(pins, emptyList(), current))
         assertEquals(listOf(current), modelSheetPicks(emptyList(), emptyList(), current))
         assertEquals(pins.take(5) + pins.last(), modelSheetPicks(pins, emptyList(), pins.last()))
     }

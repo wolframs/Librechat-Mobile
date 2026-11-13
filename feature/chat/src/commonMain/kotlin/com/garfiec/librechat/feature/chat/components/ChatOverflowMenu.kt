@@ -119,8 +119,7 @@ internal fun ChatOverflowMenu(
                     ChatOverflowItem.OPEN_APPS ->
                         OverflowItem(stringResource(Res.string.mcp_app_open_apps, openApps), Icons.Outlined.Apps, select, dragTarget)
                     ChatOverflowItem.SEARCH ->
-                        // FORK-HOOK(composer): conversation search label
-                        OverflowItem(com.garfiec.librechat.feature.chat.fork.conversationSearchLabel(),
+                        OverflowItem(stringResource(Res.string.action_search),
                             Icons.Default.Search, select, dragTarget)
                     ChatOverflowItem.SHOW_ALL_MEDIA ->
                         // FORK-HOOK(composer): media label

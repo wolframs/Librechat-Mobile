@@ -1,7 +1,7 @@
 <resources>
     <string name="cache_ttl_none">cache</string>
     <string name="cache_ttl_expired">expired</string>
-    <string name="cache_ttl_armed">%1$s armed</string>
+    <string name="cache_ttl_armed">%1$s next</string>
     <string name="cache_ttl_info">Cache window</string>
     <string name="cache_ttl_close">Close</string>
     <string name="cache_ttl_semantics">Prompt cache: %1$s</string>

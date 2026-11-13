@@ -36,17 +36,9 @@ internal fun BoxScope.ToolsButtonDots(
                 .background(color = MaterialTheme.colorScheme.tertiary, shape = CircleShape),
         )
     }
-    // FORK-HOOK(composer): no blue plus dot
-    if (com.garfiec.librechat.feature.chat.fork.ShowToolsDot &&
-        showsActiveToolsDot(showEphemeralTools, enabledTools, selectedMcpServerNames)) {
-        Box(
-            modifier = Modifier
-                .size(ToolsDotSize)
-                .align(Alignment.TopEnd)
-                .offset(x = (-2).dp, y = 2.dp)
-                .background(color = MaterialTheme.colorScheme.primary, shape = CircleShape),
-        )
-    }
+    // FORK-HOOK(composer): plus count badge
+    com.garfiec.librechat.feature.chat.fork.ComposerToolsBadge(
+        this, showEphemeralTools, enabledTools, selectedMcpServerNames)
 }
 
 private val ToolsDotSize = 10.dp

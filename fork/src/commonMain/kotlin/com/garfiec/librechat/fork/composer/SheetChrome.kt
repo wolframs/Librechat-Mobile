@@ -3,7 +3,7 @@ package com.garfiec.librechat.fork.composer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -31,7 +31,7 @@ fun ComposerDragHandle(modifier: Modifier = Modifier) {
 
 @Composable
 fun ComposerSheetHeader(title: String, onNavigate: () -> Unit, modifier: Modifier = Modifier, subPage: Boolean = false) {
-    Box(modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+    Box(modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
         Text(title, Modifier.padding(horizontal = 48.dp), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         IconButton(onClick = onNavigate, modifier = Modifier.size(48.dp).align(Alignment.CenterStart)) {
             Icon(if (subPage) ForkIcons.ArrowLeft else ForkIcons.X,

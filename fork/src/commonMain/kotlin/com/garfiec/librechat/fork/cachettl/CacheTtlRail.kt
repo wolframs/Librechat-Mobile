@@ -1,18 +1,11 @@
 package com.garfiec.librechat.fork.cachettl
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,12 +18,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -40,7 +32,6 @@ import com.garfiec.librechat.core.model.EndpointConfig
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
 import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
-import com.garfiec.librechat.core.ui.theme.statusColors
 import com.garfiec.librechat.fork.resources.Res
 import com.garfiec.librechat.fork.resources.cache_ttl_armed
 import com.garfiec.librechat.fork.resources.cache_ttl_close
@@ -98,14 +89,9 @@ fun <T> CacheTtlRail(
     val arm = session.arm.takeIf { route.canExtend }
     var explanation by remember { mutableStateOf(false) }
     val label = if (arm == null) countdown else stringResource(Res.string.cache_ttl_armed, arm)
+    if (label.isBlank()) return
     CacheTtlPill(
         label = label,
-        tone = when {
-            arm == "1h" -> PillTone.ARMED_LONG
-            arm != null -> PillTone.ARMED_SHORT
-            remaining != null && remaining > 0 -> PillTone.RUNNING
-            else -> PillTone.IDLE
-        },
         onClick = { if (route.canExtend) session.cycle(true) else explanation = true },
         onLongClick = { explanation = true },
         modifier = modifier,
@@ -127,51 +113,19 @@ fun <T> CacheTtlRail(
     }
 }
 
-private enum class PillTone { IDLE, RUNNING, ARMED_SHORT, ARMED_LONG }
-
 @Composable
 private fun CacheTtlPill(
     label: String,
-    tone: PillTone,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val accent = when (tone) {
-        PillTone.ARMED_LONG -> statusColors().warning
-        PillTone.ARMED_SHORT -> statusColors().info
-        PillTone.RUNNING -> statusColors().success
-        PillTone.IDLE -> MaterialTheme.colorScheme.outline
-    }
-    val armed = tone == PillTone.ARMED_LONG || tone == PillTone.ARMED_SHORT
-    val container = if (armed) {
-        accent.copy(alpha = 0.22f).compositeOver(MaterialTheme.colorScheme.surface)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val description =
-        stringResource(Res.string.cache_ttl_semantics, label.ifBlank { stringResource(Res.string.composer_cache) })
+    val description = stringResource(Res.string.cache_ttl_semantics, label)
     Box(modifier.height(48.dp).combinedClickable(role = Role.Button, onClick = onClick, onLongClick = onLongClick)
         .semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
-        Row(
-            modifier = Modifier
-                .height(32.dp)
-                .clip(RoundedCornerShape(50))
-                .background(container)
-                .padding(horizontal = 6.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(accent))
-            if (label.isNotEmpty()) Spacer(Modifier.width(5.dp))
-            if (label.isNotEmpty()) {
-                Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (armed) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-            }
-        }
+        Text(stringResource(Res.string.composer_cache) + " " + label,
+            Modifier.padding(horizontal = 4.dp),
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontFeatureSettings = "tnum"),
+            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }

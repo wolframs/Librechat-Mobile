@@ -130,8 +130,7 @@ module, `fork/README.md` wins.
 - The arm is in memory, per chat view model. Only a normal send from the composer consumes it, as
   the top-level request field `cacheTTL`. Regenerate, continue, edit and a queued message leave it
   in place.
-- The cache chip sits after the model pill in the composer. Idle and expired windows show only
-  a dot; the accessibility label still names cache. A tap cycles; a hold opens the explanation,
+- The cache chip sits after the model pill in the composer. Idle and expired windows are hidden. More options → Cache window can arm the next send. A tap cycles; a hold opens the explanation,
   with the marketplace caveat when `/cost/markets/endpoints` lists the endpoint.
 
 ### Prices and costs: how it is built
@@ -1108,18 +1107,18 @@ Fork-only surfaces in `feature/chat/.../chat/fork/ComposerModelSheet.kt` and
 pill replaces the landing header model chip and model-specific placeholder.
 The pill opens starred picks (six maximum), falling back to account-scoped
 usage from `SettingsDataStore.topUsedModels`. Existing selector rules filter
-specs, agents, endpoint availability and keys. The current model always stays in the six rows.
-All models embeds the upstream selector as a sub-page. Effort uses the registry's options and existing parameter
+specs, agents, endpoint availability and keys. An unstarred current model has its own row; a starred current model always stays in the six starred rows.
+All models uses a fork-owned body over the upstream picker row builder, without leading icons. Effort uses the registry's options and existing parameter
 read/write methods; enforced specs remain read-only. Compare retains its
 existing toggle/setup behavior. Parameters retains upstream's primary-lane rule.
 
 The plus surface keeps uploads, tool gates, search/key state, artifact hold,
 MCP status/auth/setup/locks, focus highlighting and context placement. Prompts
-moves there; presets and compare move to Model. The overflow filters only those
+moves there; presets and compare move to Model → More options. The overflow filters only those
 four relocated actions. A chat-owned composition scope carries existing
 callbacks to both sheet hosts without adding platform parameters. The chip
 keeps the composer expanded, with settings above the action row. Plain on-state tool/server
-chips fold into Tools · N, while attention and locked chips retain their actions. Shared fork
+chips are hidden; plus carries their enabled count. Only attention or pending override chips retain a row. Shared fork
 sheet chrome serves Model, its sub-pages, Add to chat, Connectors and Prices. Connectors is a
 separate page with back navigation; the cache chip and Prices replace the gutter controls.
 

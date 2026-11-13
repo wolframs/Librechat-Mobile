@@ -11,8 +11,8 @@ composer	feature/chat/src/androidMain/kotlin/com/garfiec/librechat/feature/chat/
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatFloatingTopBar.kt	1
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatOptionsBottomSheet.kt	3
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowItem.kt	1
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowMenu.kt	3
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatTopBarSpec.kt	4
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowMenu.kt	2
+composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatTopBarSpec.kt	3
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/CommonChatInputCore.kt	5
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ComposerSettingsLine.kt	2
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ToolsButtonDots.kt	1

@@ -19,9 +19,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.garfiec.librechat.core.ui.components.AdaptiveButton
 import com.garfiec.librechat.core.ui.components.AdaptiveDivider
 import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
@@ -49,7 +50,7 @@ fun MarketPriceContent(server: String, model: String, onDismiss: () -> Unit, mod
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         com.garfiec.librechat.fork.composer.ComposerSheetHeader(
-            stringResource(Res.string.composer_prices), onNavigate = onDismiss, subPage = true)
+            stringResource(Res.string.composer_prices), onNavigate = onDismiss)
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(model, style = MaterialTheme.typography.bodySmall)
             when {
@@ -72,6 +73,7 @@ fun MarketPriceContent(server: String, model: String, onDismiss: () -> Unit, mod
 @Composable
 private fun MarketQuote(quote: MarketPrice) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionLabel(stringResource(Res.string.composer_prices))
         val unknown = stringResource(Res.string.market_unknown)
         Text(stringResource(Res.string.market_units), style = MaterialTheme.typography.bodySmall, color = muted())
         TableRow(
@@ -112,6 +114,7 @@ private fun MarketQuote(quote: MarketPrice) {
         val sellers = quote.sellers.orEmpty()
         if (sellers.isNotEmpty()) {
             AdaptiveDivider(Modifier.padding(vertical = 6.dp))
+            SectionLabel(stringResource(Res.string.market_sellers_group))
             TableRow(
                 stringResource(Res.string.market_sellers),
                 stringResource(Res.string.market_col_offers),
@@ -130,17 +133,22 @@ private fun MarketQuote(quote: MarketPrice) {
             }
         }
         val stats = buildList {
-            quote.stats?.ttftP50Ms?.let { add(stringResource(Res.string.market_ttft, marketNumber(it))) }
-            quote.stats?.tpsP50?.let { add(stringResource(Res.string.market_tps, marketNumber(it))) }
-            quote.stats?.uptimePct?.let { add(stringResource(Res.string.market_uptime, marketNumber(it))) }
-            quote.stats?.cacheHitRatePct?.let { add(stringResource(Res.string.market_hits, marketNumber(it))) }
-            (quote.stats?.requests24h ?: quote.requests24h)?.let {
-                add(stringResource(Res.string.market_requests, it.toString()))
-            }
+            quote.stats?.ttftP50Ms?.let { add(Res.string.market_ttft_label to "${marketNumber(it)} ms") }
+            quote.stats?.tpsP50?.let { add(Res.string.market_tps_label to marketNumber(it)) }
+            quote.stats?.uptimePct?.let { add(Res.string.market_uptime_label to "${marketNumber(it)}%") }
+            quote.stats?.cacheHitRatePct?.let { add(Res.string.market_hits_label to "${marketNumber(it)}%") }
+            (quote.stats?.requests24h ?: quote.requests24h)?.let { add(Res.string.market_requests_label to it.toString()) }
         }
         if (stats.isNotEmpty()) {
             AdaptiveDivider(Modifier.padding(vertical = 6.dp))
-            Text(stats.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = muted())
+            SectionLabel(stringResource(Res.string.market_performance))
+            stats.forEach { (label, value) ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(label), Modifier.weight(1f), fontSize = 16.sp)
+                    Text(value, Modifier.weight(1f), textAlign = TextAlign.End,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum"))
+                }
+            }
         }
         Text(stringResource(Res.string.market_quote_note), style = MaterialTheme.typography.bodySmall, color = muted())
     }
@@ -152,14 +160,21 @@ private fun muted() = MaterialTheme.colorScheme.onSurfaceVariant
 /** One row of four cells: a name, then three right-aligned figures. */
 @Composable
 private fun TableRow(name: String, first: String, second: String, third: String, header: Boolean = false) {
-    val style = if (header) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium
+    val style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp, fontWeight = FontWeight.Normal,
+        fontFeatureSettings = "tnum")
     val color = if (header) muted() else MaterialTheme.colorScheme.onSurface
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(name, Modifier.weight(NAME_WEIGHT), style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(name, Modifier.weight(NAME_WEIGHT), style = style, color = color)
         listOf(first, second, third).forEach { cell ->
-            Text(cell, Modifier.weight(1f), style = style, color = color, textAlign = TextAlign.End, maxLines = 1)
+            Text(cell, Modifier.weight(1f), style = style, color = color, textAlign = TextAlign.End)
         }
     }
 }
 
 private const val NAME_WEIGHT = 1.5f
+
+@Composable
+private fun SectionLabel(label: String) {
+    Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = muted())
+}

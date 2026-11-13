@@ -11,6 +11,7 @@ class CacheTtlSession {
     var arm: String? by mutableStateOf(null)
         private set
     fun reconcile(canExtend: Boolean) { if (!canExtend) arm = null }
+    fun setArm(value: String?, canExtend: Boolean) { arm = value.takeIf { canExtend && it in setOf("1h", "5m") } }
     fun cycle(canExtend: Boolean) { arm = if (canExtend) nextArm(arm) else null }
     fun payload(base: JsonObject?, route: CacheTtlRoute, direct: Boolean): JsonObject? {
         reconcile(route.canExtend)

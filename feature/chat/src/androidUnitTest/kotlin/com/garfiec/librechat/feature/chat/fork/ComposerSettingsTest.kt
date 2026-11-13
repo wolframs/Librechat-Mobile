@@ -21,8 +21,13 @@ class ComposerSettingsTest {
         val locked = tool.copy(state = SettingChipState.LOCKED)
         val off = tool.copy(state = SettingChipState.PINNED_OFF)
         val chips = SettingChips(listOf(tool, idle, signIn, failed, pending, locked, off))
-        assertEquals(listOf(tool, idle), foldedTools(chips.chips))
-        assertEquals(listOf(signIn, failed, pending, locked, off), visibleComposerChips(chips))
-        assertEquals(listOf(tool), visibleComposerChips(SettingChips(listOf(tool))))
+        assertEquals(listOf(signIn, failed), visibleComposerChips(chips))
+        assertEquals(emptyList(), visibleComposerChips(SettingChips(listOf(tool))))
+    }
+
+    @Test fun badgeCountsToolsAndConnectorsOnlyWhenShown() {
+        assertEquals(3, composerBadgeCount(true, setOf("web_search", "skills"), setOf("server")))
+        assertEquals(0, composerBadgeCount(true, emptySet(), emptySet()))
+        assertEquals(0, composerBadgeCount(false, setOf("skills"), setOf("server")))
     }
 }

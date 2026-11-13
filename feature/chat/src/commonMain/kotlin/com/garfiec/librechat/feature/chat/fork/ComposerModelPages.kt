@@ -8,7 +8,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.common.ToolConstants
 import com.garfiec.librechat.core.ui.components.ModelParameterContent
-import com.garfiec.librechat.feature.chat.components.ModelSelectorSheetContent
 import com.garfiec.librechat.fork.composer.ComposerSheetHeader
 import com.garfiec.librechat.fork.resources.*
 import org.jetbrains.compose.resources.stringResource
@@ -17,14 +16,14 @@ import org.jetbrains.compose.resources.stringResource
 internal fun ComposerAllModels(context: ComposerContext, back: () -> Unit, dismiss: () -> Unit) {
     val s = context.state
     val vm = context.viewModel
-    ModelSelectorSheetContent(
+    ComposerAllModelContent(
         endpointConfigs = s.endpointConfigs, availableModels = s.availableModels, agents = s.agents,
         selectedEndpoint = s.selectedEndpoint, selectedModel = s.selectedModel, modelSelect = s.modelSelectEnabled,
         onModelSelect = { endpoint, model -> vm.onModelSelected(endpoint, model); dismiss() },
         onSetApiKey = { dismiss(); context.providerKeys(it) },
         modelSpecs = s.modelSpecs, selectedSpec = s.selectedSpec,
         onSpecSelect = { vm.onSpecSelected(it); dismiss() }, agentsLoaded = s.agentsLoaded,
-        serverUrl = s.serverUrl, favoriteAgentIds = s.favoriteAgentIds, favoriteModelKeys = s.favoriteModelKeys,
+        favoriteAgentIds = s.favoriteAgentIds, favoriteModelKeys = s.favoriteModelKeys,
         favoriteSpecNames = s.favoriteSpecNames, onToggleAgentFavorite = vm::toggleAgentFavorite,
         onToggleModelFavorite = vm::toggleModelFavorite, onToggleSpecFavorite = vm::toggleSpecFavorite,
         starredDisplay = s.starredModelsDisplay, endpointKeyStates = s.endpointKeyStates,

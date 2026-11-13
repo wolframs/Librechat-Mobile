@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -51,9 +50,11 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.garfiec.librechat.core.common.ToolConstants
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.model.ArtifactsMode
@@ -63,15 +64,12 @@ import com.garfiec.librechat.core.ui.components.AdaptiveFilledTonalButton
 import com.garfiec.librechat.core.ui.components.AdaptiveSwitch
 import com.garfiec.librechat.core.ui.components.AdaptiveTile
 import com.garfiec.librechat.core.ui.components.DragSelectRowShape
-import com.garfiec.librechat.core.ui.components.InitialTile
 import com.garfiec.librechat.core.ui.components.ListDragSelection
 import com.garfiec.librechat.core.ui.components.PlatformBackHandler
-import com.garfiec.librechat.core.ui.components.TileStatusDot
 import com.garfiec.librechat.core.ui.components.dragSelectRow
 import com.garfiec.librechat.core.ui.components.dragSelectRowIcon
 import com.garfiec.librechat.core.ui.components.listDragSelection
 import com.garfiec.librechat.core.ui.components.rememberListDragSelection
-import com.garfiec.librechat.core.ui.mcp.mcpStatusColor
 import com.garfiec.librechat.core.ui.mcp.mcpStatusLabel
 import com.garfiec.librechat.core.ui.resources.artifacts_mode_title
 import com.garfiec.librechat.feature.chat.components.ComparisonModelLabels
@@ -243,7 +241,8 @@ fun ComposerToolsSheetContent(
                 if (shownTools.isNotEmpty()) {
                     Text(stringResource(ForkRes.string.composer_builtin),
                         Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
-                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                     ToolGrid(
                         tools = shownTools,
                         enabledTools = enabledTools,
@@ -298,7 +297,7 @@ fun ComposerToolsSheetContent(
                     { connectors = true }, "")
             } else {
                 Text(stringResource(ForkRes.string.composer_connector_detail), Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ComposerGroup {
                     mcpServers.forEachIndexed { index, server ->
                         val locked = server.name in gates.lockedMcpServers
@@ -367,7 +366,7 @@ private val TileGap = 8.dp
 private val TileInset = 16.dp
 private val TileShape = RoundedCornerShape(16.dp)
 private val AttachCardMinHeight = 80.dp
-private val CellMinHeight = 60.dp
+private val CellMinHeight = 56.dp
 
 /**
  * Camera, Photos, Files and Server: four equal cards side by side, filling the row, each at least
@@ -410,16 +409,11 @@ private fun AttachRow(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
                 ) {
-                    Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceContainerHighest,
-                        CircleShape),
-                        contentAlignment = Alignment.Center) { Icon(imageVector = icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp)) }
+                    Icon(icon, null, Modifier.size(24.dp))
                     Text(
                         text = stringResource(labelRes),
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                         textAlign = TextAlign.Center,
-                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -462,16 +456,15 @@ private fun SheetActionRow(icon: ImageVector, label: String, onClick: () -> Unit
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Normal),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (supporting != null) {
                     Text(
                         text = supporting,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -536,8 +529,8 @@ private fun ToolGrid(
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(meta.titleRes), style = MaterialTheme.typography.bodyLarge,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, overflow = TextOverflow.Clip)
                 }
                 AdaptiveSwitch(checked, null, enabled = !locked)
             }
@@ -567,11 +560,11 @@ private fun ToolsHiddenNote(reason: ToolsHiddenReason) {
                     ToolsHiddenReason.AGENT -> {
                         Text(
                             text = stringResource(Res.string.tools_from_agent_title),
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Normal),
                         )
                         Text(
                             text = stringResource(Res.string.tools_from_agent_body),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -645,29 +638,27 @@ private fun McpServerToggleRow(
                     )
                 },
             )
-            .heightIn(min = 64.dp)
+            .heightIn(min = 56.dp)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        InitialTile(seed = server.name, label = server.label, modifier = Modifier.size(32.dp).dragSelectRowIcon()) {
-            if (server.status == McpDisplayStatus.FAILED || server.status == McpDisplayStatus.NEEDS_SIGN_IN) {
-                TileStatusDot(color = mcpStatusColor(server.status), ringColor = MaterialTheme.colorScheme.surfaceContainerLow)
-            }
+        Box(Modifier.size(32.dp).background(MaterialTheme.colorScheme.surfaceContainerHighest,
+            RoundedCornerShape(8.dp)).dragSelectRowIcon(), contentAlignment = Alignment.Center) {
+            Text(server.label.take(1).uppercase(), fontSize = 16.sp)
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = server.label,
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                maxLines = 1,
+                fontWeight = FontWeight.Normal,
                 overflow = TextOverflow.Ellipsis,
             )
             val status = when {
                 server.status.needsAttention || server.signInPending -> stringResource(mcpStatusLabel(server.status))
                 !isSelected -> ""
                 server.status == McpDisplayStatus.CONNECTED -> stringResource(mcpStatusLabel(server.status))
-                else -> stringResource(ForkRes.string.composer_connects_send)
+                else -> ""
             }
             val detail = if (locked) {
                 lockedByText(lockedBy)
@@ -677,9 +668,8 @@ private fun McpServerToggleRow(
             if (status.isNotBlank() || detail != null) {
                 Text(
                 text = if (detail != null) listOf(status, detail).filter { it.isNotBlank() }.joinToString(" · ") else status,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             }
