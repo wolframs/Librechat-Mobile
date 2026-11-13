@@ -1,9 +1,11 @@
 <resources>
-    <string name="cache_ttl_none">Noch kein Cache</string>
-    <string name="cache_ttl_expired">Abgelaufen</string>
-    <string name="cache_ttl_armed">Nächste Nachricht: %1$s</string>
-    <string name="cache_ttl_info">Cache-Zeitfenster · Info</string>
-    <string name="cache_ttl_help">Tippen wechselt: 1h, 5m, aus. Gilt für eine direkt gesendete Nachricht. Beim Einreihen bleibt die Auswahl vorgemerkt. Die Uhr folgt der letzten markierten Antwort in diesem Zweig.</string>
-    <string name="cache_ttl_readonly">Diese Route sendet fünf Minuten. Die Uhr folgt der letzten markierten Antwort in diesem Zweig.</string>
+    <string name="cache_ttl_none">Cache</string>
+    <string name="cache_ttl_expired">abgelaufen</string>
+    <string name="cache_ttl_armed">%1$s gesetzt</string>
+    <string name="cache_ttl_info">Cache-Zeitfenster</string>
+    <string name="cache_ttl_close">Schließen</string>
+    <string name="cache_ttl_semantics">Prompt-Cache: %1$s</string>
+    <string name="cache_ttl_help">Tippen setzt das Cache-Zeitfenster für die nächste Nachricht: 1h, 5m, aus. Es gilt für eine direkt gesendete Nachricht; beim Einreihen bleibt die Auswahl bestehen. Die Uhr folgt der letzten Antwort in diesem Zweig, die der Server markiert hat. Gedrückt halten zeigt diesen Hinweis erneut.</string>
+    <string name="cache_ttl_readonly">Diese Route sendet ein Fünf-Minuten-Fenster. Die Uhr folgt der letzten Antwort in diesem Zweig, die der Server markiert hat.</string>
     <string name="cache_ttl_market">Der Anbieter wird pro Anfrage gewählt. Dies ist das angefragte Zeitfenster, kein nachgewiesener Cache.</string>
 </resources>

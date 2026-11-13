@@ -1,9 +1,11 @@
 <resources>
-    <string name="cache_ttl_none">No cache yet</string>
-    <string name="cache_ttl_expired">Expired</string>
-    <string name="cache_ttl_armed">Next send: %1$s</string>
-    <string name="cache_ttl_info">Cache window · Info</string>
-    <string name="cache_ttl_help">Tap to cycle: 1h, 5m, off. Applies to one direct send. Queued messages leave the choice staged. The clock follows the last marked reply on this branch.</string>
-    <string name="cache_ttl_readonly">This route sends five minutes. The clock follows the last marked reply on this branch.</string>
+    <string name="cache_ttl_none">cache</string>
+    <string name="cache_ttl_expired">expired</string>
+    <string name="cache_ttl_armed">%1$s armed</string>
+    <string name="cache_ttl_info">Cache window</string>
+    <string name="cache_ttl_close">Close</string>
+    <string name="cache_ttl_semantics">Prompt cache: %1$s</string>
+    <string name="cache_ttl_help">Tap to set the cache window for your next message: 1h, 5m, off. It applies to one message sent directly; a queued message leaves the choice in place. The clock follows the last reply on this branch that the server marked. Hold the pill to read this again.</string>
+    <string name="cache_ttl_readonly">This route sends a five-minute window. The clock follows the last reply on this branch that the server marked.</string>
     <string name="cache_ttl_market">The seller is chosen per request. This is the window asked for, not a cache known to exist.</string>
 </resources>
