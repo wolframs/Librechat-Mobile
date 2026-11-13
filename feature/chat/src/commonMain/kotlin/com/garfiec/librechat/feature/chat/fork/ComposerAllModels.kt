@@ -349,13 +349,6 @@ internal fun EndpointGroupHeader(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (!needsKey) {
-                        Text(
-                            text = modelCount.toString(),
-                            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
                 if (keyHint != null) KeyHintLine(keyHint)
             }
@@ -366,6 +359,13 @@ internal fun EndpointGroupHeader(
                 onClick = onSetApiKey,
             )
         } else {
+            // A column of its own before the chevron: a provider's name may itself end in a number.
+            Text(
+                text = modelCount.toString(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 12.dp),
+            )
             Icon(
                 imageVector = ForkIcons.ChevronDown,
                 contentDescription = stringResource(

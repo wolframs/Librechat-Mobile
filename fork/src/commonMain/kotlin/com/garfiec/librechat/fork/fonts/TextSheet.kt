@@ -113,7 +113,7 @@ fun TextSheet(onDismiss: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
             FontRow(prefs, slot) { scope.launch { store.setFont(slot, it) } }
-            Spacer(Modifier.height(SectionGap))
+            SharedSettingsNote()
             Choices(Res.string.fonts_size, SizeNames, size.ordinal,
                 { scope.launch { settings.setChatFontSize(ChatFontSize.entries[it]) } }) {
                 Text("A", style = MaterialTheme.typography.titleMedium.copy(fontSize = SizeGlyphSp[it].sp, lineHeight = 24.sp))
@@ -186,6 +186,18 @@ private fun emphasized(text: String): AnnotatedString = buildAnnotatedString {
                 index += 1
             }
         }
+    }
+}
+
+/** The slot choice ends here: a rule and one line say that what follows is not per slot. */
+@Composable
+private fun SharedSettingsNote() {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Inset, vertical = SectionGap)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
+        Text(
+            stringResource(Res.string.fonts_shared_note), Modifier.padding(top = 12.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

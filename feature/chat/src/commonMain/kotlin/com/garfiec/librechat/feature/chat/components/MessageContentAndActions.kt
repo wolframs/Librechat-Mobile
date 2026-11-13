@@ -813,19 +813,24 @@ internal fun MessageContentAndActions(
                     }
 
                     // Action buttons (right side)
+                    // FORK-HOOK(thread): a reply's edit and branch sit behind a labelled menu
+                    com.garfiec.librechat.feature.chat.fork.ThreadActions(
+                        isUser, onEdit, onFork, Modifier.weight(1f, fill = false), // FORK-HOOK(thread)
+                    ) { edit, branch, slot -> // FORK-HOOK(thread)
                     ActionButtons(
                         isUser = isUser,
                         onFeedback = onFeedback,
                         currentFeedback = currentFeedback,
                         onPickFeedbackTag = { pendingFeedbackRating = it.name },
                         onCopy = onCopy,
-                        onEdit = onEdit,
+                        onEdit = edit, // FORK-HOOK(thread)
                         onRegenerate = onRegenerate,
                         onReadAloud = onReadAloud,
                         isReading = isReading,
-                        onFork = onFork,
-                        modifier = Modifier.weight(1f, fill = false),
+                        onFork = branch, // FORK-HOOK(thread)
+                        modifier = slot, // FORK-HOOK(thread)
                     )
+                    } // FORK-HOOK(thread)
                 }
             }
         }

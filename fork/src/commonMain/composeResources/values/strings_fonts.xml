@@ -6,6 +6,7 @@
     <string name="fonts_model">Replies</string>
     <string name="fonts_same">App font</string>
     <string name="fonts_system">System</string>
+    <string name="fonts_shared_note">Size and spacing are the same for replies and your messages.</string>
     <string name="fonts_size">Text size</string>
     <string name="fonts_small">Small</string>
     <string name="fonts_medium">Medium</string>
