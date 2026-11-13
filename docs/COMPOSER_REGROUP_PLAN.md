@@ -85,6 +85,17 @@ shit\" <- that is signal, not noise".
   - The price sheet (fork-owned) gets aligned columns and a stats list.
   - Round 3 is also captured with the keyboard open and at a larger font.
 
+- **Round 3, 2026-11-13: 8 / 10.** Per surface: composer 8, model sheet with
+  sub-pages 9, effort 9, add-to-chat 8, connectors 9, price sheet 7.5, large
+  font 8, dark theme 8.5. The three-dot menu could not be scored: its capture
+  was taken mid-animation and showed no menu (checked on the device: the menu
+  opens). Left: the count badge read as a stray superscript; "Web Search /
+  Search the web" and "Skills / Use your saved skills" say nothing; attach tile
+  icons lose their common line at font scale 1.3; the price sheet has no first
+  answer. Round 4, done by the lead: a round badge on the plus's corner; second
+  lines only where they add something; top-aligned tiles; prices lead with
+  input and output, sellers and performance behind disclosure rows.
+
 ## What the judge said about the rest of the app
 
 (collected across rounds)
@@ -107,3 +118,6 @@ shit\" <- that is signal, not noise".
   The price sheet is dense: values run into the next column, statistics are a
   paragraph (handled in round 3). A mock for thread, header, landing and the
   model list is with the operator: `fork/design/thread-header-restyle.html`.
+- Round 3: thread text shows through behind the status bar and the floating
+  header; the judge now rates header and thread above anything left in the
+  sheets. Still with the operator (mock).
