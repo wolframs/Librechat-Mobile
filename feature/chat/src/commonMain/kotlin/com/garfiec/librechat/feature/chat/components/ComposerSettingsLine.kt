@@ -109,7 +109,9 @@ internal fun ComposerSettingsLine(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             leading?.invoke()
-            chips.chips.forEach { chip ->
+            com.garfiec.librechat.feature.chat.fork.ComposerToolsSummary(chips) // FORK-HOOK(composer): folded tool summary
+            // FORK-HOOK(composer): keep attention chips separate
+            com.garfiec.librechat.feature.chat.fork.visibleComposerChips(chips).forEach { chip ->
                 // Keyed by what the chip is, not where it sits: a chip leaving the line ahead of an MCP
                 // chip would otherwise hand that chip's menu state to the next one.
                 key(chip.lineKey) {

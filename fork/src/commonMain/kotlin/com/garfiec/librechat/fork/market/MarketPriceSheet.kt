@@ -34,14 +34,23 @@ import org.koin.compose.koinInject
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MarketPriceSheet(server: String, model: String, onDismiss: () -> Unit) {
+    AdaptiveModalBottomSheet(onDismissRequest = onDismiss,
+        dragHandle = { com.garfiec.librechat.fork.composer.ComposerDragHandle() }) {
+        MarketPriceContent(server, model, onDismiss = onDismiss)
+    }
+}
+
+@Composable
+fun MarketPriceContent(server: String, model: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val state = koinInject<MarketPriceState>()
     var attempt by remember { mutableIntStateOf(0) }
     val browser = LocalExternalUriHandler.current ?: LocalUriHandler.current
     LaunchedEffect(model, attempt) { state.load(model) }
-    AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(Res.string.market_costs), style = MaterialTheme.typography.titleLarge)
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        com.garfiec.librechat.fork.composer.ComposerSheetHeader(
+            stringResource(Res.string.composer_prices), onNavigate = onDismiss, subPage = true)
+        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(model, style = MaterialTheme.typography.bodySmall)
             when {
                 state.loading -> Text(stringResource(Res.string.market_loading))
@@ -56,7 +65,6 @@ fun MarketPriceSheet(server: String, model: String, onDismiss: () -> Unit) {
             AdaptiveButton(onClick = { browser.openUri(server.trimEnd('/') + "/cost") }) {
                 Text(stringResource(Res.string.market_dashboard))
             }
-            AdaptiveTextButton(onClick = onDismiss) { Text(stringResource(Res.string.market_close)) }
         }
     }
 }

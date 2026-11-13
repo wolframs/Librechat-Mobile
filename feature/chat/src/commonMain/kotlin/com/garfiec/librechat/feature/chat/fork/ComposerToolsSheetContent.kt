@@ -32,8 +32,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,12 +60,12 @@ import com.garfiec.librechat.core.model.ArtifactsMode
 import com.garfiec.librechat.core.model.mcp.McpDisplayStatus
 import com.garfiec.librechat.core.ui.artifacts.artifactsModeName
 import com.garfiec.librechat.core.ui.components.AdaptiveFilledTonalButton
-import com.garfiec.librechat.core.ui.components.AdaptiveSectionHeader
 import com.garfiec.librechat.core.ui.components.AdaptiveSwitch
 import com.garfiec.librechat.core.ui.components.AdaptiveTile
 import com.garfiec.librechat.core.ui.components.DragSelectRowShape
 import com.garfiec.librechat.core.ui.components.InitialTile
 import com.garfiec.librechat.core.ui.components.ListDragSelection
+import com.garfiec.librechat.core.ui.components.PlatformBackHandler
 import com.garfiec.librechat.core.ui.components.TileStatusDot
 import com.garfiec.librechat.core.ui.components.dragSelectRow
 import com.garfiec.librechat.core.ui.components.dragSelectRowIcon
@@ -71,7 +73,6 @@ import com.garfiec.librechat.core.ui.components.listDragSelection
 import com.garfiec.librechat.core.ui.components.rememberListDragSelection
 import com.garfiec.librechat.core.ui.mcp.mcpStatusColor
 import com.garfiec.librechat.core.ui.mcp.mcpStatusLabel
-import com.garfiec.librechat.core.ui.platform.rememberReduceMotion
 import com.garfiec.librechat.core.ui.resources.artifacts_mode_title
 import com.garfiec.librechat.feature.chat.components.ComparisonModelLabels
 import com.garfiec.librechat.feature.chat.components.ContextUsageExpandableGauge
@@ -90,11 +91,11 @@ import com.garfiec.librechat.feature.chat.util.WebSearchRoute
 import com.garfiec.librechat.feature.chat.viewmodel.ChatInputGates
 import com.garfiec.librechat.feature.chat.viewmodel.ContextGaugeDetails
 import com.garfiec.librechat.feature.chat.viewmodel.ToolsHiddenReason
+import com.garfiec.librechat.fork.composer.ComposerSheetHeader
 import com.garfiec.librechat.fork.icons.ForkIcons
 import com.garfiec.librechat.fork.resources.*
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.StringResource
-import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import com.garfiec.librechat.core.ui.resources.Res as CoreUiRes
 import com.garfiec.librechat.fork.resources.Res as ForkRes
@@ -183,9 +184,11 @@ fun ComposerToolsSheetContent(
     onOpenArtifactsMode: () -> Unit = {},
 ) {
     val dragSelection = rememberListDragSelection()
+    var connectors by remember { mutableStateOf(mcpExpanded || focus is ToolsSheetFocus.McpServer) }
+    PlatformBackHandler(enabled = connectors) { connectors = false }
     val expandMcp by rememberUpdatedState(onMcpExpandedChange)
     LaunchedEffect(focus) {
-        if (focus is ToolsSheetFocus.McpServer && !mcpExpanded) expandMcp(true)
+        if (focus is ToolsSheetFocus.McpServer) { connectors = true; expandMcp(true) }
     }
     Column(
         modifier = modifier
@@ -196,140 +199,139 @@ fun ComposerToolsSheetContent(
             .navigationBarsPadding()
             .padding(bottom = 16.dp),
     ) {
-        SheetTitle(stringResource(ForkRes.string.composer_add))
-        // Media and files only, hidden when the selected endpoint can't accept uploads (web's
-        // AttachFileChat gate). "Server" attaches an already-uploaded file by reference.
-        if (gates.fileUploadEnabled) {
-            AttachRow(
-                onTakePhoto = onTakePhoto,
-                onPickPhotos = onPickPhotos,
-                onAttachFiles = onAttachFiles,
-                onAttachFromServer = onAttachFromServer,
-                onDismiss = onDismiss,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        ComposerSheetHeader(
+            stringResource(if (connectors) ForkRes.string.composer_connectors else ForkRes.string.composer_add),
+            onNavigate = { if (connectors) connectors = false else onDismiss() }, subPage = connectors)
 
-        // Context-usage gauge, surfaced here when the user picked the options-sheet placement.
-        // Full-width; tapping expands the breakdown inline (no nested modal sheet).
-        val sheetContextGauge = contextGauge
-        if (contextBarPlacement == ContextBarPlacement.OPTIONS_SHEET &&
-            contextUsageEnabled &&
-            sheetContextGauge != null &&
-            sheetContextGauge.usage.usedTokens > 0
-        ) {
-            ContextUsageExpandableGauge(
-                details = sheetContextGauge,
-                expanded = contextGaugeExpanded,
-                onExpandedChange = onContextGaugeExpandedChange,
-                onCompact = onCompact,
-                onSnoozeCompact = onSnoozeCompact,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-        }
-
-        // Ephemeral tools are hidden for the agents endpoint (the agent uses its own configured tools,
-        // web's showEphemeralBadges) and under a `hideBadgeRow` spec. Each tool's icon/label comes from
-        // the shared [ephemeralToolMeta]; its gate is ChatUiState.toolGateOpen, as on the settings line.
-        if (gates.showEphemeralTools) {
-            val shownTools = SETTING_TOOL_ORDER.filter { it in openTools && ephemeralToolMeta(it) != null }
-            if (shownTools.isNotEmpty()) {
-                val onCount = shownTools.count { it in gates.lockedTools || it in enabledTools }
-                AdaptiveSectionHeader(
-                    title = pluralStringResource(Res.plurals.section_tools, onCount, onCount),
-                    horizontalInset = SectionInset,
+        if (!connectors) {
+            // Media and files only, hidden when the selected endpoint can't accept uploads (web's
+            // AttachFileChat gate). "Server" attaches an already-uploaded file by reference.
+            if (gates.fileUploadEnabled) {
+                AttachRow(
+                    onTakePhoto = onTakePhoto,
+                    onPickPhotos = onPickPhotos,
+                    onAttachFiles = onAttachFiles,
+                    onAttachFromServer = onAttachFromServer,
+                    onDismiss = onDismiss,
                 )
-                ToolGrid(
-                    tools = shownTools,
-                    enabledTools = enabledTools,
-                    lockedTools = gates.lockedTools,
-                    lockedBy = selection.lockedBy,
-                    webSearchKind = webSearchKind,
-                    artifactsMode = artifactsMode,
-                    onOpenArtifactsMode = onOpenArtifactsMode,
-                    onToggleTool = { key ->
-                        if (key == ToolConstants.WEB_SEARCH && key !in enabledTools && webSearchKeys?.opensOnTurnOn == true) {
-                            onOpenWebSearchKeys()
-                            onDismiss()
-                        } else {
-                            onToggleTool(key)
-                        }
-                    },
-                    focus = focus,
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // Context-usage gauge, surfaced here when the user picked the options-sheet placement.
+            // Full-width; tapping expands the breakdown inline (no nested modal sheet).
+            val sheetContextGauge = contextGauge
+            if (contextBarPlacement == ContextBarPlacement.OPTIONS_SHEET &&
+                contextUsageEnabled &&
+                sheetContextGauge != null &&
+                sheetContextGauge.usage.usedTokens > 0
+            ) {
+                ContextUsageExpandableGauge(
+                    details = sheetContextGauge,
+                    expanded = contextGaugeExpanded,
+                    onExpandedChange = onContextGaugeExpandedChange,
+                    onCompact = onCompact,
+                    onSnoozeCompact = onSnoozeCompact,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
-            if (webSearchKeys != null) {
+
+            // Ephemeral tools are hidden for the agents endpoint (the agent uses its own configured tools,
+            // web's showEphemeralBadges) and under a `hideBadgeRow` spec. Each tool's icon/label comes from
+            // the shared [ephemeralToolMeta]; its gate is ChatUiState.toolGateOpen, as on the settings line.
+            if (gates.showEphemeralTools) {
+                val shownTools = SETTING_TOOL_ORDER.filter { it in openTools && ephemeralToolMeta(it) != null }
+                if (shownTools.isNotEmpty()) {
+                    Text(stringResource(ForkRes.string.composer_builtin),
+                        Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ToolGrid(
+                        tools = shownTools,
+                        enabledTools = enabledTools,
+                        lockedTools = gates.lockedTools,
+                        lockedBy = selection.lockedBy,
+                        webSearchKind = webSearchKind,
+                        artifactsMode = artifactsMode,
+                        onOpenArtifactsMode = onOpenArtifactsMode,
+                        onToggleTool = { key ->
+                            if (key == ToolConstants.WEB_SEARCH && key !in enabledTools && webSearchKeys?.opensOnTurnOn == true) {
+                                onOpenWebSearchKeys()
+                                onDismiss()
+                            } else {
+                                onToggleTool(key)
+                            }
+                        },
+                        focus = focus,
+                    )
+                }
+                if (webSearchKeys != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    WebSearchKeysActionRow(
+                        row = webSearchKeys,
+                        onClick = {
+                            onOpenWebSearchKeys()
+                            onDismiss()
+                        },
+                    )
+                }
+            } else if (toolsHiddenReason != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                ToolsHiddenNote(toolsHiddenReason)
+            }
+
+            if (onAttachToCode != null) {
                 Spacer(modifier = Modifier.height(8.dp))
-                WebSearchKeysActionRow(
-                    row = webSearchKeys,
+                SheetActionRow(
+                    icon = ForkIcons.Cpu,
+                    label = stringResource(Res.string.attach_code_environment),
                     onClick = {
-                        onOpenWebSearchKeys()
+                        onAttachToCode()
                         onDismiss()
                     },
                 )
             }
-        } else if (toolsHiddenReason != null) {
-            Spacer(modifier = Modifier.height(16.dp))
-            ToolsHiddenNote(toolsHiddenReason)
         }
-
-        if (onAttachToCode != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            SheetActionRow(
-                icon = ForkIcons.Cpu,
-                label = stringResource(Res.string.attach_code_environment),
-                onClick = {
-                    onAttachToCode()
-                    onDismiss()
-                },
-            )
-        }
-
-        // MCP section — hidden when role denies MCP_SERVERS.USE, and for the agents
-        // endpoint where dynamic MCP selections are silently ignored by the backend.
         if (gates.showEphemeralTools && mcpServersEnabled && mcpServers.isNotEmpty()) {
-            // The header is a tappable row: keep its press highlight off the tiles above.
-            Spacer(modifier = Modifier.height(12.dp))
-            ConnectorHeader(
-                servers = mcpServers,
-                onCount = mcpServers.count { it.name in gates.lockedMcpServers || it.name in selectedMcpServerNames },
-                onToggle = { onMcpExpandedChange(!mcpExpanded) },
-                summary = mcpServers.filter {
-                    it.name in selectedMcpServerNames || it.name in gates.lockedMcpServers
-                }.joinToString { it.label },
-
-            )
-            if (mcpExpanded) {
+            if (!connectors) {
+                Spacer(Modifier.height(12.dp))
+                ConnectorHeader(mcpServers,
+                    mcpServers.count { it.name in gates.lockedMcpServers || it.name in selectedMcpServerNames },
+                    { connectors = true }, "")
+            } else {
+                Text(stringResource(ForkRes.string.composer_connector_detail), Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ComposerGroup {
-                mcpServers.forEach { server ->
-                    val locked = server.name in gates.lockedMcpServers
-                    McpServerToggleRow(
-                        modifier = focusedRow(focus == ToolsSheetFocus.McpServer(server.name), DragSelectRowShape),
-                        server = server,
-                        isSelected = locked || server.name in selectedMcpServerNames,
-                        onToggle = { onToggleMcpServer(server.name) },
-                        dragSelection = dragSelection,
-                        lockedBy = selection.lockedBy.takeIf { locked },
-                        locked = locked,
-                        onSignIn = onSignInMcpServer?.let { { it(server.name) } },
-                        onCancelSignIn = onCancelMcpSignIn?.let { { it(server.name) } },
-                        onSetUp = onSetUpMcpServer?.let {
-                            {
-                                it(server.name)
-                                onDismiss()
-                            }
-                        },
-                    )
-                }
+                    mcpServers.forEachIndexed { index, server ->
+                        val locked = server.name in gates.lockedMcpServers
+                        McpServerToggleRow(
+                            modifier = focusedRow(focus == ToolsSheetFocus.McpServer(server.name), DragSelectRowShape),
+                            server = server,
+                            isSelected = locked || server.name in selectedMcpServerNames,
+                            onToggle = { onToggleMcpServer(server.name) },
+                            dragSelection = dragSelection,
+                            lockedBy = selection.lockedBy.takeIf { locked },
+                            locked = locked,
+                            onSignIn = onSignInMcpServer?.let { { it(server.name) } },
+                            onCancelSignIn = onCancelMcpSignIn?.let { { it(server.name) } },
+                            onSetUp = onSetUpMcpServer?.let {
+                                {
+                                    it(server.name)
+                                    onDismiss()
+                                }
+                            },
+                        )
+                        if (index < mcpServers.lastIndex) ComposerDivider()
+                    }
                 }
             }
         }
-        LocalComposer.current?.let { context ->
-            if (context.state.promptsEnabled && context.prompts != null) {
-                Spacer(Modifier.height(12.dp))
-                ComposerGroup { ComposerAction(stringResource(ForkRes.string.composer_prompts),
-                    ForkIcons.BookOpen) { onDismiss()
-                    context.prompts.invoke() } }
+        if (!connectors) {
+            LocalComposer.current?.let { context ->
+                if (context.state.promptsEnabled && context.prompts != null) {
+                    Spacer(Modifier.height(12.dp))
+                    ComposerGroup { ComposerAction(stringResource(ForkRes.string.composer_prompts),
+                        ForkIcons.BookOpen) { onDismiss()
+                        context.prompts.invoke() } }
+                }
             }
         }
     }
@@ -361,7 +363,6 @@ private const val FOCUS_HOLD_MS = 700L
 private const val FOCUS_FADE_MS = 900
 private const val FOCUS_WASH_ALPHA = 0.14f
 
-private val SectionInset = 16.dp
 private val TileGap = 8.dp
 private val TileInset = 16.dp
 private val TileShape = RoundedCornerShape(16.dp)
@@ -384,7 +385,7 @@ private fun AttachRow(
         Triple(ForkIcons.Camera, Res.string.tool_camera, onTakePhoto),
         Triple(ForkIcons.Image, Res.string.tool_photos, onPickPhotos),
         Triple(ForkIcons.Paperclip, Res.string.tool_files, onAttachFiles),
-        Triple(ForkIcons.CloudDownload, Res.string.tool_server_files, onAttachFromServer),
+        Triple(ForkIcons.FolderOpen, ForkRes.string.composer_server_files, onAttachFromServer),
     )
     Row(
         modifier = Modifier
@@ -413,7 +414,7 @@ private fun AttachRow(
                         CircleShape),
                         contentAlignment = Alignment.Center) { Icon(imageVector = icon,
                         contentDescription = null,
-                        modifier = Modifier.size(22.dp)) }
+                        modifier = Modifier.size(24.dp)) }
                     Text(
                         text = stringResource(labelRes),
                         style = MaterialTheme.typography.labelMedium,
@@ -501,8 +502,6 @@ private fun ToolGrid(
     val artifactsModeName = artifactsMode.takeIf { it != ArtifactsMode.DEFAULT }?.let { artifactsModeName(it) }
     val artifactsStyle = stringResource(CoreUiRes.string.artifacts_mode_title)
     val setBy = lockedByText(lockedBy)
-    val on = stringResource(Res.string.tool_state_on)
-    val off = stringResource(Res.string.tool_state_off)
     ComposerGroup {
         tools.forEachIndexed { index, key ->
             val meta = ephemeralToolMeta(key) ?: return@forEachIndexed
@@ -511,10 +510,11 @@ private fun ToolGrid(
             val subtitle = when {
                 locked && key == ToolConstants.WEB_SEARCH && searchName != null -> "$setBy · $searchName"
                 locked -> setBy
-                !checked -> off
-                key == ToolConstants.WEB_SEARCH -> searchName ?: on
-                key == ToolConstants.ARTIFACTS -> artifactsModeName ?: on
-                else -> on
+                key == ToolConstants.WEB_SEARCH -> searchName.takeIf { checked } ?: stringResource(ForkRes.string.composer_web_detail)
+                key == ToolConstants.FILE_SEARCH -> stringResource(ForkRes.string.composer_files_detail)
+                key == ToolConstants.SKILLS -> stringResource(ForkRes.string.composer_skills_detail)
+                key == ToolConstants.ARTIFACTS -> artifactsModeName ?: stringResource(ForkRes.string.composer_artifacts_detail)
+                else -> stringResource(meta.titleRes)
             }
             val icon = when (key) {
                 ToolConstants.WEB_SEARCH -> ForkIcons.Globe
@@ -532,10 +532,12 @@ private fun ToolGrid(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Icon(icon, null, Modifier.size(22.dp))
+                Icon(icon, null, Modifier.size(24.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(meta.titleRes), style = MaterialTheme.typography.bodyLarge)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(meta.titleRes), style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 AdaptiveSwitch(checked, null, enabled = !locked)
             }
@@ -584,12 +586,13 @@ private fun ToolsHiddenNote(reason: ToolsHiddenReason) {
 }
 
 @Composable
+@Suppress("UnusedParameter")
 private fun ConnectorHeader(servers: List<McpServerDisplayData>, onCount: Int, onToggle: () -> Unit, summary: String) {
     ComposerGroup {
         ComposerAction(stringResource(ForkRes.string.composer_connectors),
             ForkIcons.Plug,
-            summary.ifBlank { "$onCount / ${servers.size}" },
-            onToggle)
+            if (onCount == 0) stringResource(ForkRes.string.composer_none_on) else stringResource(ForkRes.string.composer_n_on, onCount),
+            onClick = onToggle)
     }
 }
 
@@ -612,7 +615,6 @@ private fun McpServerToggleRow(
     onCancelSignIn: (() -> Unit)? = null,
     onSetUp: (() -> Unit)? = null,
 ) {
-    val reduceMotion = rememberReduceMotion()
     val setUp = onSetUp.takeIf { server.setsUpOnTap }
     val signIn = onSignIn.takeIf { server.signsInOnTap && setUp == null }
     val cancelSignIn = onCancelSignIn.takeIf { server.signInPending }
@@ -643,37 +645,44 @@ private fun McpServerToggleRow(
                     )
                 },
             )
+            .heightIn(min = 64.dp)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        InitialTile(seed = server.name, label = server.label, modifier = Modifier.dragSelectRowIcon()) {
-            TileStatusDot(
-                color = mcpStatusColor(server.status),
-                ringColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                pulsing = server.status == McpDisplayStatus.CONNECTING && !reduceMotion,
-            )
+        InitialTile(seed = server.name, label = server.label, modifier = Modifier.size(32.dp).dragSelectRowIcon()) {
+            if (server.status == McpDisplayStatus.FAILED || server.status == McpDisplayStatus.NEEDS_SIGN_IN) {
+                TileStatusDot(color = mcpStatusColor(server.status), ringColor = MaterialTheme.colorScheme.surfaceContainerLow)
+            }
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = server.label,
                 style = MaterialTheme.typography.bodyLarge,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            val status = stringResource(mcpStatusLabel(server.status))
+            val status = when {
+                server.status.needsAttention || server.signInPending -> stringResource(mcpStatusLabel(server.status))
+                !isSelected -> ""
+                server.status == McpDisplayStatus.CONNECTED -> stringResource(mcpStatusLabel(server.status))
+                else -> stringResource(ForkRes.string.composer_connects_send)
+            }
             val detail = if (locked) {
                 lockedByText(lockedBy)
             } else {
-                server.description?.takeIf { it.isNotBlank() }
+                null
             }
-            Text(
-                text = if (detail != null) "$status · $detail" else status,
+            if (status.isNotBlank() || detail != null) {
+                Text(
+                text = if (detail != null) listOf(status, detail).filter { it.isNotBlank() }.joinToString(" · ") else status,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            }
         }
         when {
             setUp != null -> McpRowButton(Res.string.mcp_set_up_action, setUp, enabled = true)
@@ -681,7 +690,7 @@ private fun McpServerToggleRow(
             cancelSignIn != null ->
                 McpRowButton(Res.string.mcp_chip_cancel_sign_in, cancelSignIn, enabled = !server.signInBusy)
         }
-        if (toggles) AdaptiveSwitch(checked = isSelected, onCheckedChange = null, enabled = !locked)
+        AdaptiveSwitch(checked = isSelected, onCheckedChange = null, enabled = toggles && !locked)
     }
 }
 

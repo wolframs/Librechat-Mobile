@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -41,23 +40,21 @@ import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.model.ModelRef
 import com.garfiec.librechat.core.model.ParameterDefinition
 import com.garfiec.librechat.core.ui.components.AdaptiveAssistChip
-import com.garfiec.librechat.core.ui.components.AdaptiveChipDefaults
 import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
 import com.garfiec.librechat.core.ui.components.AdaptiveTile
-import com.garfiec.librechat.core.ui.components.EndpointIcon
 import com.garfiec.librechat.core.ui.components.EndpointParameterRegistry
 import com.garfiec.librechat.core.ui.components.PlatformBackHandler
 import com.garfiec.librechat.core.ui.components.clearFocusOnTap
-import com.garfiec.librechat.feature.chat.components.ChatOptionsPage
 import com.garfiec.librechat.feature.chat.components.ChatOptionsSheetController
 import com.garfiec.librechat.feature.chat.components.ChatOverflowItem
 import com.garfiec.librechat.feature.chat.resources.chat_agent_fallback_label
-import com.garfiec.librechat.feature.chat.screen.selectionIcon
 import com.garfiec.librechat.feature.chat.util.CompareQuickPick
 import com.garfiec.librechat.feature.chat.util.compareQuickPicks
 import com.garfiec.librechat.feature.chat.util.visibleSpecs
 import com.garfiec.librechat.feature.chat.viewmodel.ChatUiState
 import com.garfiec.librechat.feature.chat.viewmodel.ChatViewModel
+import com.garfiec.librechat.fork.composer.ComposerDragHandle
+import com.garfiec.librechat.fork.composer.ComposerSheetHeader
 import com.garfiec.librechat.fork.icons.ForkIcons
 import com.garfiec.librechat.fork.resources.*
 import com.garfiec.librechat.fork.resources.Res
@@ -72,6 +69,8 @@ internal data class ComposerContext(
     val load: () -> Unit,
     val save: () -> Unit,
     val prompts: (() -> Unit)?,
+    val cache: @Composable () -> Unit,
+    val providerKeys: (String) -> Unit,
 )
 
 // Shares chat-owned actions with composer and both tools-sheet hosts.
@@ -88,9 +87,11 @@ internal fun ComposerScope(
     load: () -> Unit,
     save: () -> Unit,
     prompts: (() -> Unit)?,
+    cache: @Composable () -> Unit,
+    providerKeys: (String) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    CompositionLocalProvider(LocalComposer provides ComposerContext(state, viewModel, options, load, save, prompts)) {
+    CompositionLocalProvider(LocalComposer provides ComposerContext(state, viewModel, options, load, save, prompts, cache, providerKeys)) {
         content()
     }
 }
@@ -101,7 +102,14 @@ internal fun conversationSections(sections: List<List<ChatOverflowItem>>): List<
 private val relocatedActions =
     setOf(ChatOverflowItem.LOAD_PRESET, ChatOverflowItem.SAVE_PRESET, ChatOverflowItem.PROMPTS_LIBRARY, ChatOverflowItem.COMPARE)
 
-internal fun shortModelName(name: String): String = name.substringAfterLast('/')
+internal fun shortModelName(name: String, specLabel: String? = null): String {
+    if (!specLabel.isNullOrBlank()) return specLabel
+    val id = name.substringAfter('/')
+    if (!id.startsWith("claude-")) return id
+    val parts = id.removePrefix("claude-").split('-')
+    return parts.first().replaceFirstChar { it.uppercase() } +
+        parts.drop(1).joinToString(".").let { if (it.isEmpty()) "" else " $it" }
+}
 internal const val ShowHeaderModel: Boolean = false
 internal val HeaderModelText: String? = null
 
@@ -121,16 +129,24 @@ private fun effortDefinition(state: ChatUiState): ParameterDefinition? {
     ).firstOrNull { it.key in setOf("reasoning_effort", "thinkingLevel", "effort") && !it.options.isNullOrEmpty() }
 }
 
-internal fun modelSheetPicks(candidates: List<CompareQuickPick>, usage: List<ModelRef>): List<CompareQuickPick> {
+internal fun modelSheetPicks(
+    candidates: List<CompareQuickPick>, usage: List<ModelRef>, current: CompareQuickPick? = null,
+): List<CompareQuickPick> {
     val starred = candidates.filter { it.starred }
-    if (starred.isNotEmpty()) return starred.take(6)
-    return usage.mapNotNull { ref -> candidates.firstOrNull { it.spec == ref.spec &&
-        it.endpoint == ref.endpoint &&
-        it.model == ref.model } }.distinct().take(6)
+    val ranked = if (starred.isNotEmpty()) {
+        starred
+    } else {
+        usage.mapNotNull { ref ->
+            candidates.firstOrNull { it.spec == ref.spec && it.endpoint == ref.endpoint && it.model == ref.model }
+        }.distinct()
+    }
+    val unstarredCurrent = if (current != null && current !in starred) listOf(current) else emptyList()
+    val picks = (unstarredCurrent + ranked).distinct().take(6)
+    return if (current != null && current !in picks) picks.take(5) + current else picks
 }
 
 @Composable
-internal fun ComposerModelChip() {
+internal fun ComposerModelChip(modifier: Modifier = Modifier) {
     val context = LocalComposer.current ?: return
     val state = context.state
     if (!state.modelPickerShown) return
@@ -142,38 +158,41 @@ internal fun ComposerModelChip() {
         state.selectedSpec,
         state.modelSpecs)
     val effort = definition?.let { state.selection.sendParameters.getValueForKey(it.key) }.orEmpty()
-    AdaptiveAssistChip(
-        onClick = { open = true },
-        modifier = Modifier.widthIn(max = 180.dp).heightIn(min = 40.dp),
-        shape = CircleShape,
-        colors = AdaptiveChipDefaults.overlayAssistChipColors(),
-        border = null,
-        label = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    shortModelName(modelLabel.displayModel.orEmpty()),
-                    Modifier.weight(1f, fill = false),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                if (effort.isNotBlank()) {
+    Box(modifier.height(48.dp), contentAlignment = Alignment.Center) {
+        AdaptiveAssistChip(
+            onClick = { open = true },
+            modifier = Modifier.widthIn(max = 180.dp).height(34.dp),
+            shape = CircleShape,
+            colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                labelColor = MaterialTheme.colorScheme.onSurface,
+                trailingIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+            border = null,
+            label = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        effortLabel(effort),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelMedium,
+                        shortModelName(state.selectedModel.orEmpty(),
+                            state.modelSpecs?.list?.firstOrNull { it.name == state.selectedSpec }?.label
+                            ?: modelLabel.displayModel.takeIf { state.selectedEndpoint == "agents" }),
+                        Modifier.weight(1f, fill = false),
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelLarge,
                     )
+                    if (effort.isNotBlank()) {
+                        Text(
+                            effortLabel(effort),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                        )
+                    }
                 }
-            }
-        },
-        leadingIcon = {
-            val icon = state.selectionIcon()
-            if (icon != null) {
-                EndpointIcon(endpointName = icon.endpointName, iconUrl = icon.imageUrl, provider = icon.provider, size = 18.dp)
-            }
-        },
-    )
+            },
+            trailingIcon = { Icon(ForkIcons.ChevronDown, null, Modifier.size(14.dp)) },
+        )
+    }
     if (open) ComposerModelSheet(context, definition) { open = false }
 }
 
@@ -194,24 +213,50 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
         endpointKeyStates = state.endpointKeyStates, specs = state.modelSpecs.visibleSpecs(state.agents, state.agentsLoaded),
         modelSpecs = state.modelSpecs, serverUrl = state.serverUrl, limit = Int.MAX_VALUE,
     )
-    val picks = modelSheetPicks(candidates, usage)
+    val current = candidates.firstOrNull {
+        it.spec == state.selectedSpec && it.endpoint == state.selectedEndpoint && it.model == state.selectedModel
+    }
+        ?: CompareQuickPick(state.selectedEndpoint, state.selectedModel.orEmpty(),
+            state.modelSpecs?.list?.firstOrNull { it.name == state.selectedSpec }?.label ?: state.selectedModel.orEmpty(),
+            state.endpointConfigs[state.selectedEndpoint]?.name ?: state.selectedEndpoint, false, spec = state.selectedSpec)
+    val picks = modelSheetPicks(candidates, usage, current)
+    val api = koinInject<com.garfiec.librechat.fork.market.MarketApi>()
+    var markets by remember(state.serverUrl) { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(state.serverUrl) { markets = api.endpoints() }
+    val priceEndpoint = state.selectedAgentProvider.takeIf { state.selectedEndpoint == "agents" } ?: state.selectedEndpoint
+    val priceModel = state.selection.selectedAgentModel.takeIf { state.selectedEndpoint == "agents" } ?: state.selectedModel
     AdaptiveModalBottomSheet(onDismissRequest = dismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        dragHandle = { ComposerDragHandle() },
         modifier = Modifier.clearFocusOnTap()) {
         PlatformBackHandler(enabled = page != "model") { page = "model" }
+        if (page == "prices") {
+            com.garfiec.librechat.fork.market.MarketPriceContent(state.serverUrl, priceModel.orEmpty(), onDismiss = { page = "model" })
+            return@AdaptiveModalBottomSheet
+        }
+        if (page == "all") {
+            ComposerAllModels(context, { page = "model" }, dismiss)
+            return@AdaptiveModalBottomSheet
+        }
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SheetTitle(stringResource(when (page) { "effort" -> Res.string.composer_effort
+            ComposerSheetHeader(stringResource(when (page) {
+                "effort" -> Res.string.composer_effort
                 "presets" -> Res.string.composer_presets
-                else -> Res.string.composer_model }))
-            if (page != "model") {
-                ComposerGroup { ComposerAction(stringResource(Res.string.composer_back),
-                ForkIcons.ChevronRight) { page = "model" } }
-            }
+                "parameters" -> Res.string.composer_parameters
+                else -> Res.string.composer_model
+            }), onNavigate = { if (page == "model") dismiss() else page = "model" }, subPage = page != "model")
             when (page) {
+                "parameters" -> ComposerParameters(context)
                 "effort" -> if (definition != null) {
                     ComposerGroup {
-                        definition.options.orEmpty().forEachIndexed { index, value ->
+                        ChoiceRow(stringResource(Res.string.composer_default), stringResource(Res.string.composer_default_detail),
+                            state.selection.sendParameters.getValueForKey(definition.key).isBlank(), !state.parametersSetBySpec) {
+                            vm.updateModelParameters(state.selection.sendParameters.withUpdatedKey(definition.key, ""))
+                            page = "model"
+                        }
+                        ComposerDivider()
+                        definition.options.orEmpty().filter { it.isNotBlank() }.forEachIndexed { index, value ->
                             ChoiceRow(effortLabel(value),
                                 null,
                                 state.selection.sendParameters.getValueForKey(definition.key) == value,
@@ -219,9 +264,11 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                                 vm.updateModelParameters(state.selection.sendParameters.withUpdatedKey(definition.key, value))
                                 page = "model"
                             }
-                            if (index < definition.options.orEmpty().lastIndex) ComposerDivider()
+                            if (index < definition.options.orEmpty().count { it.isNotBlank() } - 1) ComposerDivider()
                         }
                     }
+                    Text(stringResource(Res.string.composer_effort_detail), Modifier.padding(horizontal = 16.dp),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 "presets" -> ComposerGroup {
                     ComposerAction(stringResource(Res.string.composer_load), ForkIcons.BookOpen) { dismiss(); context.load() }
@@ -229,6 +276,10 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                     ComposerAction(stringResource(Res.string.composer_save), ForkIcons.Bookmark) { dismiss(); context.save() }
                 }
                 else -> {
+                    Text(stringResource(
+                        if (candidates.any { it.starred }) Res.string.composer_favourites else Res.string.composer_most_used),
+                        Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (picks.isNotEmpty()) {
                         ComposerGroup {
                             picks.forEachIndexed { index, pick ->
@@ -238,7 +289,10 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                                     state.selectedSpec == null &&
                                         state.selectedEndpoint == pick.endpoint && state.selectedModel == pick.model
                                 }
-                                ChoiceRow(shortModelName(pick.name), pick.source, selected) {
+                                ChoiceRow(shortModelName(pick.model,
+                                    state.modelSpecs?.list?.firstOrNull { it.name == pick.spec }?.label
+                                        ?: pick.name.takeIf { pick.endpoint == "agents" }),
+                                    "${pick.model} · ${pick.source}", selected) {
                                     if (pick.spec != null) {
                                         state.modelSpecs?.list?.firstOrNull { it.name == pick.spec }?.let(vm::onSpecSelected)
                                     } else {
@@ -250,41 +304,39 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                             }
                         }
                     }
-                    if (candidates.none { it.starred }) {
-                        Text(stringResource(Res.string.composer_pin_hint),
-                        Modifier.padding(horizontal = 20.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ComposerGroup {
+                        ComposerAction(stringResource(Res.string.composer_more), ForkIcons.Blocks) { page = "all" }
                     }
-                    if (definition != null || state.parametersEnabled || state.presetsEnabled) {
+                    if (definition != null || state.parametersEnabled || state.presetsEnabled || priceEndpoint in markets) {
                         ComposerGroup {
                             if (definition != null) {
                                 ComposerAction(
                                     stringResource(Res.string.composer_effort),
-                                    ForkIcons.Brain,
-                                    effortLabel(state.selection.sendParameters.getValueForKey(definition.key)),
+                                    ForkIcons.Gauge,
+                                    effortLabel(state.selection.sendParameters.getValueForKey(definition.key)), trailingValue = true,
                                 ) { page = "effort" }
-                                ComposerDivider()
                             }
                             if (state.parametersEnabled) {
+                                if (definition != null) ComposerDivider()
                                 ComposerAction(stringResource(Res.string.composer_parameters), ForkIcons.SlidersHorizontal) {
-                                    dismiss()
-                                    context.options.open(ChatOptionsPage.ModelParameters)
+                                    page = "parameters"
                                 }
                             }
                             if (state.presetsEnabled) {
                                 if (state.parametersEnabled || definition != null) ComposerDivider()
-                                ComposerAction(stringResource(Res.string.composer_presets), ForkIcons.Bookmark) {
+                                ComposerAction(stringResource(Res.string.composer_presets), ForkIcons.BookmarkPlus) {
                                     page = "presets"
                                 }
+                            }
+                            if (priceEndpoint in markets && !priceModel.isNullOrBlank()) {
+                                if (definition != null || state.parametersEnabled || state.presetsEnabled) ComposerDivider()
+                                ComposerAction(stringResource(Res.string.composer_prices), ForkIcons.DollarSign) { page = "prices" }
                             }
                         }
                     }
                     ComposerGroup {
-                        ComposerAction(stringResource(Res.string.composer_more), ForkIcons.Blocks) { dismiss(); vm.openModelSheet() }
                         if (state.multiConvoEnabled && state.modelPickerShown) {
-                            ComposerDivider()
-                            ComposerAction(stringResource(Res.string.composer_compare), ForkIcons.Layers) {
+                            ComposerAction(stringResource(Res.string.composer_compare), ForkIcons.Columns2) {
                                 dismiss()
                                 when { state.comparisonState.isEnabled -> vm.stopComparison()
                                     state.comparisonState.isSettingUp -> vm.cancelComparisonSetup()
@@ -312,39 +364,35 @@ private fun effortLabel(value: String): String = when (value) {
 }
 
 @Composable
-internal fun SheetTitle(title: String) {
-    Text(title,
-        Modifier.fillMaxWidth().padding(16.dp),
-        style = MaterialTheme.typography.titleMedium,
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-}
-
-@Composable
 internal fun ComposerGroup(content: @Composable ColumnScope.() -> Unit) {
     AdaptiveTile(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Column(content = content) }
 }
 
 @Composable
 internal fun ComposerDivider() {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)))
+    Box(Modifier.fillMaxWidth().height(0.5.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)))
 }
 
 @Composable
-internal fun ComposerAction(label: String, icon: ImageVector, supporting: String? = null, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(horizontal = 16.dp,
-        vertical = 12.dp),
+internal fun ComposerAction(
+    label: String, icon: ImageVector, supporting: String? = null, trailingValue: Boolean = false, onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().height(if (supporting.isNullOrBlank() || trailingValue) 56.dp else 64.dp)
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Icon(icon, null, Modifier.size(22.dp))
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, null, Modifier.size(24.dp))
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-            if (!supporting.isNullOrBlank()) {
-                Text(supporting,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis)
+            Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+            if (!trailingValue && !supporting.isNullOrBlank()) {
+                Text(supporting, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+        if (trailingValue && !supporting.isNullOrBlank()) {
+            Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Icon(ForkIcons.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -352,25 +400,30 @@ internal fun ComposerAction(label: String, icon: ImageVector, supporting: String
 
 @Composable
 private fun ChoiceRow(label: String, source: String?, checked: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(enabled = enabled,
+    Row(Modifier.fillMaxWidth().height(if (source.isNullOrBlank()) 56.dp else 64.dp).clickable(enabled = enabled,
         onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
             if (!source.isNullOrBlank()) {
                 Text(source,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (checked) Icon(ForkIcons.Check, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+        if (checked) Icon(ForkIcons.Check, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
     }
 }
 
 @Composable
 internal fun ComposerLeadingButtons(content: @Composable RowScope.() -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) { content(); ComposerModelChip() }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        content()
+        ComposerModelChip(Modifier.weight(1f, fill = false))
+        LocalComposer.current?.cache?.invoke()
+    }
 }
 
 @Composable
-internal fun composerCanFold(upstream: Boolean): Boolean = upstream && LocalComposer.current?.state?.modelPickerShown != true
+internal fun composerCanFold(upstream: Boolean): Boolean = upstream && LocalComposer.current == null

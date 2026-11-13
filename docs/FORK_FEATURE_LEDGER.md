@@ -130,15 +130,15 @@ module, `fork/README.md` wins.
 - The arm is in memory, per chat view model. Only a normal send from the composer consumes it, as
   the top-level request field `cacheTTL`. Regenerate, continue, edit and a queued message leave it
   in place.
-- The rail is a sideways pill, 28 x 104 dp, in the thread's left gutter below the header, as the
-  fork had it before. A tap cycles; a hold opens the explanation, with the marketplace caveat when
-  the server's `/cost/markets/endpoints` lists the endpoint.
+- The cache chip sits after the model pill in the composer. Idle and expired windows show only
+  a dot; the accessibility label still names cache. A tap cycles; a hold opens the explanation,
+  with the marketplace caveat when `/cost/markets/endpoints` lists the endpoint.
 
 ### Prices and costs: how it is built
 
 - `:fork` `market/` owns the sidecar wire types, authenticated calls, sheet state and Adaptive sheet.
-- The existing gutter hook calls `ChatGutter`: cache and price controls have independent visibility;
-  marketplace discovery uses the cache route's endpoint and saved agents use their own model.
+- The existing cache hook supplies the composer chip through `ChatGutter`; the gutter overlay is gone.
+  Prices opens from Model for marketplace endpoints, including saved agents' provider/model.
 - Opening or Retry fetches one quote, with no polling. Account/server/model changes discard the sheet;
   absent routes hide the entry, and quote failures offer Retry. No Room changes.
 - The sheet shows effective prices with per-lane best fallback, list comparisons, sellers and available
@@ -1108,8 +1108,8 @@ Fork-only surfaces in `feature/chat/.../chat/fork/ComposerModelSheet.kt` and
 pill replaces the landing header model chip and model-specific placeholder.
 The pill opens starred picks (six maximum), falling back to account-scoped
 usage from `SettingsDataStore.topUsedModels`. Existing selector rules filter
-specs, agents, endpoint availability and keys. More models opens the unchanged
-full selector. Effort uses the registry's options and existing parameter
+specs, agents, endpoint availability and keys. The current model always stays in the six rows.
+All models embeds the upstream selector as a sub-page. Effort uses the registry's options and existing parameter
 read/write methods; enforced specs remain read-only. Compare retains its
 existing toggle/setup behavior. Parameters retains upstream's primary-lane rule.
 
@@ -1118,7 +1118,10 @@ MCP status/auth/setup/locks, focus highlighting and context placement. Prompts
 moves there; presets and compare move to Model. The overflow filters only those
 four relocated actions. A chat-owned composition scope carries existing
 callbacks to both sheet hosts without adding platform parameters. The chip
-keeps the composer expanded so it remains below the field at narrow widths.
+keeps the composer expanded, with settings above the action row. Plain on-state tool/server
+chips fold into Tools · N, while attention and locked chips retain their actions. Shared fork
+sheet chrome serves Model, its sub-pages, Add to chat, Connectors and Prices. Connectors is a
+separate page with back navigation; the cache chip and Prices replace the gutter controls.
 
 Hook list and hand-check instructions: `docs/COMPOSER_REGROUP_IMPLEMENTATION.md`.
 No device use, backend requests, iOS build or visual acceptance in this change.

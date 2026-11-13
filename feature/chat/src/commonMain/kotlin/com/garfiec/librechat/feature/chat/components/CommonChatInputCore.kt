@@ -558,7 +558,7 @@ private fun ComposerRows(
     // Folded mid-run, Stop stays and the mic gives way; otherwise the mic stays and Send goes.
     val streaming by animateFloatAsState(if (state.isStreaming) 1f else 0f, label = "foldStreaming")
     val hidden = if (folded) Modifier.clearAndSetSemantics {} else Modifier
-    FoldingComposerRows(
+    com.garfiec.librechat.feature.chat.fork.ComposerRowsLayout( // FORK-HOOK(composer): settings above actions
         openness = openness,
         field = textFieldContent,
         // FORK-HOOK(composer): shared Android and iOS model chip

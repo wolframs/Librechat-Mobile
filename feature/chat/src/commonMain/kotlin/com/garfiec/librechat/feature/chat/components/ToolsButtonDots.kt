@@ -36,7 +36,9 @@ internal fun BoxScope.ToolsButtonDots(
                 .background(color = MaterialTheme.colorScheme.tertiary, shape = CircleShape),
         )
     }
-    if (showsActiveToolsDot(showEphemeralTools, enabledTools, selectedMcpServerNames)) {
+    // FORK-HOOK(composer): no blue plus dot
+    if (com.garfiec.librechat.feature.chat.fork.ShowToolsDot &&
+        showsActiveToolsDot(showEphemeralTools, enabledTools, selectedMcpServerNames)) {
         Box(
             modifier = Modifier
                 .size(ToolsDotSize)

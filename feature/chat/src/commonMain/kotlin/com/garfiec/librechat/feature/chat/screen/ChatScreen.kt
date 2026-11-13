@@ -441,7 +441,16 @@ fun ChatScreen(
     // FORK-HOOK(composer): model and prompts actions
     com.garfiec.librechat.feature.chat.fork.ComposerScope(uiState, viewModel, optionsController,
         { viewModel.reloadPresetsIfFailed(); showPresetPicker = true },
-        { showSavePresetDialog = true }, onNavigateToPromptsLibrary) {
+        { showSavePresetDialog = true }, onNavigateToPromptsLibrary,
+        cache = { // FORK-HOOK(cache-ttl): composer slot
+                    com.garfiec.librechat.fork.market.ChatGutter( // FORK-HOOK(cache-ttl): composer cache chip
+                        viewModel.cacheTtl, uiState.selectedEndpoint, uiState.selectedModel, uiState.serverUrl, // FORK-HOOK(cache-ttl)
+                        uiState.endpointConfigs, uiState.modelParameters.dynamicValues, // FORK-HOOK(cache-ttl)
+                        uiState.selectedAgentProvider, uiState.selection.selectedAgentModel, // FORK-HOOK(cache-ttl)
+                        uiState.selection.selectedAgentReasoning, viewModel.uiState, // FORK-HOOK(cache-ttl)
+                        { it.displayMessages.map { node -> node.message } }, // FORK-HOOK(cache-ttl)
+                    ) // FORK-HOOK(cache-ttl)
+        }, providerKeys = { onNavigateToProviderKeys(it) }) { // FORK-HOOK(composer): model sub-pages
     ChatRoot(
         inlineArtifactPrefs = prefs.inlineArtifactPrefs,
         mermaidRenderCache = viewModel.mermaidRenderCache,
@@ -561,15 +570,6 @@ fun ChatScreen(
                             onBrowseAllModels = { showCompareBrowseAll = true },
                         )
                     }
-
-                    com.garfiec.librechat.fork.market.ChatGutter( // FORK-HOOK(cache-ttl): cache and prices host
-                        viewModel.cacheTtl, uiState.selectedEndpoint, uiState.selectedModel, uiState.serverUrl, // FORK-HOOK(cache-ttl)
-                        uiState.endpointConfigs, uiState.modelParameters.dynamicValues, // FORK-HOOK(cache-ttl)
-                        uiState.selectedAgentProvider, uiState.selection.selectedAgentModel, // FORK-HOOK(cache-ttl)
-                        uiState.selection.selectedAgentReasoning, viewModel.uiState, // FORK-HOOK(cache-ttl)
-                        { it.displayMessages.map { node -> node.message } }, // FORK-HOOK(cache-ttl)
-                        Modifier.align(Alignment.TopStart).padding(top = topContentPadding, start = 8.dp), // FORK-HOOK(cache-ttl)
-                    ) // FORK-HOOK(cache-ttl)
 
                     // ChatInput overlays at the bottom so gradient shows content behind
                     val isAnyStreaming = uiState.isStreaming ||

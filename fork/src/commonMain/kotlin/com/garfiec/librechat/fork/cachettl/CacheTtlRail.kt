@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -27,7 +26,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -46,13 +44,12 @@ import com.garfiec.librechat.core.ui.theme.statusColors
 import com.garfiec.librechat.fork.resources.Res
 import com.garfiec.librechat.fork.resources.cache_ttl_armed
 import com.garfiec.librechat.fork.resources.cache_ttl_close
-import com.garfiec.librechat.fork.resources.cache_ttl_expired
 import com.garfiec.librechat.fork.resources.cache_ttl_help
 import com.garfiec.librechat.fork.resources.cache_ttl_info
 import com.garfiec.librechat.fork.resources.cache_ttl_market
-import com.garfiec.librechat.fork.resources.cache_ttl_none
 import com.garfiec.librechat.fork.resources.cache_ttl_readonly
 import com.garfiec.librechat.fork.resources.cache_ttl_semantics
+import com.garfiec.librechat.fork.resources.composer_cache
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -94,8 +91,8 @@ fun <T> CacheTtlRail(
     val anchor = cacheTtlAnchor(currentPath, markers)
     val remaining = anchor?.let { remainingMillis(it, now) }
     val countdown = when {
-        remaining == null -> stringResource(Res.string.cache_ttl_none)
-        remaining <= 0 -> stringResource(Res.string.cache_ttl_expired)
+        remaining == null -> ""
+        remaining <= 0 -> ""
         else -> formatRemaining(remaining)
     }
     val arm = session.arm.takeIf { route.canExtend }
@@ -132,13 +129,6 @@ fun <T> CacheTtlRail(
 
 private enum class PillTone { IDLE, RUNNING, ARMED_SHORT, ARMED_LONG }
 
-private val RailWidth = 28.dp
-private val RailLength = 104.dp
-
-/**
- * A pill turned on its side, so it fits the thread's left gutter: 28 x 104 dp whatever the label
- * says. The outer box keeps that footprint; the pill inside is laid out at full length and rotated.
- */
 @Composable
 private fun CacheTtlPill(
     label: String,
@@ -159,28 +149,29 @@ private fun CacheTtlPill(
     } else {
         MaterialTheme.colorScheme.surfaceVariant
     }
-    val description = stringResource(Res.string.cache_ttl_semantics, label)
-    Box(modifier.width(RailWidth).height(RailLength), contentAlignment = Alignment.Center) {
+    val description =
+        stringResource(Res.string.cache_ttl_semantics, label.ifBlank { stringResource(Res.string.composer_cache) })
+    Box(modifier.height(48.dp).combinedClickable(role = Role.Button, onClick = onClick, onLongClick = onLongClick)
+        .semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
-                .requiredWidth(RailLength)
-                .rotate(-90f)
+                .height(32.dp)
                 .clip(RoundedCornerShape(50))
                 .background(container)
-                .combinedClickable(role = Role.Button, onClick = onClick, onLongClick = onLongClick)
-                .semantics { contentDescription = description }
                 .padding(horizontal = 6.dp, vertical = 5.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.size(7.dp).clip(CircleShape).background(accent))
-            Spacer(Modifier.width(5.dp))
-            Text(
+            if (label.isNotEmpty()) Spacer(Modifier.width(5.dp))
+            if (label.isNotEmpty()) {
+                Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = if (armed) accent else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
             )
+            }
         }
     }
 }

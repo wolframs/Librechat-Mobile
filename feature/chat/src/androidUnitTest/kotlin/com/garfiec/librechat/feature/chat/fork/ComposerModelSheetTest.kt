@@ -13,6 +13,21 @@ class ComposerModelSheetTest {
         assertEquals("haiku-5.5", shortModelName("haiku-5.5"))
     }
 
+    @Test fun claudeNamesAndSpecLabelsAreShared() {
+        assertEquals("Haiku 5.5", shortModelName("claude-haiku-5.5"))
+        assertEquals("Opus 4.8", shortModelName("anthropic/claude-opus-4-8"))
+        assertEquals("My spec", shortModelName("claude-haiku-5.5", "My spec"))
+        assertEquals("deepseek-v4.1-flash", shortModelName("vendor/deepseek-v4.1-flash"))
+    }
+
+    @Test fun currentModelIsFirstWhenUnstarredAndAlwaysFits() {
+        val current = pick("current")
+        val pins = (1..8).map { pick("m$it", true) }
+        assertEquals(listOf(current) + pins.take(5), modelSheetPicks(pins, emptyList(), current))
+        assertEquals(listOf(current), modelSheetPicks(emptyList(), emptyList(), current))
+        assertEquals(pins.take(5) + pins.last(), modelSheetPicks(pins, emptyList(), pins.last()))
+    }
+
     @Test fun starredModelsWinInPinOrderAndStopAtSix() {
         val pins = (1..8).map { pick("m$it", true) }
         assertEquals(

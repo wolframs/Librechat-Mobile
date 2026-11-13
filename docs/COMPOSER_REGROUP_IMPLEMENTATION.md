@@ -1,96 +1,184 @@
 # Composer regrouping implementation
 
-Fork surfaces: `feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/fork/`.
-English and German strings: `fork/src/commonMain/composeResources/values*/strings_composer.xml`.
+Round 2 builds on round 1 (`ab218233`) on `feat/composer-regroup`.
+Fork surfaces live in `feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/fork/`;
+shared sheet chrome lives in `fork/.../composer/SheetChrome.kt`. All added/changed copy is in
+English and German `fork/src/commonMain/composeResources/values*/strings_composer.xml`.
 
-The composer has a model pill after plus, an endpoint icon, trimmed model name,
-and a quieter explicit effort value. Its field says Message. Both header
-renderers omit the former model chip. The shared composer stays expanded while
-the pill is shown. The model sheet lists at most six available starred models,
-including starred specs and agents, in existing picker order. Without stars it
-uses account-scoped send-count ranking; the hint explains how to pin a model.
-All selection gates come from the existing picker helpers.
+## Chrome
 
-Effort is included: the active parameter target and EndpointParameterRegistry
-supply options, including model/version/drop-parameter filtering. Existing
-getValueForKey / withUpdatedKey / updateModelParameters handle reads and writes.
-Enforced specs remain read-only. Effort is omitted during comparison because
-upstream parameters edit only the primary lane; Parameters keeps that upstream
-behavior. Full model selection and comparison setup are unchanged upstream UI.
-Presets and prompts reuse the same screen-owned callbacks as the top bar.
+Model, Effort, Model presets, All models, Advanced settings, Add to chat, Connectors and Prices
+use the shared 56 dp header, centred title, 24 dp close/back icon in a 48 dp target and 16 dp
+side margins. The shared handle is 32 x 4 dp, neutral grey in both themes. Groups use 12 dp
+spacing, hairline dividers, 56 dp single-line / 64 dp two-line rows and 24 dp leading icons.
+Titles and supporting copy use separate weight/size/tone. System back and header back from a
+model sub-page return to Model; Connectors returns to Add to chat. The full selector and
+parameter controls are upstream bodies embedded in the model sheet, so no second modal
+closes the parent. Provider-key navigation retains its existing screen callback.
 
-The plus sheet preserves attachment gates, tool locks, search routing/key row,
-artifact long-press, MCP status/auth/setup/locks, focus highlighting, context
-placement and code-environment upload. It has no model or parameter controls,
-and no separate memory switch. The three-dot menu filters the four relocated
-actions, preserving conversation actions and all other gates.
+## A. Composer
 
-## Platform and visual limits
+The action row contains plus, a quiet filled 34 dp model pill in a 48 dp target, cache, mic and
+send. The pill has no provider avatar, shares short-model naming with the model list, and
+shows explicit effort quietly after the name. Spec labels win; vendor prefixes are dropped;
+Claude family/version ids become readable names. No other names are invented.
 
-The chip hooks the common ComposerRows used by Android ChatInput and iOS
-IosChatInput; no actual signature changed and no iOS-only implementation was
-invented. Both header renderers are hooked. iOS was not compiled here. No device,
-emulator, adb, browser, or backend requests were used. Light/dark and Material /
-Liquid Glass rendering, keyboard layouts, picker transitions, MCP auth/setup,
-attachment pickers and actual server parameter application remain manual checks.
-Theme tokens and Adaptive components supply both styles.
+The settings line sits between the field and action row, only when populated. Two or more
+plain on-state tool/server chips fold into Tools · N, opening Add to chat. Locked, pinned-off,
+sign-in, setup, failed, connecting and thinking chips retain their existing individual behavior.
+Workspace and context controls retain their upstream slots. The blue plus dot is disabled;
+upstream's separate compact-suggestion indicator remains.
 
-## Hand checks
+The existing cache hook now provides a composer slot: the gutter overlay and dollar button
+are gone. Cache route visibility, one-shot arm cycling, marker countdown and hold explanation
+are preserved. Idle/expired cache shows only its dot, with cache named for accessibility.
+Marketplace discovery still supplies the explanation caveat, and saved agents resolve their
+provider/model. The stream path is still collected inside the cache composable.
 
-1. Open a new or existing chat with model selection enabled: the model pill sits
-   after plus; the field says Message; the former header model chip is absent.
-2. Tap the pill: Model opens. Star models in More models, reopen Model, verify
-   six maximum, endpoint subtitles, current check, and pick-to-dismiss. With no
-   stars, previously used available models appear in send-count order.
-3. On a registry-supported reasoning model, open Effort, choose a level, and
-   verify the pill value. Back returns to Model; enforced specs cannot be edited.
-4. Model → Parameters opens the existing parameters page. Model → Presets →
-   Load / Save opens the existing actions, only when server gates permit them.
-5. Model → More models opens the existing searchable grouped/starred selector.
-   Model → Compare with a second model runs the existing comparison action.
-6. Tap plus (or pull up): Add to chat shows gated attachment tiles, tool rows,
-   Connectors and prompts. Expand Connectors to toggle/sign in/set up servers.
-   Hold Artifacts for modes; tap an enabled composer setting chip to check focus.
-   Check context gauge placement and code-environment upload where enabled.
-7. Open three dots: Load/Save preset, Prompts library and Compare are absent.
-   Check conversation actions still work. Repeat in both themes/styles.
+## B. Model
 
-## Checks
+The list is labelled Favourites or Most used, capped at six and always includes the current
+model with a check. An unstarred current model leads; a starred current model beyond the
+first six displaces the last row. Rows show the short name, exact id and endpoint label.
+All models follows the list. Settings contains registry-gated Effort with a trailing value,
+Advanced settings, Model presets and marketplace Prices, followed by Compare models.
+Gauge, sliders, bookmark-plus, dollar-sign and columns-2 distinguish the actions.
+Existing selection, key, comparison, parameter, preset and spec-lock gates remain in use.
 
-- `:app:assembleFossDebug`: passed, final combined run 52 seconds.
-- `:fork:detektAndroidDebug`, `:fork:detektMetadataCommonMain`: passed.
-- `:feature:chat:detektMetadataCommonMain` and normal `:feature:chat:detekt`: passed.
-- `:feature:chat:detektAndroidDebug`: fails with 21 type-resolved findings in
-  untouched upstream Android files (redundant suspend, dispatcher injection and
-  unreachable code). `build-logic/convention/src/main/kotlin/DetektConventionPlugin.kt`
-  documents why type-resolved tasks are outside the normal gate. No baselines or
-  suppressions were added for these findings and no unrelated upstream code changed.
-- `:fork:testDebugUnitTest`: 15 tests passed.
-- Targeted `:feature:chat:testDebugUnitTest`: ChatOverflowSectionsTest (13),
-  ComposerModelSheetTest (3), ModelPickerShownTest (2), all passed (final run 52 seconds).
-- Hook write/check and `git diff --check`: passed.
-- Initial implementation compile/lint failures were corrected; no test run
-  reached the ten-minute budget. No push or PR.
+## C. Effort
 
-## Every composer hook
+Header back replaces the old Back row. Model default has its server-setting explanation;
+the remaining registry-supported nonempty options follow it once each. A quiet line explains
+the quality/time/cost trade-off. Existing parameter reads/writes and enforced-spec locks apply.
 
-Output of `fork/scripts/fork-hooks.py --list | grep composer`:
+## D. Add to chat
 
-```text
-composer	feature/chat/src/androidMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatToolsSheetPreviews.kt:115	com.garfiec.librechat.feature.chat.fork.ComposerToolsSheetContent( // FORK-HOOK(composer): attachment and tools surface
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatFloatingTopBar.kt:411	// FORK-HOOK(composer): model lives in composer
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatOptionsBottomSheet.kt:282	// FORK-HOOK(composer): attachment and tools surface
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowItem.kt:105	// FORK-HOOK(composer): conversation actions only
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatTopBarSpec.kt:1	@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): keep upstream imports at the swapped surface
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ChatTopBarSpec.kt:122	text = com.garfiec.librechat.feature.chat.fork.HeaderModelText, // FORK-HOOK(composer): model lives in composer
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/CommonChatInputCore.kt:1	@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): keep upstream placeholder resource import
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/CommonChatInputCore.kt:327	// FORK-HOOK(composer): keep the model chip below the field
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/CommonChatInputCore.kt:564	// FORK-HOOK(composer): shared Android and iOS model chip
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/CommonChatInputCore.kt:1143	com.garfiec.librechat.feature.chat.fork.messagePlaceholder() // FORK-HOOK(composer): model lives in the chip
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatPullUpSheet.kt:1	@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): keep upstream imports at the swapped surface
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatPullUpSheet.kt:496	com.garfiec.librechat.feature.chat.fork.ComposerToolsSheetContent( // FORK-HOOK(composer): attachment and tools surface
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatScreen.kt:441	// FORK-HOOK(composer): model and prompts actions
-composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatScreen.kt:1063	} // FORK-HOOK(composer): end composer scope
-composer	feature/chat/src/commonTest/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowSectionsTest.kt:68	// FORK-HOOK(composer): presets, prompts and compare moved to the composer sheets.
-composer	feature/chat/src/commonTest/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowSectionsTest.kt:88	// FORK-HOOK(composer): the landing menu follows the same regrouping.
+Attach tiles retain their gates, with Server files and folder-open; the first section follows
+a 24 dp gap. Built-in tools have descriptions and switches, without repeated Off labels.
+Search routing/key actions, artifacts hold/mode, code upload and context placement are retained.
+Connectors shows N on / None on and opens a separate page. Its intro explains permission to
+use a server. Idle selected servers say Connects when you send; connected servers say
+Connected; off servers have no status unless attention is required. Only failed/sign-in states
+have dots. Server marks are 32 dp; locks, auth/cancel/setup and focused-row highlighting remain.
+Prompt library retains the existing navigation callback.
+
+## E. Conversation menu
+
+Both menu renderers say Search conversation and Media through fork label helpers. Other
+conversation actions and the round-1 relocated-action filtering are unchanged.
+
+## Verification and limits
+
+- `./gradlew :app:assembleFossDebug`: passed.
+- `./gradlew detekt` (aggregate CI gate): passed; no baseline changes.
+- `:fork:testDebugUnitTest`: passed (15 tests).
+- Targeted `:feature:chat:testDebugUnitTest --tests '*ComposerModelSheetTest' --tests '*ComposerSettingsTest'`:
+  passed (6 tests), including naming, current-model inclusion and fold eligibility/attention controls.
+- `fork/scripts/fork-hooks.py --write`, then `fork/scripts/fork-hooks.py`: passed.
+- Final combined build, aggregate detekt and unit-test run: passed in 53 seconds.
+- `git diff --check`: passed. No test run exceeded ten minutes.
+
+The supplied round-1 and reference screenshots were inspected. No emulator, adb, device,
+browser, app runtime or live backend requests were used for verification. iOS was not built.
+Light/dark screenshots, Material/Liquid Glass rendering, small-screen touch/layout acceptance,
+platform back behavior and live auth/parameter application await the operator's installation.
+No push or PR.
+
+## Hook changes from round 1
+
+The following is the complete upstream-file delta. Only fork hooks change; original imports
+remain. Round 1's three import suppressions remain; two new suppression hooks retain imports
+made unused by shared handles/menu labels. Cache keeps one call, moved from the thread overlay
+to the composer slot, dropping its overlay modifier. No platform composer signatures change.
+
+### ChatOptionsBottomSheet.kt
+
+```diff
++@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): retain upstream surface imports
++
+-        dragHandle = { LowProfileDragHandle() },
++        dragHandle = { com.garfiec.librechat.fork.composer.ComposerDragHandle() } // FORK-HOOK(composer): shared sheet handle,
+```
+
+### ChatOverflowMenu.kt
+
+```diff
++@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): retain upstream surface imports
++
+-                        OverflowItem(stringResource(Res.string.action_search), Icons.Default.Search, select, dragTarget)
++                        // FORK-HOOK(composer): conversation search label
++                        OverflowItem(com.garfiec.librechat.feature.chat.fork.conversationSearchLabel(),
++                            Icons.Default.Search, select, dragTarget)
+-                        OverflowItem(stringResource(Res.string.action_show_all_media), Icons.Outlined.PhotoLibrary, select, dragTarget)
++                        // FORK-HOOK(composer): media label
++                        OverflowItem(com.garfiec.librechat.feature.chat.fork.conversationMediaLabel(),
++                            Icons.Outlined.PhotoLibrary, select, dragTarget)
+```
+
+### ChatTopBarSpec.kt
+
+```diff
+-        ChatOverflowItem.SEARCH -> entry(stringResource(Res.string.action_search), BarIcons.Search)
+-        ChatOverflowItem.SHOW_ALL_MEDIA -> entry(stringResource(Res.string.action_show_all_media), BarIcons.Media)
++        // FORK-HOOK(composer): conversation search label
++        ChatOverflowItem.SEARCH -> entry(com.garfiec.librechat.feature.chat.fork.conversationSearchLabel(), BarIcons.Search)
++        // FORK-HOOK(composer): media label
++        ChatOverflowItem.SHOW_ALL_MEDIA -> entry(com.garfiec.librechat.feature.chat.fork.conversationMediaLabel(), BarIcons.Media)
+```
+
+### CommonChatInputCore.kt
+
+```diff
+-    FoldingComposerRows(
++    com.garfiec.librechat.feature.chat.fork.ComposerRowsLayout( // FORK-HOOK(composer): settings above actions
+```
+
+### ComposerSettingsLine.kt
+
+```diff
+-            chips.chips.forEach { chip ->
++            com.garfiec.librechat.feature.chat.fork.ComposerToolsSummary(chips) // FORK-HOOK(composer): folded tool summary
++            // FORK-HOOK(composer): keep attention chips separate
++            com.garfiec.librechat.feature.chat.fork.visibleComposerChips(chips).forEach { chip ->
+```
+
+### ToolsButtonDots.kt
+
+```diff
+-    if (showsActiveToolsDot(showEphemeralTools, enabledTools, selectedMcpServerNames)) {
++    // FORK-HOOK(composer): no blue plus dot
++    if (com.garfiec.librechat.feature.chat.fork.ShowToolsDot &&
++        showsActiveToolsDot(showEphemeralTools, enabledTools, selectedMcpServerNames)) {
+```
+
+### ChatPullUpSheet.kt
+
+```diff
+-            LowProfileDragHandle()
++            com.garfiec.librechat.fork.composer.ComposerDragHandle() // FORK-HOOK(composer): shared sheet handle
+```
+
+### ChatScreen.kt
+
+```diff
+-        { showSavePresetDialog = true }, onNavigateToPromptsLibrary) {
++        { showSavePresetDialog = true }, onNavigateToPromptsLibrary,
++        cache = { // FORK-HOOK(cache-ttl): composer slot
++                    com.garfiec.librechat.fork.market.ChatGutter( // FORK-HOOK(cache-ttl): composer cache chip
++                        viewModel.cacheTtl, uiState.selectedEndpoint, uiState.selectedModel, uiState.serverUrl, // FORK-HOOK(cache-ttl)
++                        uiState.endpointConfigs, uiState.modelParameters.dynamicValues, // FORK-HOOK(cache-ttl)
++                        uiState.selectedAgentProvider, uiState.selection.selectedAgentModel, // FORK-HOOK(cache-ttl)
++                        uiState.selection.selectedAgentReasoning, viewModel.uiState, // FORK-HOOK(cache-ttl)
++                        { it.displayMessages.map { node -> node.message } }, // FORK-HOOK(cache-ttl)
++                    ) // FORK-HOOK(cache-ttl)
++        }, providerKeys = { onNavigateToProviderKeys(it) }) { // FORK-HOOK(composer): model sub-pages
+-                    com.garfiec.librechat.fork.market.ChatGutter( // FORK-HOOK(cache-ttl): cache and prices host
+-                        viewModel.cacheTtl, uiState.selectedEndpoint, uiState.selectedModel, uiState.serverUrl, // FORK-HOOK(cache-ttl)
+-                        uiState.endpointConfigs, uiState.modelParameters.dynamicValues, // FORK-HOOK(cache-ttl)
+-                        uiState.selectedAgentProvider, uiState.selection.selectedAgentModel, // FORK-HOOK(cache-ttl)
+-                        uiState.selection.selectedAgentReasoning, viewModel.uiState, // FORK-HOOK(cache-ttl)
+-                        { it.displayMessages.map { node -> node.message } }, // FORK-HOOK(cache-ttl)
+-                        Modifier.align(Alignment.TopStart).padding(top = topContentPadding, start = 8.dp), // FORK-HOOK(cache-ttl)
+-                    ) // FORK-HOOK(cache-ttl)
+-
 ```

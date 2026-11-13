@@ -1,3 +1,5 @@
+@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): retain upstream surface imports
+
 package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.animation.AnimatedContent
@@ -250,7 +252,7 @@ fun ChatOptionsBottomSheet(
         onDismissRequest = dismiss,
         modifier = modifier.clearFocusOnTap(),
         sheetState = sheetState,
-        dragHandle = { LowProfileDragHandle() },
+        dragHandle = { com.garfiec.librechat.fork.composer.ComposerDragHandle() } // FORK-HOOK(composer): shared sheet handle,
     ) {
         // Inside the sheet: on Android the content is its own dialog window, so an outer handler
         // never sees its back events. Takes precedence over Material3's back-to-dismiss so a

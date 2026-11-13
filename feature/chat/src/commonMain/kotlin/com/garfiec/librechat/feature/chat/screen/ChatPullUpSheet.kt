@@ -492,7 +492,7 @@ internal fun BoxScope.ChatPullUpSheetOverlay(
             .nestedScroll(state.sheetConnection),
     ) {
         Column(modifier = Modifier.fillMaxWidth().predictiveBackSheetContent(back)) {
-            LowProfileDragHandle()
+            com.garfiec.librechat.fork.composer.ComposerDragHandle() // FORK-HOOK(composer): shared sheet handle
             com.garfiec.librechat.feature.chat.fork.ComposerToolsSheetContent( // FORK-HOOK(composer): attachment and tools surface
                 enabledTools = uiState.effectiveEnabledTools,
                 onToggleTool = viewModel::toggleTool,

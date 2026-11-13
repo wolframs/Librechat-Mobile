@@ -1,3 +1,5 @@
+@file:Suppress("NoUnusedImports") // FORK-HOOK(composer): retain upstream surface imports
+
 package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.foundation.layout.Column
@@ -117,9 +119,13 @@ internal fun ChatOverflowMenu(
                     ChatOverflowItem.OPEN_APPS ->
                         OverflowItem(stringResource(Res.string.mcp_app_open_apps, openApps), Icons.Outlined.Apps, select, dragTarget)
                     ChatOverflowItem.SEARCH ->
-                        OverflowItem(stringResource(Res.string.action_search), Icons.Default.Search, select, dragTarget)
+                        // FORK-HOOK(composer): conversation search label
+                        OverflowItem(com.garfiec.librechat.feature.chat.fork.conversationSearchLabel(),
+                            Icons.Default.Search, select, dragTarget)
                     ChatOverflowItem.SHOW_ALL_MEDIA ->
-                        OverflowItem(stringResource(Res.string.action_show_all_media), Icons.Outlined.PhotoLibrary, select, dragTarget)
+                        // FORK-HOOK(composer): media label
+                        OverflowItem(com.garfiec.librechat.feature.chat.fork.conversationMediaLabel(),
+                            Icons.Outlined.PhotoLibrary, select, dragTarget)
                     ChatOverflowItem.LOAD_PRESET ->
                         OverflowItem(stringResource(Res.string.load_preset), Icons.Outlined.FileOpen, select, dragTarget)
                     ChatOverflowItem.SAVE_PRESET ->

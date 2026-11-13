@@ -196,8 +196,10 @@ private fun overflowMenuItem(item: ChatOverflowItem, uiState: ChatUiState, openA
 
     return when (item) {
         ChatOverflowItem.OPEN_APPS -> entry(stringResource(Res.string.mcp_app_open_apps, openApps), BarIcons.Apps)
-        ChatOverflowItem.SEARCH -> entry(stringResource(Res.string.action_search), BarIcons.Search)
-        ChatOverflowItem.SHOW_ALL_MEDIA -> entry(stringResource(Res.string.action_show_all_media), BarIcons.Media)
+        // FORK-HOOK(composer): conversation search label
+        ChatOverflowItem.SEARCH -> entry(com.garfiec.librechat.feature.chat.fork.conversationSearchLabel(), BarIcons.Search)
+        // FORK-HOOK(composer): media label
+        ChatOverflowItem.SHOW_ALL_MEDIA -> entry(com.garfiec.librechat.feature.chat.fork.conversationMediaLabel(), BarIcons.Media)
         ChatOverflowItem.LOAD_PRESET -> entry(stringResource(Res.string.load_preset), BarIcons.LoadPreset)
         ChatOverflowItem.SAVE_PRESET -> entry(stringResource(Res.string.save_as_preset), BarIcons.SavePreset)
         ChatOverflowItem.PROMPTS_LIBRARY -> entry(stringResource(Res.string.prompts_library), BarIcons.Prompts)

@@ -13,6 +13,14 @@ import androidx.compose.ui.unit.dp
 
 /** The fork's line icons. An `Icon` tints them, so the stroke colour here is only a placeholder. */
 object ForkIcons {
+    val ArrowLeft: ImageVector by lazy {
+        lucide(
+            "ArrowLeft",
+            "m12 19-7-7 7-7",
+            "M19 12H5",
+        )
+    }
+
     val Blocks: ImageVector by lazy {
         lucide(
             "Blocks",
@@ -26,6 +34,15 @@ object ForkIcons {
             "BookOpen",
             "M12 5v16",
             "M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z",
+        )
+    }
+
+    val BookmarkPlus: ImageVector by lazy {
+        lucide(
+            "BookmarkPlus",
+            "M12 7v6",
+            "M15 10H9",
+            "M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z",
         )
     }
 
@@ -65,6 +82,13 @@ object ForkIcons {
         )
     }
 
+    val ChevronDown: ImageVector by lazy {
+        lucide(
+            "ChevronDown",
+            "m6 9 6 6 6-6",
+        )
+    }
+
     val ChevronRight: ImageVector by lazy {
         lucide(
             "ChevronRight",
@@ -78,6 +102,14 @@ object ForkIcons {
             "M12 13v8l-4-4",
             "m12 21 4-4",
             "M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284",
+        )
+    }
+
+    val Columns2: ImageVector by lazy {
+        lucide(
+            "Columns2",
+            "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2z",
+            "M12 3v18",
         )
     }
 
@@ -116,6 +148,13 @@ object ForkIcons {
             "M14 2v5a1 1 0 0 0 1 1h5",
             "M9 14.5a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0",
             "M13.3 16.3 15 18",
+        )
+    }
+
+    val FolderOpen: ImageVector by lazy {
+        lucide(
+            "FolderOpen",
+            "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
         )
     }
 
@@ -245,6 +284,14 @@ object ForkIcons {
         lucide(
             "Star",
             "M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z",
+        )
+    }
+
+    val X: ImageVector by lazy {
+        lucide(
+            "X",
+            "M18 6 6 18",
+            "m6 6 12 12",
         )
     }
 }
