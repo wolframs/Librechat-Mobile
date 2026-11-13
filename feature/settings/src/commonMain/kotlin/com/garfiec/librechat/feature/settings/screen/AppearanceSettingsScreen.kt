@@ -99,6 +99,7 @@ fun AppearanceSettingsPage(
     val usesSidebar = windowUsesSidebarLayout()
 
     SettingsListPage(contentPadding = contentPadding, modifier = modifier) {
+        item(key = "fork_text") { com.garfiec.librechat.fork.fonts.TextSettingsRow() } // FORK-HOOK(fonts): reading settings
         item(key = "theme_header") {
             AdaptiveSectionHeader(stringResource(Res.string.appearance_section_theme))
         }

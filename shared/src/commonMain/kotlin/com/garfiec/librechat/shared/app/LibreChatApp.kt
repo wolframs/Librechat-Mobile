@@ -1,3 +1,5 @@
+@file:Suppress("NoUnusedImports") // FORK-HOOK(fonts): retain upstream theme import
+
 package com.garfiec.librechat.shared.app
 
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -86,7 +88,7 @@ fun LibreChatApp(modifier: Modifier = Modifier) {
         ThemeMode.SYSTEM -> systemDark
     }
     if (themeReady && localeReady && dateTimeReady) {
-        LibreChatTheme(
+        com.garfiec.librechat.fork.fonts.ReadingTheme( // FORK-HOOK(fonts): gate and provide reading choices
             darkTheme = darkTheme,
             accentColor = Color(accentColorArgb),
             useDynamicColor = useDynamicColor,

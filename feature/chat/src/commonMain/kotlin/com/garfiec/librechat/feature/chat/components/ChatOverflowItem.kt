@@ -7,6 +7,7 @@ import com.garfiec.librechat.core.model.usage.ContextUsage
 internal enum class ChatOverflowItem {
     /** "Open apps (n)": MCP Apps still running while the panel is down. Opens it on the last-used one. */
     OPEN_APPS,
+    TEXT, // FORK-HOOK(fonts): reading sheet action
     SEARCH,
     SHOW_ALL_MEDIA,
     LOAD_PRESET,

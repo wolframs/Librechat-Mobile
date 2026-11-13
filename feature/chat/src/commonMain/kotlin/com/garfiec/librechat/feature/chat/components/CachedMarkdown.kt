@@ -169,9 +169,13 @@ private fun MarkdownWithImages(
 ) {
     CompositionLocalProvider(LocalMarkdownSource provides (state as? State.Success)?.content) {
         Markdown(
+            // FORK-HOOK(fonts): top-level block gaps
+            success = { value, components, layout ->
+                com.garfiec.librechat.feature.chat.fork.ReadingMarkdownBlocks(value, components, layout)
+            },
             state = state,
             colors = colors,
-            typography = typography,
+            typography = com.garfiec.librechat.feature.chat.fork.readingTypography(typography), // FORK-HOOK(fonts): heading faces
             modifier = modifier,
             annotator = annotator,
             inlineContent = inlineContent,

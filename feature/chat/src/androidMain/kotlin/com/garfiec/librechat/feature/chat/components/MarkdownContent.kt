@@ -113,6 +113,10 @@ actual fun MarkdownContent(
         segments.lastOrNull()?.let { canHostInlineCursor(it) } == true
 
     Column(
+        // FORK-HOOK(fonts): extracted block gaps
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+            com.garfiec.librechat.fork.fonts.LocalReadingPreferences.current.spacing.dp.dp,
+        ),
         modifier = modifier
             .fillMaxWidth()
             .semantics {

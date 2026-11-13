@@ -1,3 +1,5 @@
+@file:Suppress("NoUnusedImports") // FORK-HOOK(fonts): retain upstream theme import
+
 package com.garfiec.librechat
 
 import android.view.Window
@@ -62,7 +64,7 @@ internal fun SwitchboardTheme(window: Window, content: @Composable (appLocaleTag
     }
 
     if (themeReady && localeReady && dateTimeReady) {
-        LibreChatTheme(
+        com.garfiec.librechat.fork.fonts.ReadingTheme( // FORK-HOOK(fonts): gate and provide reading choices
             darkTheme = darkTheme,
             accentColor = Color(accentColorArgb),
             useDynamicColor = useDynamicColor,

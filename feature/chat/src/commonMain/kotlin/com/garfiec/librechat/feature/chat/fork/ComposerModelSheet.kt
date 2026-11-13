@@ -99,7 +99,9 @@ internal fun ComposerScope(
 }
 
 internal fun conversationSections(sections: List<List<ChatOverflowItem>>): List<List<ChatOverflowItem>> =
-    sections.map { section -> section.filterNot { it in relocatedActions } }.filter { it.isNotEmpty() }
+    sections.mapIndexed { index, section ->
+        (if (index == 0) listOf(ChatOverflowItem.TEXT) + section else section).filterNot { it in relocatedActions }
+    }.filter { it.isNotEmpty() }
 
 private val relocatedActions =
     setOf(ChatOverflowItem.LOAD_PRESET, ChatOverflowItem.SAVE_PRESET, ChatOverflowItem.PROMPTS_LIBRARY, ChatOverflowItem.COMPARE)

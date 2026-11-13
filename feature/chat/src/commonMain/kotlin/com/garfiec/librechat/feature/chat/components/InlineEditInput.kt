@@ -78,7 +78,8 @@ fun MessageEditField(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 56.dp, max = 200.dp),
-            textStyle = MaterialTheme.typography.bodyLarge,
+            // FORK-HOOK(fonts): composer face
+            textStyle = com.garfiec.librechat.fork.thread.userMessageTextStyle(MaterialTheme.typography.bodyLarge),
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,

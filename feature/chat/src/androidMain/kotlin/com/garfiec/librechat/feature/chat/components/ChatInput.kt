@@ -212,7 +212,8 @@ fun ChatInput(
                         { ComposerComparisonReserve(collapse = { comparisonCollapse }) }
                     },
                     suffix = { ComposerAffixAnchor() },
-                    textStyle = MaterialTheme.typography.bodyLarge,
+                    // FORK-HOOK(fonts): composer face
+                    textStyle = com.garfiec.librechat.fork.thread.userMessageTextStyle(MaterialTheme.typography.bodyLarge),
                     outputTransformation = pickerCommandToken,
                     colors = ChatInputDefaults.textFieldColors(),
                     keyboardOptions = ChatInputDefaults.keyboardOptions,

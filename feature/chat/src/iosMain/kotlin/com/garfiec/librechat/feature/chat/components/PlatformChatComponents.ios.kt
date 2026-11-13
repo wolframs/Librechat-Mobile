@@ -563,7 +563,13 @@ actual fun MarkdownContent(
     val inlineCursor = trailingCursor && !isSearchActive &&
         segments.lastOrNull()?.let { canHostInlineCursor(it) } == true
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    // FORK-HOOK(fonts): extracted block gaps
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+            com.garfiec.librechat.fork.fonts.LocalReadingPreferences.current.spacing.dp.dp,
+        ),
+    ) {
         // Per-segment occurrence base offsets, advanced via countSegmentOccurrences to stay
         // identical to SearchMatchEnumeration's numbering (mirrors androidMain). Computed once
         // per (segments, query), not every recomposition.
