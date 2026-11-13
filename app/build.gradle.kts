@@ -101,6 +101,7 @@ androidComponents {
 }
 
 dependencies {
+    implementation(project(":fork")) // FORK-HOOK(fonts): root reading provider
     implementation(project(":shared"))
     implementation(project(":core:ui"))
     implementation(project(":core:data"))

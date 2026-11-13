@@ -74,7 +74,8 @@ fun LibreChatTheme(
     ) {
         MaterialTheme(
             colorScheme = colors.scheme,
-            typography = colors.typography,
+            // FORK-HOOK(fonts): interface face
+            typography = com.garfiec.librechat.core.ui.fork.fonts.interfaceTypography(colors.typography),
             shapes = libreChatShapes,
             content = content,
         )
@@ -101,7 +102,8 @@ fun ThemePreview(
     ) {
         MaterialTheme(
             colorScheme = colors.scheme,
-            typography = colors.typography,
+            // FORK-HOOK(fonts): interface face
+            typography = com.garfiec.librechat.core.ui.fork.fonts.interfaceTypography(colors.typography),
             shapes = libreChatShapes,
             content = content,
         )

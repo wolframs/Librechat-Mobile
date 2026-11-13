@@ -110,7 +110,28 @@ module, `fork/README.md` wins.
 | Prices sheet | in. Run on the emulator on `Surplus (Claude)` and the plain `Surplus` row with live data. Opened from the model sheet (More options, Prices) since the composer regrouping. Not run: the dashboard button, Retry, a saved agent, a server without the sidecar, iOS. | none of its own |
 | Default-on connectors and first-send selection | implemented; unit tests and Android build, device acceptance pending | `mcp-default-on` |
 | Composer regrouping (model capsule, model sheet, Add to chat, conversation-only menu, Lucide icons) | in. Five rounds against a design critic (GPT-6 Astra) from device screenshots, 5.5 to 9 out of 10, light, dark and font scale 1.3. Not seen: the composer with the keyboard open (the emulator's test keyboard is invisible), the Liquid Glass style, iOS. | `composer` |
+| Reading fonts and paragraph spacing | in; Android build, aggregate detekt, fork tests and upstream overflow tests checked in the implementation commit; device review pending | `fonts` |
 | Thread and header restyle | in; build, aggregate detekt and focused unit checks recorded in the implementation commit. Device review is pending (light, dark, font scale 1.3); no device or server used here. Native iOS controls and wide headers retain upstream behavior. | `thread` |
+
+### Reading settings: how it is built
+
+`fork/fonts` owns a DataStore store, slot resolution, bundled families and the Text sheet.
+Both app roots call `ReadingTheme`, which waits for its first persisted snapshot before composing
+and provides choices and resolved families once. The core-ui typography hook applies Interface;
+the thread style seams and both composers apply You/Model. Android fonts explicitly set the
+variable weight axis for 400/500/600/700 on the roman and italic files; code retains monospace.
+
+The shared `CachedMarkdown` success slot retains the renderer's AST nodes, search components,
+citations and block padding, adding 2/8/12/20 dp only between top-level blocks. Its previous
+success layout was a plain Column and paragraphs added no vertical padding. Extracted segments
+(tables, code, maths) get the same extra gap on both platforms. Comfortable defaults to 8 dp;
+the old `chat_paragraph_spacing` strings remain readable, with `wide` added.
+
+Text is first in the overflow's tools section, using its typed action and both menu renderers,
+and a row on Appearance. The sheet shares composer chrome, applies each tap immediately,
+previews both message slots and spacing, and reads/writes upstream's existing text-size setting.
+English/German strings and six OFL notices are bundled. Device acceptance in both styles and iOS
+compilation remain for the owner; this implementation uses no device or server.
 
 ### Thread restyle: how it is built
 
@@ -130,8 +151,8 @@ temporary-chat transition, positioning or starters. `ComposerAllModels` partitio
 picker groups into usable then key-blocked groups, with one localized setup heading; upstream
 still builds the rows. English and German day/setup strings live in `:fork`.
 
-Font work: `userMessageTextStyle` and `modelReplyTextStyle` in `fork/thread/ThreadRules.kt` return
-the input style unchanged. Both platform markdown renderers route their body style through them;
+Font work: `userMessageTextStyle` and `modelReplyTextStyle` in `fork/thread/ThreadRules.kt` resolve
+the You and Model reading slots. Both platform markdown renderers route their body style through them;
 existing 16/24 sp typography and the user's size multiplier remain in force.
 
 ### Default-on connectors: how it is built

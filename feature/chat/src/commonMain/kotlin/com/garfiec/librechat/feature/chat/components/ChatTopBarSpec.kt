@@ -195,6 +195,7 @@ private fun overflowMenuItem(item: ChatOverflowItem, uiState: ChatUiState, openA
     ) = BarMenuItem(item.name, label, icon, onClick, checked = checked, destructive = destructive, enabled = enabled, subtitle = subtitle)
 
     return when (item) {
+        ChatOverflowItem.TEXT -> entry(com.garfiec.librechat.fork.fonts.textLabel(), BarIcons.Edit) // FORK-HOOK(fonts): native text entry
         ChatOverflowItem.OPEN_APPS -> entry(stringResource(Res.string.mcp_app_open_apps, openApps), BarIcons.Apps)
         ChatOverflowItem.SEARCH -> entry(stringResource(Res.string.action_search), BarIcons.Search)
         // FORK-HOOK(composer): media label

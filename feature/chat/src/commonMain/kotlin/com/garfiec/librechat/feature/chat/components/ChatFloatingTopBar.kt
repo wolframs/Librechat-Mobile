@@ -159,8 +159,10 @@ internal fun ChatFloatingTopBar(
         openApps = openApps,
     )
     val overflowSections = remember(overflowGates) { chatOverflowSections(overflowGates) }
+    val openText = com.garfiec.librechat.fork.fonts.rememberTextSheet() // FORK-HOOK(fonts): sheet host
     val onOverflowItem: (ChatOverflowItem) -> Unit = { item ->
         when (item) {
+            ChatOverflowItem.TEXT -> openText() // FORK-HOOK(fonts): open reading sheet
             ChatOverflowItem.OPEN_APPS -> mcpAppsViewModel?.showApps()
             ChatOverflowItem.SEARCH -> viewModel.openSearch()
             ChatOverflowItem.SHOW_ALL_MEDIA -> onShowAllMedia?.invoke()

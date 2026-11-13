@@ -50,7 +50,9 @@ class ChatOverflowSectionsTest {
             traceViewerAvailable, contextUsage, contextUsageEnabled, contextBarPlacement, sharedLinksEnabled,
             compactNudgeVisible, firstTurnStreaming, bookmarksEnabled, isTemporaryChat, hasPullRequest, openApps,
         ),
-    )
+    // FORK-HOOK(fonts): require Text, then isolate upstream conversation-action assertions
+    ).also { check(ChatOverflowItem.TEXT in it.flatten()) }
+        .map { it.filterNot { item -> item == ChatOverflowItem.TEXT } }.filter { it.isNotEmpty() }
 
     @Test
     fun compactAppearsUnderContextOnlyWhenDueAndTheGaugeLivesInTheMenu() {
