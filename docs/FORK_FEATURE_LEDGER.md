@@ -106,8 +106,9 @@ module, `fork/README.md` wins.
 | Guard for a cache database with the fork's old schema (Android) | in; run on the emulator 2026-11-13: old fork build signed in, new build installed over it, the app opened signed in on upstream's schema v15 | `legacy-db` |
 | Build under the old debug app id | in, not yet built that way | `legacy-debug-id` |
 | Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. The emulator has no password manager, so no credential was actually saved or picked: that needs the Pixel. iOS has no-op actuals. | `saved-login` |
-| Cache TTL rail | in. On the emulator 2026-11-13, native Anthropic: countdown from the server's marker on an old chat, the cycle 1h, 5m, off, and one send with 1h armed that the server stored as `1h` and the rail showed as 60m. Same day on `Surplus (Claude)`: armed send stored as `1h`, the next unarmed send as `5m`, and the explanation carried the marketplace note. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
-| Prices and costs sheet | in. On the emulator 2026-11-13: opened from the `$` button in the gutter on `Surplus (Claude)` and on the plain `Surplus` row (where the cache pill is hidden), with live prices, sellers and stats from the sidecar. Not run: the dashboard button, Retry, a saved agent, a server without the sidecar, iOS. | `cache-ttl` (shares the gutter hook) |
+| Cache window control | in. Run on the emulator on native Anthropic and on `Surplus (Claude)` (2026-11-13): countdown from the server's marker, the cycle 1h, 5m, off, an armed send stored as `1h`, arming from the model sheet's Cache window page. Since the composer regrouping it is a quiet "Cache 4:47" in the composer, shown only while a window runs or is armed. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
+| Prices sheet | in. Run on the emulator on `Surplus (Claude)` and the plain `Surplus` row with live data. Opened from the model sheet (More options, Prices) since the composer regrouping. Not run: the dashboard button, Retry, a saved agent, a server without the sidecar, iOS. | none of its own |
+| Composer regrouping (model capsule, model sheet, Add to chat, conversation-only menu, Lucide icons) | in. Five rounds against a design critic (GPT-6 Astra) from device screenshots, 5.5 to 9 out of 10, light, dark and font scale 1.3. Not seen: the composer with the keyboard open (the emulator's test keyboard is invisible), the Liquid Glass style, iOS. | `composer` |
 
 ### Saved login: what differs from the old fork
 
@@ -133,15 +134,54 @@ module, `fork/README.md` wins.
 - The cache chip sits after the model pill in the composer. Idle and expired windows are hidden. More options → Cache window can arm the next send. A tap cycles; a hold opens the explanation,
   with the marketplace caveat when `/cost/markets/endpoints` lists the endpoint.
 
-### Prices and costs: how it is built
+### Prices: how it is built
 
-- `:fork` `market/` owns the sidecar wire types, authenticated calls, sheet state and Adaptive sheet.
-- The existing cache hook supplies the composer chip through `ChatGutter`; the gutter overlay is gone.
-  Prices opens from Model for marketplace endpoints, including saved agents' provider/model.
-- Opening or Retry fetches one quote, with no polling. Account/server/model changes discard the sheet;
-  absent routes hide the entry, and quote failures offer Retry. No Room changes.
-- The sheet shows effective prices with per-lane best fallback, list comparisons, sellers and available
-  stats. Its browser link adds no credentials and explains the dashboard's separate sign-in.
+- `:fork` `market/` owns the sidecar's wire types, the calls, the sheet state and the sheet.
+- The sheet opens from the model sheet (More options, Prices), only when the server's
+  `/cost/markets/endpoints` lists the chat's endpoint. It leads with the input and output price this
+  key can get (`effective`, else the best offer, and the heading says which), with list price and
+  discount beneath; sellers and performance are behind two disclosure rows.
+- One fetch when it opens and on Retry, no polling. A change of account, server or model drops it.
+
+### Composer regrouping: how it is built (2026-11-13)
+
+What it is: after the Claude app's pattern, the chat's controls are grouped by what they are about.
+The agreed mock is `fork/design/composer-regroup.html`.
+
+- **Composer** action row: plus (with a count badge for tools and connectors that are on), the
+  model capsule (short name, effort when set, chevron), the cache text while a window runs or is
+  armed, mic, send. Upstream's settings chips get a row only when one needs the user (a sign-in, a
+  pending thinking choice). The placeholder says "Message"; the header's model chip is gone.
+- **Model sheet** (from the capsule): "Current model" when it is not starred, "Starred" (or "Most
+  used"), All models, Effort, and "More options" (Advanced settings, Model presets, Prices, Compare
+  models, Cache window). No leading icons. Short names come from one function: a spec's label, a
+  `claude-…` id as family and version, a vendor prefix dropped, anything else unchanged.
+- **Add to chat** (from the plus): attach tiles with Lucide icons, the built-in tools as switch rows
+  (a second line only where it adds something), Connectors as a page of its own, Prompt library.
+- **Three-dot menu**: conversation actions only; presets, prompts and compare moved to the sheets.
+- Where the code is: surfaces that need the chat's own types are in
+  `feature/chat/src/commonMain/.../feature/chat/fork/` (`ComposerModelSheet`, `ComposerModelPages`,
+  `ComposerAllModels`, `ComposerToolsSheetContent`, `ComposerSettings`, `ComposerLayout`); the shared
+  sheet chrome, icons, strings, cache and prices are in `:fork`. The full model list is a
+  fork-owned body over upstream's own picker data (`PickerInputs`, `pickerRows`), so upstream's
+  gates and selection rules still decide what it shows.
+- Sheet chrome, one for all of it: the same drag handle, a 56 dp header with a centred title, a
+  close icon on a root sheet and a back arrow on a sub-page, 16 dp side margins, rows 56 dp (one
+  line) or 64 dp and up (two lines), titles 16 sp, second lines 13 sp, medium weight only for a
+  sheet title, a model's name and a tool's name. System back on a sub-page returns to its sheet.
+- Not built: a Memory switch. The backend runs memory and web in every chat unless the chat opts
+  out, and the app cannot send that opt-out yet (see the app check, B5).
+
+### Open look and feel proposals (with the operator since 2026-11-13)
+
+The critic's standing remarks about the chat screen outside the composer work, most damaging
+first; the mock for all four is `fork/design/thread-header-restyle.html`.
+
+1. Thread text shows through behind the status bar and the floating header.
+2. The thread reads like a log: avatar, bold name and timestamp on every short message.
+3. The header is a row of outlined pills; the title looks like a button; the landing screen's
+   eye icon is unexplained and the landing repeats the model under a brown "An" circle.
+4. The full model list opens on providers without a key.
 
 ---
 
@@ -1098,29 +1138,3 @@ are marked inline.
 | `.gitignore` `gradle/gradle-daemon-jvm.properties` | root | Not in upstream; keep (1 line) |
 | Fork v8/v9/v10 schema JSON, `ForkMigration9To10Test` | core/data | Drop (F3) |
 | `ConversationRepositoryImplTest` edits, `DataStoreRoundTripTest` / `ChatPayloadBuilderTest` / `MessageMapperTest` deletions | core/data tests | Take upstream's |
-
-## Composer regrouping (`composer`, November 2026)
-
-Fork-only surfaces in `feature/chat/.../chat/fork/ComposerModelSheet.kt` and
-`ComposerToolsSheetContent.kt`; English/German strings in `:fork`'s
-`strings_composer.xml`. The shared composer row serves Android and iOS: a model
-pill replaces the landing header model chip and model-specific placeholder.
-The pill opens starred picks (six maximum), falling back to account-scoped
-usage from `SettingsDataStore.topUsedModels`. Existing selector rules filter
-specs, agents, endpoint availability and keys. An unstarred current model has its own row; a starred current model always stays in the six starred rows.
-All models uses a fork-owned body over the upstream picker row builder, without leading icons. Effort uses the registry's options and existing parameter
-read/write methods; enforced specs remain read-only. Compare retains its
-existing toggle/setup behavior. Parameters retains upstream's primary-lane rule.
-
-The plus surface keeps uploads, tool gates, search/key state, artifact hold,
-MCP status/auth/setup/locks, focus highlighting and context placement. Prompts
-moves there; presets and compare move to Model → More options. The overflow filters only those
-four relocated actions. A chat-owned composition scope carries existing
-callbacks to both sheet hosts without adding platform parameters. The chip
-keeps the composer expanded, with settings above the action row. Plain on-state tool/server
-chips are hidden; plus carries their enabled count. Only attention or pending override chips retain a row. Shared fork
-sheet chrome serves Model, its sub-pages, Add to chat, Connectors and Prices. Connectors is a
-separate page with back navigation; the cache chip and Prices replace the gutter controls.
-
-Hook list and hand-check instructions: `docs/COMPOSER_REGROUP_IMPLEMENTATION.md`.
-No device use, backend requests, iOS build or visual acceptance in this change.
