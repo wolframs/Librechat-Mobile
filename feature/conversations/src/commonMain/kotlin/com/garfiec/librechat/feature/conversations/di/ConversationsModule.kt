@@ -1,16 +1,20 @@
 package com.garfiec.librechat.feature.conversations.di
 
 import com.garfiec.librechat.core.common.di.KoinQualifiers
-import com.garfiec.librechat.core.common.extensions.RelativeTimeReference
-import com.garfiec.librechat.core.common.extensions.dayBoundaryReferences
+import com.garfiec.librechat.feature.conversations.drawer.DrawerPreferences
+import com.garfiec.librechat.feature.conversations.drawer.DrawerSearchSources
 import com.garfiec.librechat.feature.conversations.drawer.DrawerViewModel
+import com.garfiec.librechat.feature.conversations.drawer.WorkspacePinsViewModel
 import com.garfiec.librechat.feature.conversations.export.ConversationExporter
 import com.garfiec.librechat.feature.conversations.export.ConversationImporter
+import com.garfiec.librechat.feature.conversations.search.SearchViewModel
 import com.garfiec.librechat.feature.conversations.viewmodel.ArchivedConversationsViewModel
-import com.garfiec.librechat.feature.conversations.viewmodel.ConversationListViewModel
+import com.garfiec.librechat.feature.conversations.viewmodel.BookmarkChatsViewModel
+import com.garfiec.librechat.feature.conversations.viewmodel.BookmarksViewModel
 import com.garfiec.librechat.feature.conversations.viewmodel.ProjectChatsViewModel
+import com.garfiec.librechat.feature.conversations.viewmodel.ProjectInstructionsViewModel
 import com.garfiec.librechat.feature.conversations.viewmodel.ProjectsViewModel
-import kotlinx.coroutines.flow.Flow
+import org.koin.core.module.dsl.factoryOf
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
@@ -29,25 +33,58 @@ val conversationsModule = module {
         )
     }
 
-    // Clock input for date grouping: emits at each local midnight so an open list re-buckets
-    // instead of showing yesterday's sections. Registered (rather than defaulted) so
-    // ConversationListViewModel can stay on `viewModelOf` and keep its `verify()` coverage.
-    single<Flow<RelativeTimeReference>> { dayBoundaryReferences() }
-
-    viewModelOf(::ConversationListViewModel)
     viewModelOf(::ArchivedConversationsViewModel)
     viewModelOf(::ProjectsViewModel)
+    viewModelOf(::BookmarksViewModel)
     // Drawer-data half of the nav shell's NavHostViewModel.
+    factoryOf(::DrawerSearchSources)
+    factoryOf(::DrawerPreferences)
     viewModelOf(::DrawerViewModel)
+    viewModelOf(::WorkspacePinsViewModel)
+    // The Search screen's initial query arrives from the navigation layer via parametersOf.
+    viewModel { params ->
+        SearchViewModel(
+            initialQuery = params.get(),
+            sources = get(),
+            conversationRepository = get(),
+            messageRepository = get(),
+            agentRepository = get(),
+            activeAccountProvider = get(),
+            defaultDispatcher = get(KoinQualifiers.Default),
+            preferenceStore = get(),
+        )
+    }
     // projectId arrives from the navigation layer via parametersOf.
-    @Suppress("DeprecatedKoinApi")
     viewModel { params ->
         ProjectChatsViewModel(
             projectId = params.get(),
             conversationRepository = get(),
             tagRepository = get(),
-            shareRepository = get(),
+            shareLinkControllerFactory = get(),
             conversationExporter = get(),
+            roleRepository = get(),
+            configRepository = get(),
+            projectRepository = get(),
+            fileRepository = get(),
+        )
+    }
+    // The instructions editor's projectId arrives from the navigation layer via parametersOf.
+    viewModel { params ->
+        ProjectInstructionsViewModel(
+            projectId = params.get(),
+            projectRepository = get(),
+            configRepository = get(),
+        )
+    }
+    // The bookmark's name arrives from the navigation layer via parametersOf.
+    viewModel { params ->
+        BookmarkChatsViewModel(
+            tag = params.get(),
+            conversationRepository = get(),
+            tagRepository = get(),
+            shareLinkControllerFactory = get(),
+            conversationExporter = get(),
+            bookmarksGate = get(),
             roleRepository = get(),
             configRepository = get(),
         )

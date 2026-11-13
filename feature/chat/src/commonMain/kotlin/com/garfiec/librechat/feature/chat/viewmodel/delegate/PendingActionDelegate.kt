@@ -8,18 +8,36 @@ import com.garfiec.librechat.core.data.repository.ChatRepository
 import com.garfiec.librechat.core.data.repository.ResumePinStore
 import com.garfiec.librechat.core.data.repository.ResumeTurnPin
 import com.garfiec.librechat.core.model.PendingAction
+import com.garfiec.librechat.core.model.ToolApprovalDecisions
 import com.garfiec.librechat.core.model.request.ChatResumeRequest
 import com.garfiec.librechat.core.model.request.EphemeralAgent
 import com.garfiec.librechat.core.model.request.ToolApprovalResolution
+import com.garfiec.librechat.core.model.request.withManualSkillsFlag
+import com.garfiec.librechat.feature.chat.components.PAUSE_PANEL_AUTO_ADVANCE_DELAY_MS
+import com.garfiec.librechat.feature.chat.components.PausePanelAutoAdvance
+import com.garfiec.librechat.feature.chat.components.pausePanelActiveIndex
+import com.garfiec.librechat.feature.chat.components.toAskPanelModel
 import com.garfiec.librechat.feature.chat.util.AskAnswerDraft
+import com.garfiec.librechat.feature.chat.util.ToolDecisionDraft
 import com.garfiec.librechat.feature.chat.util.askFreeTextBudget
 import com.garfiec.librechat.feature.chat.util.composeAskAnswer
+import com.garfiec.librechat.feature.chat.util.nextBlankQuestionIndex
+import com.garfiec.librechat.feature.chat.util.nextUndecidedCallIndex
+import com.garfiec.librechat.feature.chat.util.toResolution
+import com.garfiec.librechat.feature.chat.util.toolBatchResolutions
+import com.garfiec.librechat.feature.chat.viewmodel.ChatNotice
 import com.garfiec.librechat.feature.chat.viewmodel.ChatRequestBuilder
 import com.garfiec.librechat.feature.chat.viewmodel.PendingActionHandle
+import com.garfiec.librechat.feature.chat.viewmodel.PendingActionWrites
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
+import com.garfiec.librechat.feature.chat.viewmodel.refusalErrorMarker
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.time.Clock
@@ -33,11 +51,14 @@ import kotlin.time.Clock
  * flips the pause fields; the resumed continuation flows back through the events
  * [StreamingManagerDelegate] is already collecting.
  *
- * **An `ask_user_question` answer is the user's own text, so it falls under the same rule as a
- * steer: no path may lose it.** [ChatViewModel.sendDuringRun] clears the composer before posting,
- * which means the words exist nowhere else while the resume is in flight — so every way this can
- * fail (rejection, transport error, or the pause being cleared out from under the POST) hands
- * them back through [restoreAnswer]. Tool decisions carry no prose and need none of this.
+ * **An `ask_user_question` answer typed into the composer falls under the same rule as a steer:
+ * no path may lose it.** [ChatViewModel.sendDuringRun] clears the composer before posting, which
+ * means the words exist nowhere else while the resume is in flight — so every way a
+ * [submitAnswerFromComposer] can fail (rejection, transport error, or the pause being cleared out
+ * from under the POST) hands them back through [restoreAnswer]. Panel submits ([submitAnswer],
+ * [submitAnswers]) never do: their words stay in `askAnswerDrafts` on the panel, and a pause that
+ * dies under them (expiry, a run that ends) takes those drafts with it. Tool decisions carry no
+ * prose and need none of this.
  */
 class PendingActionDelegate(
     private val handle: PendingActionHandle,
@@ -92,6 +113,15 @@ class PendingActionDelegate(
     private var generationCreatedAt: Long? = null
 
     /**
+     * The live run's generation epoch, for callers outside the resume path.
+     *
+     * A queued turn captures it as the boundary it follows, and the drain matches an admission's
+     * reported boundary against it. Read it BEFORE [clear] on any teardown path — the epoch is
+     * gone by the time the run's own end has finished unwinding.
+     */
+    val generationEpoch: Long? get() = generationCreatedAt
+
+    /**
      * The action id whose resume POST is in flight.
      *
      * The POST outlives the run: it can return after the pause it resolves is gone and a NEWER
@@ -108,11 +138,41 @@ class PendingActionDelegate(
     /** Dismisses the card when [PendingAction.expiresAt] passes; see [scheduleExpiry]. */
     private var expiryJob: Job? = null
 
+    /**
+     * The move a complete pick has scheduled; see [pickAskOption] and [pickToolDecision]. A newer
+     * pick, moving to another item, a submit or the pause going away cancels it.
+     */
+    private val autoAdvance = AutoAdvanceSlot(handle.scope) { handle.state.isResolvingPendingAction }
+
+    /**
+     * The docked panel's editor state (ask answers or tool decisions) as [clear] found it, keyed
+     * by the pause it belonged to.
+     *
+     * [clear] runs at every stream session boundary, including a reconnect into the SAME run —
+     * and a reconnect is routine: backgrounding the app, or folding/unfolding a foldable (which
+     * recreates the Activity and so pauses and resumes the screen). The sync frame or status read
+     * then re-announces the very same pause, and without this the user's half-filled answers or
+     * decisions would be gone. Restored only by a pause with the same action id; dropped once that pause
+     * is resolved or expires.
+     */
+    private var retainedPanel: RetainedPanel? = null
+
+    private data class RetainedPanel(
+        val actionId: String,
+        val askDrafts: Map<String, AskAnswerDraft>,
+        val askActiveQuestionId: String?,
+        val askCollapsed: Boolean,
+        val toolDrafts: Map<String, ToolDecisionDraft>,
+        val toolActiveCallId: String?,
+        val toolCollapsed: Boolean,
+    )
+
     private data class PinnedTurnConfig(
         val endpoint: String,
         val endpointType: String?,
         val agentId: String?,
         val model: String?,
+        val spec: String?,
         /**
          * The `promptPrefix` ("Custom Instructions") the send POST carried at the TOP LEVEL of its
          * body, spread there out of the model-parameter payload
@@ -123,9 +183,6 @@ class PendingActionDelegate(
          * Null whenever the send omitted the key: nothing customized, or a wire key that is not
          * `promptPrefix` (bedrock-anthropic sends `system`, which the fingerprint does not cover).
          *
-         * `spec` is the fingerprint's one remaining field with no pin here, and cannot be sent by
-         * this client: nothing populates [com.garfiec.librechat.core.model.request.ChatRequest.spec],
-         * so both bodies hash it as null. Pin it here the moment a send path starts setting it.
          */
         val promptPrefix: String?,
         val ephemeralAgent: EphemeralAgent?,
@@ -140,10 +197,13 @@ class PendingActionDelegate(
      * client only reconnected to — there the live selection, restored from the conversation, is
      * the best available guess).
      *
+     * [manualSkills] are the skill names a spec-less turn (regenerate / edit) replays: they can
+     * turn the ephemeral skills flag on in the body, so the pin has to apply the same rule.
+     *
      * Must run AFTER the session boundary that calls [clear], or the new turn's pin is wiped.
      */
-    fun onTurnStarted(spec: QueuedMessage?) {
-        pinnedTurn = spec?.toPinnedTurn() ?: captureTurnConfig()
+    fun onTurnStarted(spec: QueuedMessage?, manualSkills: List<String>? = null) {
+        pinnedTurn = spec?.toPinnedTurn() ?: captureTurnConfig(manualSkills)
         persistPin()
     }
 
@@ -201,12 +261,24 @@ class PendingActionDelegate(
             inFlightActionId != null &&
             inFlightActionId == pendingAction.actionId
         // A re-announcement of the SAME pause must keep the drafts — the user may have been
-        // typing into the card through a reconnect. A different pause starts blank.
+        // typing into the panel through a reconnect. A different pause starts blank.
         val isSameAction = handle.state.pendingAction?.actionId == pendingAction.actionId
+        // The same pause coming back after a session boundary cleared it (see [retainedPanel]).
+        val restored = retainedPanel?.takeIf { !isSameAction && it.actionId == pendingAction.actionId }
+        retainedPanel = null
+        if (!isSameAction) cancelAutoAdvance()
         handle.update {
             this.pendingAction = pendingAction
             if (!isSameActionMidSubmit) isResolvingPendingAction = false
-            if (!isSameAction) askAnswerDrafts = emptyMap()
+            if (!isSameAction) {
+                pendingActionResumeFailed = false
+                askAnswerDrafts = restored?.askDrafts.orEmpty()
+                askActiveQuestionId = restored?.askActiveQuestionId
+                askPanelCollapsed = restored?.askCollapsed ?: false
+                toolDecisionDrafts = restored?.toolDrafts.orEmpty()
+                toolActiveCallId = restored?.toolActiveCallId
+                toolPanelCollapsed = restored?.toolCollapsed ?: false
+            }
         }
         scheduleExpiry(pendingAction)
     }
@@ -248,6 +320,8 @@ class PendingActionDelegate(
         // inside the timer's own coroutine is safe (the remaining writes are non-suspending).
         expiryJob?.cancel()
         expiryJob = null
+        cancelAutoAdvance()
+        retainedPanel = null
         pinnedTurn = null
         generationCreatedAt = null
         // Invalidate any in-flight resume: its continuation then restores the typed answer
@@ -257,7 +331,11 @@ class PendingActionDelegate(
         handle.update {
             pendingAction = null
             isResolvingPendingAction = false
+            pendingActionResumeFailed = false
             askAnswerDrafts = emptyMap()
+            askActiveQuestionId = null
+            askPanelCollapsed = false
+            resetToolPanel()
             error = pauseExpiredMessage()
         }
     }
@@ -265,20 +343,38 @@ class PendingActionDelegate(
     /**
      * Drops any pause without resolving it. Called at every stream end: whatever ended the run
      * (final frame, error, abort, expiry) has already made the pause unresolvable, and leaving
-     * the card up would offer controls that can only 409.
+     * the card up would offer controls that can only 409. Also called at a reconnect into the
+     * same run, which is why the panel's drafts are set aside in [retainedPanel] rather than lost.
      */
     fun clear() {
         expiryJob?.cancel()
         expiryJob = null
+        cancelAutoAdvance()
         pinnedTurn = null
         generationCreatedAt = null
         epoch++
         inFlightActionId = null
         if (handle.state.pendingAction == null && !handle.state.isResolvingPendingAction) return
+        handle.state.pendingAction?.actionId?.takeIf { it.isNotEmpty() }?.let { actionId ->
+            val state = handle.state
+            retainedPanel = RetainedPanel(
+                actionId = actionId,
+                askDrafts = state.askAnswerDrafts,
+                askActiveQuestionId = state.askActiveQuestionId,
+                askCollapsed = state.askPanelCollapsed,
+                toolDrafts = state.toolDecisionDrafts,
+                toolActiveCallId = state.toolActiveCallId,
+                toolCollapsed = state.toolPanelCollapsed,
+            )
+        }
         handle.update {
             pendingAction = null
             isResolvingPendingAction = false
+            pendingActionResumeFailed = false
             askAnswerDrafts = emptyMap()
+            askActiveQuestionId = null
+            askPanelCollapsed = false
+            resetToolPanel()
         }
     }
 
@@ -287,9 +383,32 @@ class PendingActionDelegate(
         submit(answerText = null) { request -> request.copy(decisions = decisions) }
     }
 
-    /** Resolves a single-question `ask_user_question` pause with the user's reply. */
+    /**
+     * Resolves a single-question `ask_user_question` pause from the docked panel.
+     *
+     * Nothing is re-homed on failure, for the same reason as [submitAnswers]: the panel's words
+     * live in `askAnswerDrafts` under the action id, still on screen, while the composer is hidden
+     * behind the panel — restoring into it would resurface an answer that already went up (or
+     * Skip's declined sentinel) the moment the pause resolves. The composer's own send goes
+     * through [submitAnswerFromComposer], which does restore.
+     */
     fun submitAnswer(answer: String) {
-        submit(answerText = answer) { request -> request.copy(answer = answer) }
+        submit(answerText = null) { request -> request.copy(answer = answer) }
+    }
+
+    /**
+     * The composer's send on a single-question pause. Folds in whatever the user already picked
+     * or typed in the docked panel (drafted under the action id), so choosing an option there and
+     * then typing a qualifier in the composer sends both rather than silently dropping the pick.
+     * A failed submit hands back only the composer's own [text]; the panel keeps its draft.
+     */
+    fun submitAnswerFromComposer(text: String) {
+        val state = handle.state
+        val action = state.pendingAction
+        val draft = action?.actionId?.let { state.askAnswerDrafts[it] } ?: AskAnswerDraft()
+        val typed = listOf(draft.freeText.trim(), text.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+        val answer = composeAskAnswer(action?.payload?.question?.options.orEmpty(), draft.selectedOptions, typed)
+        submit(answerText = text) { request -> request.copy(answer = answer) }
     }
 
     /**
@@ -321,9 +440,127 @@ class PendingActionDelegate(
         handle.update { askAnswerDrafts = askAnswerDrafts + (questionId to draft) }
     }
 
+    fun selectAskQuestion(questionId: String) {
+        if (handle.state.askActiveQuestionId == questionId) return
+        cancelAutoAdvance()
+        handle.update { askActiveQuestionId = questionId }
+    }
+
+    fun setAskPanelCollapsed(collapsed: Boolean) {
+        if (handle.state.askPanelCollapsed == collapsed) return
+        handle.update { askPanelCollapsed = collapsed }
+    }
+
+    /** The tool-approval panel's per-call editor, writing the draft the batch is submitted from. */
+    fun updateToolDecisionDraft(toolCallId: String, draft: ToolDecisionDraft) {
+        if (toolCallId.isEmpty()) return
+        if (handle.state.toolDecisionDrafts[toolCallId] == draft) return
+        handle.update { toolDecisionDrafts = toolDecisionDrafts + (toolCallId to draft) }
+    }
+
+    fun selectToolCall(toolCallId: String) {
+        if (handle.state.toolActiveCallId == toolCallId) return
+        cancelAutoAdvance()
+        handle.update { toolActiveCallId = toolCallId }
+    }
+
+    fun setToolPanelCollapsed(collapsed: Boolean) {
+        if (handle.state.toolPanelCollapsed == collapsed) return
+        handle.update { toolPanelCollapsed = collapsed }
+    }
+
     /**
-     * The composer's send during a batched pause: fills the FIRST question that has no answer
-     * yet, and submits the whole batch through [submitAnswers] once every question has one.
+     * An option row's tap on the ask panel: records [draft], the selection after the tap.
+     *
+     * A single-select pick is a complete answer: after a beat (so the pick is seen landing) the
+     * panel moves on as [advance] says. Re-picking an already answered question never moves on by
+     * itself; the user may still be reviewing.
+     */
+    fun pickAskOption(questionId: String, draft: AskAnswerDraft, advance: PausePanelAutoAdvance) {
+        val question = handle.state.pendingAction?.toAskPanelModel()?.questions?.firstOrNull { it.id == questionId }
+        val wasAnswered = question != null &&
+            composeAskAnswer(question.options, handle.state.askAnswerDrafts[questionId] ?: AskAnswerDraft()).isNotBlank()
+        cancelAutoAdvance()
+        updateAskAnswerDraft(questionId, draft)
+        // An empty selection after the tap is a deselect.
+        if (question == null || question.multiSelect || draft.selectedOptions.isEmpty() || wasAnswered) return
+        val picked = composeAskAnswer(question.options, draft)
+        autoAdvance.schedule {
+            val model = handle.state.pendingAction?.toAskPanelModel() ?: return@schedule
+            val ids = model.questions.map { it.id }
+            val drafts = handle.state.askAnswerDrafts
+            val answers = model.questions.associate { it.id to composeAskAnswer(it.options, drafts[it.id] ?: AskAnswerDraft()) }
+            val activeIndex = pausePanelActiveIndex(ids, handle.state.askActiveQuestionId)
+            // Decided on what is recorded NOW, not at the tap: a re-pick, a deselect or a typed
+            // qualifier inside the beat means the user is still editing, and the tap-time answers
+            // would submit the pick they just replaced.
+            if (ids[activeIndex] != questionId || answers[questionId] != picked) return@schedule
+            moveOn(
+                advance = advance,
+                ids = ids,
+                activeIndex = activeIndex,
+                nextOpen = { nextBlankQuestionIndex(ids, answers, activeIndex) },
+                select = ::selectAskQuestion,
+                submit = {
+                    if (model.isBatch) submitAnswers(answers) else submitAnswer(answers.getValue(ids.first()))
+                },
+            )
+        }
+    }
+
+    /**
+     * A decision tapped on the tool-approval panel: records [draft], the call's draft after the tap.
+     *
+     * Approve is a complete decision: after a beat (so the pick is seen landing) the panel moves on
+     * as [advance] says. Edit, Respond and Reject reveal a field instead and never move on (Reject's
+     * is the optional reason, which web offers too), and a call that was already decided never
+     * moves on by itself; the user is reviewing.
+     */
+    fun pickToolDecision(toolCallId: String, draft: ToolDecisionDraft, advance: PausePanelAutoAdvance) {
+        val wasComplete = handle.state.toolDecisionDrafts[toolCallId]?.toResolution(toolCallId) != null
+        cancelAutoAdvance()
+        updateToolDecisionDraft(toolCallId, draft)
+        val decision = draft.decision
+        if (decision != ToolApprovalDecisions.APPROVE || wasComplete) return
+        autoAdvance.schedule {
+            val payload = handle.state.pendingAction?.takeIf { it.isToolApproval }?.payload
+                ?: return@schedule
+            val ids = payload.actionRequests.map { it.toolCallId }
+            if (ids.isEmpty()) return@schedule
+            val drafts = handle.state.toolDecisionDrafts
+            val activeIndex = pausePanelActiveIndex(ids, handle.state.toolActiveCallId)
+            // Decided on what is recorded NOW, not at the tap: a different pick inside the beat
+            // means the user is still deciding.
+            if (ids[activeIndex] != toolCallId || drafts[toolCallId]?.decision != decision) return@schedule
+            moveOn(
+                advance = advance,
+                ids = ids,
+                activeIndex = activeIndex,
+                nextOpen = { nextUndecidedCallIndex(ids, drafts, activeIndex) },
+                select = ::selectToolCall,
+                submit = { toolBatchResolutions(payload, drafts)?.let(::submitToolDecisions) },
+            )
+        }
+    }
+
+    /**
+     * Drops a scheduled move. Besides the delegate's own cancel points, the panel calls this when
+     * the layout a pick was made in leaves the screen (a fold or rotation inside the beat), so a
+     * compact pick cannot submit under the wide layout, which never does.
+     */
+    fun cancelAutoAdvance() = autoAdvance.cancel()
+
+    private fun PendingActionWrites.resetToolPanel() {
+        toolDecisionDrafts = emptyMap()
+        toolActiveCallId = null
+        toolPanelCollapsed = false
+    }
+
+    /**
+     * The composer's send during a batched pause: fills the question on the panel's active tab
+     * (or, if that one is already answered, the first question that has no answer yet), moves
+     * the panel to the next blank question, and submits the whole batch through [submitAnswers]
+     * once every question has one.
      *
      * There is deliberately no per-question resume: the route requires the answers map to cover
      * every id and 400s a partial submission, so a batch can only ever go up whole. Until it
@@ -346,16 +583,25 @@ class PendingActionDelegate(
         val answers = questions.associate { question ->
             question.id to composeAskAnswer(question.options, drafts[question.id] ?: AskAnswerDraft())
         }
-        val target = questions.firstOrNull { answers.getValue(it.id).isBlank() } ?: return false
+        // The tab on screen if it still needs an answer — that is the question the user is
+        // reading — else the first one that does.
+        val active = questions.firstOrNull { it.id == state.askActiveQuestionId }
+            ?.takeIf { answers.getValue(it.id).isBlank() }
+        val target = active ?: questions.firstOrNull { answers.getValue(it.id).isBlank() } ?: return false
         val typed = text.trim().take(askFreeTextBudget(target.options, emptyList()))
         if (typed.isEmpty()) return false
-        handle.update {
-            askAnswerDrafts = askAnswerDrafts + (target.id to AskAnswerDraft(freeText = typed))
-        }
-        // Recomputed from what was just written rather than read back off the card, whose own
+        // Recomputed from what is being written rather than read back off the panel, whose own
         // report of the composed answer rides an effect that has not run yet.
         val filled = answers + (target.id to composeAskAnswer(target.options, emptyList(), typed))
-        if (filled.values.all { it.isNotBlank() }) submitAnswers(filled)
+        // Move the panel on to the next question still blank — the same forward-and-wrap walk as
+        // the panel's own advance, so consecutive sends walk the tabs in order — or, once none is
+        // left, submit the batch.
+        val next = nextBlankQuestionIndex(questions.map { it.id }, filled, questions.indexOf(target))
+        handle.update {
+            askAnswerDrafts = askAnswerDrafts + (target.id to AskAnswerDraft(freeText = typed))
+            if (next != null) askActiveQuestionId = questions[next].id
+        }
+        if (next == null) submitAnswers(filled)
         return true
     }
 
@@ -366,8 +612,10 @@ class PendingActionDelegate(
      * 409 (someone else resolved it, or it expired), leave the run with no controls and no way
      * back to them — the card is the only route to a resume.
      *
-     * [answerText] is the user's prose for a SINGLE-question `ask_user_question` pause, null for
-     * tool decisions and for batches (whose words stay in `askAnswerDrafts`, on the card).
+     * [answerText] is the composer's prose for a SINGLE-question `ask_user_question` pause
+     * ([submitAnswerFromComposer]) — text that exists nowhere else once the composer is cleared.
+     * Null for tool decisions and for every panel-origin submit, single or batch, whose words stay
+     * in `askAnswerDrafts`, on the panel.
      * It is captured by the continuation rather than stored in a field precisely because [clear]
      * can run while this is in flight: the closure survives that, a field would have to be
      * cleaned up by the very code path that invalidates the pause.
@@ -376,6 +624,7 @@ class PendingActionDelegate(
         answerText: String?,
         withDecision: (ChatResumeRequest) -> ChatResumeRequest,
     ) {
+        cancelAutoAdvance()
         val state = handle.state
         val action = state.pendingAction ?: return
         val actionId = action.actionId ?: return
@@ -406,6 +655,7 @@ class PendingActionDelegate(
                     endpointType = turn.endpointType,
                     agentId = turn.agentId,
                     model = turn.model,
+                    spec = turn.spec,
                     promptPrefix = turn.promptPrefix,
                     ephemeralAgent = turn.ephemeralAgent,
                     isTemporary = turn.isTemporary.takeIf { it },
@@ -425,19 +675,24 @@ class PendingActionDelegate(
             inFlightActionId = null
             when (result) {
                 is Result.Success -> {
+                    retainedPanel = null
                     pinnedTurn = null
                     resumePinStore.remove(conversationId)
                     handle.update {
                         pendingAction = null
                         isResolvingPendingAction = false
+                        pendingActionResumeFailed = false
                         askAnswerDrafts = emptyMap()
+                        askActiveQuestionId = null
+                        askPanelCollapsed = false
+                        resetToolPanel()
                     }
                 }
                 is Result.Error -> {
                     Logger.w(result.exception) { "Failed to resume paused run: ${result.message}" }
                     // The card stays up so a transient failure can be retried. A composer-origin
-                    // submit emptied the composer to send, so its text comes back; a batch passes
-                    // null because its drafts are still on the card (see [submitAnswers]).
+                    // submit emptied the composer to send, so its text comes back; a panel submit
+                    // passes null because its drafts are still on the panel (see [submitAnswers]).
                     answerText?.let(restoreAnswer)
                     val statusCode = (result.exception as? ApiException)?.statusCode
                     // A 409 arriving past the pause's own expiry is the expiry, not a retryable
@@ -449,13 +704,23 @@ class PendingActionDelegate(
                         expireNow(actionId)
                         return@launch
                     }
-                    val fingerprintRejected = statusCode == HTTP_FORBIDDEN
+                    // Two 403 families: a decision the policy no longer permits names the calls
+                    // in `disallowed` and can be fixed by choosing again; anything else is the
+                    // fingerprint (or ownership) check, which no answer from here can pass.
+                    val decisionNotPermitted = statusCode == HTTP_FORBIDDEN &&
+                        isDisallowedDecisionBody((result.exception as? ApiException)?.body)
+                    val fingerprintRejected = statusCode == HTTP_FORBIDDEN && !decisionNotPermitted
+                    // The resume route runs the message limiters and moderation over the answer,
+                    // and their refusal arrives as a 200 naming what to do next — wait, or edit.
+                    val refusalMarker = refusalErrorMarker(result.exception)
                     handle.update {
                         isResolvingPendingAction = false
-                        error = if (fingerprintRejected) {
-                            fingerprintRejectedMessage()
-                        } else {
-                            resumeFailureMessage(result.message)
+                        pendingActionResumeFailed = true
+                        error = when {
+                            refusalMarker != null -> refusalMarker
+                            decisionNotPermitted -> ChatNotice.TOOL_DECISION_NOT_PERMITTED.marker()
+                            fingerprintRejected -> fingerprintRejectedMessage()
+                            else -> resumeFailureMessage(result.message)
                         }
                     }
                 }
@@ -472,8 +737,10 @@ class PendingActionDelegate(
         endpointType = dispatch.endpointType,
         agentId = agentId.takeIf { endpoint == EndpointConstants.AGENTS },
         model = model,
+        spec = modelSpec,
         promptPrefix = modelParamsPayload.promptPrefix(),
-        ephemeralAgent = ephemeralAgent,
+        // What the body carried: picked skills turn the ephemeral flag on there.
+        ephemeralAgent = ephemeralAgent.withManualSkillsFlag(endpoint, manualSkills),
         isTemporary = isTemporary,
     )
 
@@ -482,6 +749,7 @@ class PendingActionDelegate(
         endpointType = endpointType,
         agentId = agentId,
         model = model,
+        spec = spec,
         promptPrefix = promptPrefix,
         ephemeralAgent = ephemeralAgent,
         isTemporary = isTemporary,
@@ -492,12 +760,13 @@ class PendingActionDelegate(
         endpointType = endpointType,
         agentId = agentId,
         model = model,
+        spec = spec,
         promptPrefix = promptPrefix,
         ephemeralAgent = ephemeralAgent,
         isTemporary = isTemporary,
     )
 
-    private fun captureTurnConfig(): PinnedTurnConfig {
+    private fun captureTurnConfig(manualSkills: List<String>? = null): PinnedTurnConfig {
         val state = handle.state
         val dispatch = requestBuilder.currentDispatch()
         val isAgent = state.selectedEndpoint == EndpointConstants.AGENTS
@@ -506,8 +775,9 @@ class PendingActionDelegate(
             endpointType = dispatch.endpointType,
             agentId = if (isAgent) state.selectedModel else null,
             model = state.selectedModel,
+            spec = state.selectedSpec,
             promptPrefix = requestBuilder.buildModelParams().promptPrefix(),
-            ephemeralAgent = requestBuilder.buildEphemeralAgent(),
+            ephemeralAgent = requestBuilder.buildEphemeralAgent().withManualSkillsFlag(state.selectedEndpoint, manualSkills),
             isTemporary = state.isTemporaryChat,
         )
     }
@@ -523,4 +793,51 @@ class PendingActionDelegate(
         const val HTTP_FORBIDDEN = 403
         const val HTTP_CONFLICT = 409
     }
+}
+
+/** Where a complete pick takes the panel from [activeIndex], once its beat has passed. */
+private inline fun moveOn(
+    advance: PausePanelAutoAdvance,
+    ids: List<String>,
+    activeIndex: Int,
+    nextOpen: () -> Int?,
+    select: (String) -> Unit,
+    submit: () -> Unit,
+) {
+    when (advance) {
+        PausePanelAutoAdvance.AdvanceOrSubmit -> {
+            val next = nextOpen()
+            if (next == null) submit() else select(ids[next])
+        }
+        PausePanelAutoAdvance.NextTab -> if (activeIndex < ids.lastIndex) select(ids[activeIndex + 1])
+    }
+}
+
+/** One scheduled auto-advance at a time: scheduling replaces it, and it never runs while a resolve is in flight. */
+private class AutoAdvanceSlot(private val scope: CoroutineScope, private val isResolving: () -> Boolean) {
+    private var job: Job? = null
+
+    fun schedule(proceed: () -> Unit) {
+        cancel()
+        job = scope.launch {
+            delay(PAUSE_PANEL_AUTO_ADVANCE_DELAY_MS)
+            if (!isResolving()) proceed()
+        }
+    }
+
+    fun cancel() {
+        job?.cancel()
+        job = null
+    }
+}
+
+/** The resume route's "Decision not permitted" 403 carries the offending calls in `disallowed`. */
+internal fun isDisallowedDecisionBody(body: String?): Boolean {
+    if (body.isNullOrBlank()) return false
+    val obj = try {
+        Json.parseToJsonElement(body) as? JsonObject
+    } catch (_: SerializationException) {
+        null
+    } ?: return false
+    return obj["disallowed"] is JsonArray
 }

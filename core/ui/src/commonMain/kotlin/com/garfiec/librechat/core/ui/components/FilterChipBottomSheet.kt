@@ -11,15 +11,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -65,12 +64,12 @@ fun <T : Any> FilterChipBottomSheet(
     var currentSelection by remember { mutableStateOf(selectedItems) }
     var newItemText by remember { mutableStateOf("") }
 
-    ModalBottomSheet(
+    AdaptiveModalBottomSheet(
         onDismissRequest = {
             onSelectionChange(currentSelection)
             onDismiss()
         },
-        modifier = modifier,
+        modifier = modifier.clearFocusOnTap(),
         sheetState = sheetState,
         dragHandle = { LowProfileDragHandle() },
     ) {
@@ -96,12 +95,15 @@ fun <T : Any> FilterChipBottomSheet(
                     )
                 }
             } else {
+                // The chips scroll in whatever height is left, so the add field below stays on the sheet
+                // however many tags there are and wherever the keyboard is.
                 FlowRow(
+                    modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items.forEach { item ->
-                        FilterChip(
+                        AdaptiveFilterChip(
                             selected = item in currentSelection,
                             onClick = {
                                 currentSelection = if (item in currentSelection) {
@@ -123,7 +125,7 @@ fun <T : Any> FilterChipBottomSheet(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedTextField(
+                    AdaptiveOutlinedTextField(
                         value = newItemText,
                         onValueChange = { newItemText = it },
                         placeholder = { Text(addPlaceholder) },

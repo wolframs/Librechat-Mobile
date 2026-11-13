@@ -1,31 +1,32 @@
 package com.garfiec.librechat.core.network.api
 
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.logging.redact.LogRedactor
 import com.garfiec.librechat.core.model.FileObject
 import com.garfiec.librechat.core.model.request.DeleteFilesRequest
+import com.garfiec.librechat.core.model.response.DeleteFilesResponse
 import com.garfiec.librechat.core.model.response.FileDownloadURLResponse
 import com.garfiec.librechat.core.model.response.FilePreviewResponse
 import com.garfiec.librechat.core.model.response.FileUploadConfig
 import com.garfiec.librechat.core.model.response.uploadMimeType
-import com.garfiec.librechat.core.network.upload.StreamingUploadSource
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.onUpload
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.delete
-import io.ktor.client.request.forms.ChannelProvider
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.path
-import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -39,6 +40,7 @@ private data class FilesUsageRequest(
 
 class FilesApi constructor(
     private val client: HttpClient,
+    private val json: Json,
 ) {
     suspend fun getFiles(): List<FileObject> =
         client.get {
@@ -50,38 +52,10 @@ class FilesApi constructor(
             url { path("api/files/config") }
         }.body()
 
+    @Suppress("TooGenericExceptionCaught") // a throwing progress callback must not kill the upload
     @OptIn(ExperimentalUuidApi::class)
     suspend fun uploadFile(
         bytes: ByteArray,
-        filename: String,
-        type: String,
-        fileId: String = Uuid.random().toString(),
-        endpoint: String? = null,
-        model: String? = null,
-        agentId: String? = null,
-        toolResource: String? = null,
-        messageFile: Boolean? = null,
-        width: Int? = null,
-        height: Int? = null,
-        onProgress: ((Float) -> Unit)? = null,
-    ): FileObject = uploadFile(
-        source = StreamingUploadSource(bytes.size.toLong()) { ByteReadChannel(bytes) },
-        filename = filename,
-        type = type,
-        fileId = fileId,
-        endpoint = endpoint,
-        model = model,
-        agentId = agentId,
-        toolResource = toolResource,
-        messageFile = messageFile,
-        width = width,
-        height = height,
-        onProgress = onProgress,
-    )
-
-    @OptIn(ExperimentalUuidApi::class)
-    suspend fun uploadFile(
-        source: StreamingUploadSource,
         filename: String,
         type: String,
         fileId: String = Uuid.random().toString(),
@@ -101,20 +75,17 @@ class FilesApi constructor(
         val wireType = uploadMimeType(type) ?: type
         Logger.d("FilesApi") {
             val reported = if (wireType != type) " (platform reported $type)" else ""
-            "uploadFile: filename=$filename, type=$wireType$reported, size=${source.contentLength ?: "unknown"} bytes, fileId=$fileId, " +
-                "endpoint=$endpoint, model=$model, agentId=$agentId, messageFile=$messageFile, width=$width, height=$height"
+            "uploadFile: filename=${LogRedactor.redactFileName(filename)}, type=$wireType$reported, " +
+                "size=${bytes.size} bytes, fileId=$fileId, endpoint=$endpoint, model=$model, " +
+                "agentId=$agentId, messageFile=$messageFile, width=$width, height=$height"
         }
 
         val multipart = MultiPartFormDataContent(
             formData {
-                append(
-                    "file",
-                    ChannelProvider(source.contentLength, source.openChannel),
-                    Headers.build {
-                        append(HttpHeaders.ContentDisposition, "filename=\"${encodeFilename(filename)}\"")
-                        append(HttpHeaders.ContentType, wireType)
-                    },
-                )
+                append("file", bytes, Headers.build {
+                    append(HttpHeaders.ContentDisposition, "filename=\"${encodeFilename(filename)}\"")
+                    append(HttpHeaders.ContentType, wireType)
+                })
                 append("file_id", fileId)
                 if (endpoint != null) append("endpoint", endpoint)
                 if (model != null) append("model", model)
@@ -154,15 +125,15 @@ class FilesApi constructor(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            Logger.w(e, tag = "FilesApi") { "onProgress callback threw; suppressing to keep upload alive" }
+                            Logger.w("FilesApi", e) { "onProgress callback threw; suppressing to keep upload alive" }
                         }
                     }
                 }
             }
         }.body()
 
-        Logger.d(tag = "FilesApi") {
-            "uploadFile success: fileId=${response.fileId}, filepath=${response.filepath}, " +
+        Logger.d("FilesApi") {
+            "uploadFile success: fileId=${response.fileId}, filepath=${LogRedactor.redactFileName(response.filepath)}, " +
                 "type=${response.type}, width=${response.width}, height=${response.height}"
         }
         return response
@@ -179,12 +150,23 @@ class FilesApi constructor(
      *   400s on a missing/invalid `tool_resource` and dropped the non-owner via-agent fallback.
      *   `AgentFilesDelegate` routes deletes with the file's origin resource (or the slot's wire
      *   value), all of which are in the allowed set, so this stays compliant.
+     *
+     * From v0.8.8-rc2 the response reports per-file outcomes and a PARTIAL delete still answers
+     * 200 — see [DeleteFilesResponse].
+     *
+     * The body is read raw because one answer carries none: the route drops every entry with a
+     * falsy `filepath` and, when that leaves nothing, replies `res.status(204).json(…)` — on which
+     * Express strips the body AND the Content-Type, so ContentNegotiation never engages and
+     * `.body()` throws instead of reporting "nothing was deleted". Same treatment as
+     * [BannerApi.getBanner], for the same Express behaviour.
      */
-    suspend fun deleteFiles(request: DeleteFilesRequest) {
-        client.delete {
+    suspend fun deleteFiles(request: DeleteFilesRequest): DeleteFilesResponse {
+        val text = client.delete {
             url { path("api/files") }
             setBody(request)
-        }
+        }.bodyAsText().trim()
+        if (text.isEmpty() || text == "null") return DeleteFilesResponse()
+        return json.decodeFromString<DeleteFilesResponse>(text)
     }
 
     /**
@@ -229,8 +211,9 @@ class FilesApi constructor(
         }.body()
 
     /**
-     * Fetches raw bytes from an absolute CDN [url] returned by [getDownloadUrl],
-     * bypassing the LibreChat proxy. The URL is presigned, so no auth is needed.
+     * Fetches raw bytes from an absolute [url]: a presigned CDN URL from [getDownloadUrl] (no auth
+     * needed, and none is sent off the server's host), or a code-output download route joined to
+     * the server's origin, which the auth interceptor authenticates by host match.
      */
     suspend fun downloadFromUrl(url: String): ByteArray =
         client.get(url).body()

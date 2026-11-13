@@ -1,0 +1,8 @@
+- Link the privacy policy from Settings → General → About
+- Offer the diagnostic log on sign-in errors
+- Add a preference registry with channel defaults and one-time migrations
+- Split builds into open-source and store distribution channels
+- Report untrusted certificates instead of a generic failure
+- Hash hosts named in transport error text
+- Explain a ban instead of signing out silently
+- And 3 more; see the release notes on GitHub.

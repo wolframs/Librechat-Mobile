@@ -1,17 +1,25 @@
 package com.garfiec.librechat.feature.chat.viewmodel.delegate
 
+import com.garfiec.librechat.core.common.EndpointConstants
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.network.ConnectivityObserver
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.data.endpoint.EndpointDispatch
 import com.garfiec.librechat.core.data.repository.ChatRepository
+import com.garfiec.librechat.core.model.Agent
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.StreamEvent
+import com.garfiec.librechat.core.model.error.UserKeyError
 import com.garfiec.librechat.core.model.response.ChatAbortResponse
 import com.garfiec.librechat.feature.chat.util.AbortFrameFixtures
+import com.garfiec.librechat.feature.chat.util.buildActiveMessagePath
 import com.garfiec.librechat.feature.chat.viewmodel.ChatStateHandle
 import com.garfiec.librechat.feature.chat.viewmodel.ChatUiState
 import com.garfiec.librechat.feature.chat.viewmodel.ConversationMetaState
 import com.garfiec.librechat.feature.chat.viewmodel.MessagesState
+import com.garfiec.librechat.feature.chat.viewmodel.ModelChoice
+import com.garfiec.librechat.feature.chat.viewmodel.ModelSelectionState
+import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import com.garfiec.librechat.feature.chat.viewmodel.StreamingHandle
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
@@ -46,9 +54,7 @@ class StreamingManagerEndStreamTest {
     private val comparisonDelegate = mockk<ComparisonModeDelegate>(relaxed = true)
     private val completionDelegate = mockk<SendCompletionDelegate>(relaxed = true)
     private val queueDelegate = mockk<MessageQueueDelegate>(relaxed = true)
-    private val reloadConversation = mockk<(String) -> Unit>(relaxed = true)
-    private val treeDelegate = mockk<MessageTreeDelegate>(relaxed = true)
-    private val restoreUnsentInput = mockk<(String, List<String>) -> Unit>(relaxed = true)
+    private val host = mockk<StreamingHost>(relaxed = true)
 
     /**
      * Shared so a test can assert whether the connectivity observer was started — that is the only
@@ -84,21 +90,23 @@ class StreamingManagerEndStreamTest {
             activeAccountProvider = mockk<ActiveAccountProvider>(relaxed = true),
             connectivityObserver = connectivity,
             comparisonDelegate = comparisonDelegate,
-            subagentTraceDelegate = mockk(relaxed = true),
-            officePreviewDelegate = mockk(relaxed = true),
+            liveReply = LiveReplyDelegate(StreamingHandle(root), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)),
             completionDelegate = completionDelegate,
             queueDelegate = queueDelegate,
-            treeDelegate = treeDelegate,
             pendingActionDelegate = mockk(relaxed = true),
             steeringDelegate = mockk(relaxed = true),
-            emitUserKeyError = {},
-            reloadConversation = reloadConversation,
-            restoreUnsentInput = restoreUnsentInput,
-            isNewConversation = { false },
-            isHandedOffNewChat = { false },
+            host = host,
         )
         return delegate to flow
     }
+
+    /** A queued send's spec, sent to [choice]; nothing else about it matters here. */
+    private fun queuedTurn(choice: ModelChoice) = QueuedMessage(
+        localId = "q1",
+        text = "hi",
+        choice = choice,
+        dispatch = EndpointDispatch(endpointType = null, key = null, modelDisplayLabel = null),
+    )
 
     /** The realistic wire shape: content parts present, no text. See AbortFrameFixtures. */
     private fun abortedFinal() = AbortFrameFixtures.persistedAbortFrame()
@@ -131,9 +139,37 @@ class StreamingManagerEndStreamTest {
             // could race the server's post-frame persistence.
             assertThat(flow.value.isStreaming).isFalse()
             assertThat(flow.value.streamingContent).isEqualTo("half an answer")
-            verify(exactly = 0) { reloadConversation(any()) }
+            verify(exactly = 0) { host.reloadConversation(any()) }
             verify { comparisonDelegate.endStreaming(clearContent = false) }
             verify(atLeast = 1) { queueDelegate.pause() }
+            events.close()
+            advanceUntilIdle()
+        }
+
+    @Test
+    fun `a local stop of a resumed stream brings back the reply's saved partial`() =
+        runTest(StandardTestDispatcher()) {
+            coEvery { chatRepository.abortChat("conv-1", any(), any()) } returns Result.Success(ChatAbortResponse())
+            val partial = message("r1", parentId = "u1").copy(unfinished = true)
+            val messages = listOf(message("u1", isUser = true), partial)
+            val state = streamingState().let {
+                it.copy(content = it.content.copy(messages = messages, displayMessages = buildActiveMessagePath(messages)))
+            }
+            val events = Channel<StreamEvent>(Channel.UNLIMITED)
+            val (delegate, flow) = delegateWith(this, state)
+            delegate.launchStream(events.receiveAsFlow())
+
+            events.send(StreamEvent.Sync(aggregatedContent = emptyList(), responseMessageId = "r1"))
+            runCurrent()
+            assertThat(flow.value.displayMessages.map { it.message.messageId }).containsExactly("u1")
+
+            delegate.stopGeneration()
+            advanceTimeBy(15_001)
+            runCurrent()
+
+            assertThat(flow.value.isStreaming).isFalse()
+            assertThat(flow.value.displayMessages.map { it.message.messageId }).containsExactly("u1", "r1").inOrder()
+            verify(exactly = 0) { host.reloadConversation(any()) }
             events.close()
             advanceUntilIdle()
         }
@@ -159,7 +195,7 @@ class StreamingManagerEndStreamTest {
             completionDelegate.onFinal(any(), any(), any(), any(), any(), any(), any(), any(), true)
         }
         verify(exactly = 0) { comparisonDelegate.endStreaming(clearContent = false) }
-        verify(exactly = 0) { reloadConversation(any()) }
+        verify(exactly = 0) { host.reloadConversation(any()) }
         events.close()
         advanceUntilIdle()
     }
@@ -193,7 +229,7 @@ class StreamingManagerEndStreamTest {
         // rewritten it with the buffered partial. It must not have.
         assertThat(flow.value.streamingContent).isEmpty()
         verify(exactly = 0) { comparisonDelegate.endStreaming(clearContent = false) }
-        verify(exactly = 0) { reloadConversation(any()) }
+        verify(exactly = 0) { host.reloadConversation(any()) }
         events.close()
         advanceUntilIdle()
     }
@@ -224,7 +260,7 @@ class StreamingManagerEndStreamTest {
             // Stream N+1 untouched: no teardown state write, no queue pause beyond stream N's.
             assertThat(flow.value.isStreaming).isTrue()
             verify(exactly = 0) { comparisonDelegate.endStreaming(any()) }
-            verify(exactly = 0) { reloadConversation(any()) }
+            verify(exactly = 0) { host.reloadConversation(any()) }
             // beginStreaming started the throttled updater; end it so the scope can settle.
             delegate.reset()
             advanceUntilIdle()
@@ -245,15 +281,16 @@ class StreamingManagerEndStreamTest {
         assertThat(flow.value.streamingContent).isEqualTo("half an answer")
         assertThat(flow.value.error).isEqualTo("boom")
         verify(atLeast = 1) { queueDelegate.pause() }
-        verify(exactly = 0) { queueDelegate.drainNext(any()) }
-        verify(exactly = 1) { reloadConversation("conv-1") }
+        verify(exactly = 0) { queueDelegate.drainNext(any(), any()) }
+        verify(exactly = 1) { host.reloadConversation("conv-1") }
         events.close()
         advanceUntilIdle()
     }
 
     /**
      * A send rejected before the server's `created` milestone persisted nothing — not even the user
-     * message — so the turn is un-sent and the text handed back, exactly as an early abort does.
+     * message — so the turn is un-sent and the text handed back, exactly as an early abort does. The
+     * restore itself is the ViewModel's (ChatViewModelFailedTurnRestoreTest); this pins the decision.
      *
      * Without this the typed text simply vanishes: on a new chat the optimistic bubble is never even
      * rendered (screenState stays LANDING until `created`), and on an existing conversation the
@@ -262,7 +299,7 @@ class StreamingManagerEndStreamTest {
      * `created`.
      */
     @Test
-    fun `a send that dies before created un-sends the turn and hands the text back`() =
+    fun `a send that dies before created has the host un-send the turn`() =
         runTest(StandardTestDispatcher()) {
             val events = Channel<StreamEvent>(Channel.UNLIMITED)
             val (delegate, flow) = delegateWith(this)
@@ -272,8 +309,7 @@ class StreamingManagerEndStreamTest {
             events.send(StreamEvent.Error(message = "Request failed (HTTP 302)"))
             runCurrent()
 
-            verify(exactly = 1) { treeDelegate.unsendOptimisticTurn("u1") }
-            verify(exactly = 1) { restoreUnsentInput("text-u1", any()) }
+            verify(exactly = 1) { host.unsendTurn("u1") }
             // The failure is still reported — un-sending is not the same as swallowing it.
             assertThat(flow.value.error).isEqualTo("Request failed (HTTP 302)")
 
@@ -299,8 +335,114 @@ class StreamingManagerEndStreamTest {
         events.send(StreamEvent.Error(message = "boom"))
         runCurrent()
 
-        verify(exactly = 0) { treeDelegate.unsendOptimisticTurn(any()) }
-        verify(exactly = 0) { restoreUnsentInput(any(), any()) }
+        verify(exactly = 0) { host.unsendTurn(any()) }
+
+        events.close()
+        delegate.reset()
+        advanceUntilIdle()
+    }
+
+    /**
+     * The server sends `no_user_key` as a bare `{type}`; the snackbar still has to say which key is
+     * missing and open that endpoint's sheet, so the error names the endpoint the turn was sent to.
+     */
+    @Test
+    fun `a key error without an endpoint names the endpoint the turn was sent to`() =
+        runTest(StandardTestDispatcher()) {
+            val events = Channel<StreamEvent>(Channel.UNLIMITED)
+            val state = streamingState().copy(
+                selection = ModelSelectionState(choice = ModelChoice.Raw("OpenRouter", "meta/llama")),
+            )
+            val (delegate, _) = delegateWith(this, state)
+            delegate.beginStreaming(isEdit = false, optimisticUserMessageId = "u1")
+            delegate.launchStream(events.receiveAsFlow())
+
+            events.send(StreamEvent.Error(message = """{"type":"no_user_key"}"""))
+            runCurrent()
+
+            verify(exactly = 1) { host.emitUserKeyError(UserKeyError.NoUserKey("OpenRouter")) }
+
+            events.close()
+            delegate.reset()
+            advanceUntilIdle()
+        }
+
+    @Test
+    fun `an agent turn's key error names the agent's provider`() = runTest(StandardTestDispatcher()) {
+        val events = Channel<StreamEvent>(Channel.UNLIMITED)
+        val state = streamingState().copy(
+            selection = ModelSelectionState(
+                choice = ModelChoice.Raw(EndpointConstants.AGENTS, "agent_1"),
+                agents = listOf(Agent(id = "agent_1", provider = "anthropic")),
+            ),
+        )
+        val (delegate, _) = delegateWith(this, state)
+        delegate.beginStreaming(isEdit = false, optimisticUserMessageId = "u1")
+        delegate.launchStream(events.receiveAsFlow())
+
+        events.send(StreamEvent.Error(message = """{"type":"invalid_user_key"}"""))
+        runCurrent()
+
+        verify(exactly = 1) { host.emitUserKeyError(UserKeyError.InvalidUserKey("anthropic")) }
+
+        events.close()
+        delegate.reset()
+        advanceUntilIdle()
+    }
+
+    /**
+     * A queued or drained send carries its own spec, and the composer may have moved on since: the
+     * error names the endpoint the turn went to, not the live selection.
+     */
+    @Test
+    fun `a queued turn's key error names the queued endpoint, not the live selection`() =
+        runTest(StandardTestDispatcher()) {
+            val events = Channel<StreamEvent>(Channel.UNLIMITED)
+            val state = streamingState().copy(
+                selection = ModelSelectionState(choice = ModelChoice.Raw("anthropic", "claude-sonnet")),
+            )
+            val (delegate, _) = delegateWith(this, state)
+            delegate.beginStreaming(
+                isEdit = false,
+                optimisticUserMessageId = "u1",
+                turnSpec = queuedTurn(ModelChoice.Raw("OpenRouter", "meta/llama")),
+            )
+            delegate.launchStream(events.receiveAsFlow())
+
+            events.send(StreamEvent.Error(message = """{"type":"no_user_key"}"""))
+            runCurrent()
+
+            verify(exactly = 1) { host.emitUserKeyError(UserKeyError.NoUserKey("OpenRouter")) }
+
+            events.close()
+            delegate.reset()
+            advanceUntilIdle()
+        }
+
+    @Test
+    fun `a queued agent turn's key error names the queued agent's provider`() = runTest(StandardTestDispatcher()) {
+        val events = Channel<StreamEvent>(Channel.UNLIMITED)
+        val state = streamingState().copy(
+            selection = ModelSelectionState(
+                choice = ModelChoice.Raw(EndpointConstants.AGENTS, "agent_live"),
+                agents = listOf(
+                    Agent(id = "agent_live", provider = "anthropic"),
+                    Agent(id = "agent_queued", provider = "OpenRouter"),
+                ),
+            ),
+        )
+        val (delegate, _) = delegateWith(this, state)
+        delegate.beginStreaming(
+            isEdit = false,
+            optimisticUserMessageId = "u1",
+            turnSpec = queuedTurn(ModelChoice.Raw(EndpointConstants.AGENTS, "agent_queued")),
+        )
+        delegate.launchStream(events.receiveAsFlow())
+
+        events.send(StreamEvent.Error(message = """{"type":"no_user_key"}"""))
+        runCurrent()
+
+        verify(exactly = 1) { host.emitUserKeyError(UserKeyError.NoUserKey("OpenRouter")) }
 
         events.close()
         delegate.reset()
@@ -321,8 +463,7 @@ class StreamingManagerEndStreamTest {
         events.send(StreamEvent.Error(message = "boom"))
         runCurrent()
 
-        verify(exactly = 0) { treeDelegate.unsendOptimisticTurn(any()) }
-        verify(exactly = 0) { restoreUnsentInput(any(), any()) }
+        verify(exactly = 0) { host.unsendTurn(any()) }
 
         events.close()
         delegate.reset()
@@ -389,7 +530,7 @@ class StreamingManagerEndStreamTest {
         delegate.launchStream(
             flow {
                 emit(StreamEvent.ContentDelta(chunk = "half an answer"))
-                throw RuntimeException("boom")
+                throw IllegalStateException("boom")
             },
         )
         advanceUntilIdle()
@@ -399,7 +540,7 @@ class StreamingManagerEndStreamTest {
         assertThat(flow.value.error).isNotEmpty()
         assertThat(flow.value.error).doesNotContain("boom")
         verify(atLeast = 1) { queueDelegate.pause() }
-        verify(exactly = 0) { queueDelegate.drainNext(any()) }
-        verify(exactly = 1) { reloadConversation("conv-1") }
+        verify(exactly = 0) { queueDelegate.drainNext(any(), any()) }
+        verify(exactly = 1) { host.reloadConversation("conv-1") }
     }
 }

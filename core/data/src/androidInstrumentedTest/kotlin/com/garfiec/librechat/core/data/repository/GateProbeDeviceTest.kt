@@ -5,12 +5,16 @@ import com.garfiec.librechat.core.common.BackendBuildClass
 import com.garfiec.librechat.core.common.DetectedBackend
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.data.pdf.PdfNormalizeResult
+import com.garfiec.librechat.core.data.pdf.PdfNormalizer
 import com.garfiec.librechat.core.model.EndpointConfig
 import com.garfiec.librechat.core.model.config.StartupConfig
 import com.garfiec.librechat.core.model.response.Category
 import com.garfiec.librechat.core.network.api.FavoritesApi
 import com.garfiec.librechat.core.network.api.FilesApi
 import com.garfiec.librechat.core.network.api.FilesExtApi
+import com.garfiec.librechat.core.network.client.ServerUrlProvider
+import com.garfiec.librechat.core.network.di.librechatJson
 import com.google.common.truth.Truth.assertThat
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -28,6 +32,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
@@ -121,7 +126,17 @@ class GateProbeDeviceTest {
 
     private fun files(detected: DetectedBackend?): FileRepository {
         val c = countingClient(login())
-        return FileRepositoryImpl(FilesApi(c), FilesExtApi(c), FakeConfig(detected))
+        return FileRepositoryImpl(
+            FilesApi(c, librechatJson),
+            FilesExtApi(c),
+            FakeConfig(detected),
+            object : PdfNormalizer {
+                override fun normalize(bytes: ByteArray, password: String?) = PdfNormalizeResult.Unchanged
+            },
+            object : ServerUrlProvider {
+                override fun getBaseUrl() = BASE_URL
+            },
+        )
     }
 
     private fun favorites(detected: DetectedBackend?): ToolFavoritesRepository {
@@ -249,12 +264,14 @@ class GateProbeDeviceTest {
 
     private class FakeConfig(detected: DetectedBackend?) : ConfigRepository {
         override val startupConfig = MutableStateFlow<StartupConfig?>(null)
+        override val startupConfigRefreshes = MutableSharedFlow<StartupConfig>()
         override val endpointConfigs = MutableStateFlow<Map<String, EndpointConfig>>(emptyMap())
         override val availableModels = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+        override val serverUrl = MutableStateFlow("")
         override val detectedBackendVersion: StateFlow<String?> = MutableStateFlow(detected?.version)
         override val detectedBackend: StateFlow<DetectedBackend?> = MutableStateFlow(detected)
-        override suspend fun validateServerUrl(url: String) = error("unused")
-        override suspend fun probeServerUrl() = error("unused")
+        override suspend fun resolveServer(candidates: List<String>, headers: Map<String, String>) = error("unused")
+        override suspend fun publishStartupConfig(config: StartupConfig) = Unit
         override suspend fun reloadForActiveServer() = Unit
         override suspend fun fetchStartupConfig() = error("unused")
         override suspend fun fetchEndpoints() = error("unused")

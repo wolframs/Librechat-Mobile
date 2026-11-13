@@ -14,15 +14,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,12 +37,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.garfiec.librechat.core.model.ActionAuth
 import com.garfiec.librechat.core.model.ActionMetadata
 import com.garfiec.librechat.core.model.request.FunctionTool
+import com.garfiec.librechat.core.ui.components.AdaptiveDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedButton
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.UrlKeyboardOptions
+import com.garfiec.librechat.core.ui.components.VerbatimKeyboardOptions
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.agents.AgentActionDisplayData
 import com.garfiec.librechat.feature.agents.resources.*
 import com.garfiec.librechat.feature.agents.resources.Res
@@ -106,7 +112,7 @@ internal fun ActionEditorDialog(
         isValidating = false
     }
 
-    Dialog(
+    AdaptiveDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
@@ -115,81 +121,62 @@ internal fun ActionEditorDialog(
         ),
     ) {
         Scaffold(
+            modifier = Modifier.clearFocusOnTap(),
             topBar = {
-                Surface(tonalElevation = 2.dp) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = if (isEditing) stringResource(Res.string.edit_action) else stringResource(Res.string.add_action),
-                            style = MaterialTheme.typography.titleMedium,
+                ActionEditorTopBar(
+                    isEditing = isEditing,
+                    saveEnabled = parsedFunctions.isNotEmpty() && validationErrors.isEmpty() && !isValidating,
+                    onDismiss = onDismiss,
+                    onSave = {
+                        val auth = ActionAuth(
+                            type = authType,
+                            authorizationType = if (authType == "service_http") authorizationType else null,
+                            customAuthHeader = if (authType == "service_http" && authorizationType == "custom") {
+                                customAuthHeader.ifBlank { null }
+                            } else {
+                                null
+                            },
+                            authorizationUrl = if (authType == "oauth") authorizationUrl.ifBlank { null } else null,
+                            clientUrl = if (authType == "oauth") clientUrl.ifBlank { null } else null,
+                            scope = if (authType == "oauth") scope.ifBlank { null } else null,
+                            tokenExchangeMethod = if (authType == "oauth") tokenExchangeMethod else null,
                         )
-                        Row {
-                            TextButton(onClick = onDismiss) {
-                                Text(stringResource(Res.string.cancel))
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            TextButton(
-                                onClick = {
-                                    val auth = ActionAuth(
-                                        type = authType,
-                                        authorizationType = if (authType == "service_http") authorizationType else null,
-                                        customAuthHeader = if (authType == "service_http" && authorizationType == "custom") {
-                                            customAuthHeader.ifBlank { null }
-                                        } else {
-                                            null
-                                        },
-                                        authorizationUrl = if (authType == "oauth") authorizationUrl.ifBlank { null } else null,
-                                        clientUrl = if (authType == "oauth") clientUrl.ifBlank { null } else null,
-                                        scope = if (authType == "oauth") scope.ifBlank { null } else null,
-                                        tokenExchangeMethod = if (authType == "oauth") tokenExchangeMethod else null,
-                                    )
-                                    val metadata = ActionMetadata(
-                                        domain = parsedDomain,
-                                        auth = auth,
-                                        rawSpec = rawSpec,
-                                        apiKey = if (
-                                            authType == "service_http" &&
-                                            apiKey.isNotBlank() &&
-                                            apiKey != HIDDEN_PLACEHOLDER
-                                        ) {
-                                            apiKey
-                                        } else {
-                                            null
-                                        },
-                                        oauthClientId = if (
-                                            authType == "oauth" &&
-                                            oauthClientId.isNotBlank() &&
-                                            oauthClientId != HIDDEN_PLACEHOLDER
-                                        ) {
-                                            oauthClientId
-                                        } else {
-                                            null
-                                        },
-                                        oauthClientSecret = if (
-                                            authType == "oauth" &&
-                                            oauthClientSecret.isNotBlank() &&
-                                            oauthClientSecret != HIDDEN_PLACEHOLDER
-                                        ) {
-                                            oauthClientSecret
-                                        } else {
-                                            null
-                                        },
-                                        privacyPolicyUrl = privacyPolicyUrl.ifBlank { null },
-                                    )
-                                    onSave(existingAction?.actionId, metadata, parsedFunctions)
-                                },
-                                enabled = parsedFunctions.isNotEmpty() && validationErrors.isEmpty() && !isValidating,
+                        val metadata = ActionMetadata(
+                            domain = parsedDomain,
+                            auth = auth,
+                            rawSpec = rawSpec,
+                            apiKey = if (
+                                authType == "service_http" &&
+                                apiKey.isNotBlank() &&
+                                apiKey != HIDDEN_PLACEHOLDER
                             ) {
-                                Text(if (isEditing) stringResource(Res.string.save) else stringResource(Res.string.create))
-                            }
-                        }
-                    }
-                }
+                                apiKey
+                            } else {
+                                null
+                            },
+                            oauthClientId = if (
+                                authType == "oauth" &&
+                                oauthClientId.isNotBlank() &&
+                                oauthClientId != HIDDEN_PLACEHOLDER
+                            ) {
+                                oauthClientId
+                            } else {
+                                null
+                            },
+                            oauthClientSecret = if (
+                                authType == "oauth" &&
+                                oauthClientSecret.isNotBlank() &&
+                                oauthClientSecret != HIDDEN_PLACEHOLDER
+                            ) {
+                                oauthClientSecret
+                            } else {
+                                null
+                            },
+                            privacyPolicyUrl = privacyPolicyUrl.ifBlank { null },
+                        )
+                        onSave(existingAction?.actionId, metadata, parsedFunctions)
+                    },
+                )
             },
         ) { innerPadding ->
             Column(
@@ -207,7 +194,7 @@ internal fun ActionEditorDialog(
                     onShowAuthConfig = { showAuthConfig = true },
                 )
 
-                HorizontalDivider()
+                AdaptiveDivider()
 
                 // 2. Schema input
                 Text(
@@ -219,7 +206,7 @@ internal fun ActionEditorDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedTextField(
+                AdaptiveOutlinedTextField(
                     value = rawSpec,
                     onValueChange = { rawSpec = it },
                     label = { Text(stringResource(Res.string.label_openapi_spec)) },
@@ -233,6 +220,7 @@ internal fun ActionEditorDialog(
                     textStyle = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace,
                     ),
+                    keyboardOptions = VerbatimKeyboardOptions,
                     minLines = 8,
                     maxLines = 20,
                     modifier = Modifier.fillMaxWidth(),
@@ -270,7 +258,7 @@ internal fun ActionEditorDialog(
 
                 // 3. Available actions table
                 if (parsedFunctionInfos.isNotEmpty()) {
-                    HorizontalDivider()
+                    AdaptiveDivider()
                     Text(
                         text = stringResource(Res.string.available_actions_count, parsedFunctionInfos.size),
                         style = MaterialTheme.typography.titleSmall,
@@ -279,12 +267,13 @@ internal fun ActionEditorDialog(
                 }
 
                 // 4. Privacy policy URL
-                OutlinedTextField(
+                AdaptiveOutlinedTextField(
                     value = privacyPolicyUrl,
                     onValueChange = { privacyPolicyUrl = it },
                     label = { Text(stringResource(Res.string.label_privacy_policy_url)) },
                     placeholder = { Text("https://example.com/privacy") },
                     singleLine = true,
+                    keyboardOptions = UrlKeyboardOptions,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -337,7 +326,7 @@ private fun AuthenticationSection(
             style = MaterialTheme.typography.titleSmall,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(
+        AdaptiveOutlinedButton(
             onClick = onShowAuthConfig,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -385,21 +374,27 @@ private fun FunctionTable(
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.width(180.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = stringResource(Res.string.table_method),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.width(60.dp),
+                    modifier = Modifier.width(72.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = stringResource(Res.string.table_path),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.width(200.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            HorizontalDivider()
+            AdaptiveDivider()
 
             // Rows
             functions.forEach { func ->
@@ -415,12 +410,15 @@ private fun FunctionTable(
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.width(180.dp),
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = func.method,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.width(60.dp),
+                        modifier = Modifier.width(72.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = func.path,
@@ -428,8 +426,44 @@ private fun FunctionTable(
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.width(200.dp),
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ActionEditorTopBar(
+    isEditing: Boolean,
+    saveEnabled: Boolean,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+) {
+    Surface(tonalElevation = 2.dp) {
+        // Close as an icon, not a Cancel label: with two text actions a translated title has no
+        // room left beside them.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, contentDescription = stringResource(Res.string.cancel))
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = if (isEditing) stringResource(Res.string.edit_action) else stringResource(Res.string.add_action),
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            TextButton(onClick = onSave, enabled = saveEnabled) {
+                Text(if (isEditing) stringResource(Res.string.save) else stringResource(Res.string.create))
             }
         }
     }

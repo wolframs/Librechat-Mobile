@@ -1,6 +1,5 @@
 package com.garfiec.librechat.feature.agents.components.model
 
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
 /**
@@ -10,7 +9,6 @@ import kotlinx.serialization.json.JsonElement
  * `reasoning_effort`, `verbosity`) so a load → save round-trip never drops
  * server-set values that mobile doesn't yet surface in the UI.
  */
-@Serializable
 data class AgentAdvancedSettings(
     val temperature: Float? = null,
     val topP: Float? = null,

@@ -47,6 +47,16 @@ class LogRedactor(private val salt: String = DEFAULT_SALT) {
         out = objectIdRegex.replace(out) { m -> "id:" + hash8(m.value) }
         // url: drop the scheme/`://` so `https?://` no longer matches; keep path (diagnostically useful).
         out = urlRegex.replace(out) { m -> "url:" + hash8(m.groupValues[1] + m.groupValues[2]) + m.groupValues[3] }
+        // Transport errors name the host without a scheme ("Failed to connect to /10.0.2.2:3080"),
+        // so urlRegex never sees it. Matched by the phrases that carry one rather than by a generic
+        // host shape, which would also hash class names and stack frames. `(?!host:)` keeps it idempotent.
+        for (regex in hostPhraseRegexes) {
+            out = regex.replace(out) { m -> m.groupValues[1] + "host:" + hash8(m.groupValues[2]) }
+        }
+        // Whatever addresses are left (another library's wording). The replacement has no dots or
+        // brackets, so it cannot re-match.
+        out = ipv4Regex.replace(out) { m -> "ip:" + hash8(m.value) }
+        out = ipv6Regex.replace(out) { m -> "ip:" + hash8(m.value) }
         return out
     }
 
@@ -64,18 +74,34 @@ class LogRedactor(private val salt: String = DEFAULT_SALT) {
         }
     }
 
-    /** 64-bit FNV-1a → first 8 hex chars. Dependency-free; for correlation, not cryptographic secrecy. */
-    private fun hash8(value: String): String {
-        var hash = FNV_OFFSET_BASIS
-        for (byte in (salt + value).encodeToByteArray()) {
-            hash = hash xor (byte.toLong() and 0xff)
-            hash *= FNV_PRIME
-        }
-        return hash.toULong().toString(16).padStart(8, '0').take(8)
-    }
+    private fun hash8(value: String): String = hash8(salt, value)
 
     companion object {
         const val DEFAULT_SALT: String = "librechat-diag"
+
+        /**
+         * A file name as a log line may carry it: `file:` + its salted hash, plus a short alphanumeric
+         * extension when it has one (`report.pdf` → `file:1a2b3c4d.pdf`). The sink can't recognise a
+         * file name by its shape, so a call site that logs one passes it through here.
+         */
+        fun redactFileName(name: String): String {
+            val dot = name.lastIndexOf('.')
+            val extension = if (dot > 0) name.substring(dot + 1) else ""
+            val suffix = if (fileExtensionRegex.matches(extension)) ".$extension" else ""
+            return "file:" + hash8(DEFAULT_SALT, name) + suffix
+        }
+
+        /** 64-bit FNV-1a → first 8 hex chars. Dependency-free; for correlation, not cryptographic secrecy. */
+        private fun hash8(salt: String, value: String): String {
+            var hash = FNV_OFFSET_BASIS
+            for (byte in (salt + value).encodeToByteArray()) {
+                hash = hash xor (byte.toLong() and 0xff)
+                hash *= FNV_PRIME
+            }
+            return hash.toULong().toString(16).padStart(8, '0').take(8)
+        }
+
+        private val fileExtensionRegex = Regex("[A-Za-z0-9]{1,5}")
 
         private const val FNV_OFFSET_BASIS: Long = -3750763034362895579L // 14695981039346656037 as Long
         private const val FNV_PRIME: Long = 1099511628211L
@@ -94,6 +120,24 @@ class LogRedactor(private val salt: String = DEFAULT_SALT) {
         // dotted-TLD-only pattern would miss. Over-matching a stray `a@b` token in a log is acceptable.
         private val emailRegex = Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9][A-Za-z0-9._-]*")
         private val urlRegex = Regex("(?i)(https?://)([^/\\s:?#]+)([^\\s]*)")
+
+        // Group 2 is the host token. Wordings: OkHttp's ConnectException ("Failed to connect to
+        // host/1.2.3.4:443"), Android libcore's connect timeout ("failed to connect to host/1.2.3.4
+        // (port 443) …"), Android's UnknownHostException, and OkHttp's hostname-verification and
+        // cleartext refusals.
+        private val hostPhraseRegexes = listOf(
+            Regex("(?i)(failed to connect to\\s+)(?!host:)([^\\s\"',;()]+)"),
+            Regex("(?i)(unable to resolve host\\s+\")(?!host:)([^\"]+)"),
+            Regex("(?i)(hostname\\s+)(?!host:)(\\S+)(?=\\s+not verified)"),
+            Regex("(?i)(cleartext communication to\\s+)(?!host:)(\\S+)(?=\\s+not permitted)"),
+        )
+
+        // Dotted quad with an optional port, not inside a longer dotted or word token (so a
+        // four-part version like "1.2.3.4-beta" still matches, but "v1.2.3.4.5" does not).
+        private val ipv4Regex = Regex("(?<![\\w.])\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d{1,5})?(?![\\w.])")
+
+        // Bracketed IPv6 only ("[::1]:3080"): bare IPv6 can't be told apart from a timestamp.
+        private val ipv6Regex = Regex("\\[[0-9a-fA-F]*:[0-9a-fA-F:.]*\\](?::\\d{1,5})?")
 
         // Bare identifiers anywhere in text (incl. URL/path segments): UUID and 24-char Mongo ObjectId.
         private val uuidRegex =
@@ -115,7 +159,7 @@ class LogRedactor(private val salt: String = DEFAULT_SALT) {
         // here; an omitted key is dropped (safe-by-default), so add new keys deliberately.
         private val safeKeys = setOf(
             // build / device / platform (startup header)
-            "versionname", "versioncode", "gitsha", "osname", "osversion", "devicemodel",
+            "versionname", "versioncode", "gitsha", "channel", "osname", "osversion", "devicemodel",
             // backend version + server-config snapshot flags
             "supportedbackendversion", "detectedbackendversion", "compatible",
             "registrationenabled", "emailloginenabled", "socialloginenabled", "passwordresetenabled",

@@ -2,16 +2,16 @@ package com.garfiec.librechat.feature.settings.screen
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,9 +22,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.data.prefetch.PrefetchDepth
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedButton
 import com.garfiec.librechat.feature.settings.resources.Res
 import com.garfiec.librechat.feature.settings.resources.prefetch_activity
 import com.garfiec.librechat.feature.settings.resources.prefetch_attachments
@@ -76,28 +77,34 @@ fun PrefetchSettingsSection(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ToggleRow(
+        SettingsSwitchRow(
             title = stringResource(Res.string.prefetch_enabled),
             description = stringResource(Res.string.prefetch_enabled_desc),
             checked = prefetchEnabled,
-            onChange = onPrefetchEnabledChange,
+            onCheckedChange = onPrefetchEnabledChange,
+            showDivider = false,
+            contentPadding = PaddingValues(0.dp),
         )
         // Hidden, not disabled, where there is no image cache to warm: a greyed row invites the user
         // to turn prefetching on to reach a switch that would still do nothing.
         if (prefetchAttachmentsSupported) {
-            ToggleRow(
+            SettingsSwitchRow(
                 title = stringResource(Res.string.prefetch_attachments),
                 description = stringResource(Res.string.prefetch_attachments_desc),
                 checked = prefetchAttachmentsEnabled,
-                onChange = onPrefetchAttachmentsChange,
+                onCheckedChange = onPrefetchAttachmentsChange,
+                showDivider = false,
+                contentPadding = PaddingValues(0.dp),
                 enabled = prefetchEnabled,
             )
         }
-        ToggleRow(
+        SettingsSwitchRow(
             title = stringResource(Res.string.prefetch_on_metered),
             description = stringResource(Res.string.prefetch_on_metered_desc),
             checked = prefetchOnMeteredEnabled,
-            onChange = onPrefetchOnMeteredChange,
+            onCheckedChange = onPrefetchOnMeteredChange,
+            showDivider = false,
+            contentPadding = PaddingValues(0.dp),
             enabled = prefetchEnabled,
         )
 
@@ -107,7 +114,7 @@ fun PrefetchSettingsSection(
             enabled = prefetchEnabled,
         )
 
-        HorizontalDivider()
+        AdaptiveDivider()
 
         SummaryRow(
             label = stringResource(Res.string.prefetch_summary_status),
@@ -125,7 +132,7 @@ fun PrefetchSettingsSection(
             enabled = prefetchEnabled,
         )
 
-        OutlinedButton(
+        AdaptiveOutlinedButton(
             onClick = onActivityClick,
             enabled = prefetchEnabled,
             modifier = Modifier.fillMaxWidth(),
@@ -135,7 +142,7 @@ fun PrefetchSettingsSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(stringResource(Res.string.prefetch_activity))
+                Text(stringResource(Res.string.prefetch_activity), modifier = Modifier.weight(1f))
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
@@ -167,15 +174,18 @@ private fun DepthSlider(depth: Int, onChange: (Int) -> Unit, enabled: Boolean) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(
+        // The count drops below the label when a translation leaves them too little room side by side,
+        // rather than either breaking mid-word.
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = stringResource(Res.string.prefetch_depth),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
+                modifier = Modifier.padding(end = 12.dp),
             )
             Text(
                 text = stringResource(Res.string.prefetch_depth_value, shown),
@@ -207,20 +217,21 @@ private const val DISABLED_ALPHA = 0.38f
 @Composable
 private fun SummaryRow(label: String, value: String, enabled: Boolean) {
     val alpha = if (enabled) 1f else DISABLED_ALPHA
-    Row(
+    // The value drops below the label when a translation leaves them too little room side by side.
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
+            // Counted when the pair is fitted on one line, so the two never run together.
+            modifier = Modifier.padding(end = 12.dp),
         )
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.End,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
         )
     }

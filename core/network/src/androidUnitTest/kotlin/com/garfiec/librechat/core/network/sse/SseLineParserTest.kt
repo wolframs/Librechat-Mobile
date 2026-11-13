@@ -1,8 +1,15 @@
 package com.garfiec.librechat.core.network.sse
 
 import app.cash.turbine.test
+import co.touchlab.kermit.LogWriter
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
 import com.google.common.truth.Truth.assertThat
+import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.writeFully
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -130,6 +137,51 @@ class SseLineParserTest {
         // DONE as sole remaining buffer should not be emitted
         val input = "data: [DONE]"
         parser.parse(channel(input)).test {
+            awaitComplete()
+        }
+    }
+
+    @Test
+    fun `cancelling the collector does not log a parse error`() = runTest {
+        val logged = mutableListOf<Severity>()
+        val previousWriters = Logger.config.logWriterList
+        Logger.setLogWriters(
+            object : LogWriter() {
+                override fun log(severity: Severity, message: String, tag: String, throwable: Throwable?) {
+                    logged += severity
+                }
+            },
+        )
+        try {
+            val open = ByteChannel()
+            val job = launch(start = CoroutineStart.UNDISPATCHED) { parser.parse(open).collect {} }
+            job.cancel()
+            job.join()
+
+            assertThat(job.isCancelled).isTrue()
+            assertThat(logged).doesNotContain(Severity.Error)
+        } finally {
+            Logger.setLogWriters(previousWriters)
+        }
+    }
+
+    @Test
+    fun `keepalive comments hold a quiet stream open past the stall timeout`() = runTest {
+        // v0.8.9-rc1 writes `:\n\n` whenever a stream is quiet for 25 s. Each one is a line read,
+        // so a run silent for longer than the stall timeout (a long tool call, a review pause) is
+        // not cut, and none of them is an event.
+        val channel = ByteChannel()
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            repeat(4) {
+                kotlinx.coroutines.delay(3_000L)
+                channel.writeFully(":\n\n".encodeToByteArray())
+                channel.flush()
+            }
+            channel.writeFully("data: {\"n\":1}\n\n".encodeToByteArray())
+            channel.flushAndClose()
+        }
+        parser.parse(channel).test {
+            assertThat(awaitItem().data).isEqualTo("{\"n\":1}")
             awaitComplete()
         }
     }

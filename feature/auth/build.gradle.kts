@@ -2,7 +2,7 @@ plugins {
     id("librechat.kmp.feature")
 }
 
-extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+android {
     namespace = "com.garfiec.librechat.feature.auth"
 }
 
@@ -10,11 +10,11 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":core:network"))
-        }
-        androidMain.dependencies {
-            implementation(libs.browser)
-            implementation(libs.credentials)
-            implementation(libs.credentials.play.services.auth)
+            implementation(project(":core:logging"))
+            // QR code for the required 2FA setup screen, same library as Settings' enrollment.
+            implementation(libs.qrose)
+            // The server's terms are Markdown; same renderer as Settings' release notes.
+            implementation(libs.markdown.renderer.m3)
         }
         named("androidUnitTest").dependencies {
             implementation(libs.kotlinx.serialization.json)

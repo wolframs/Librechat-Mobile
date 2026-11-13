@@ -7,15 +7,17 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.garfiec.librechat.core.common.identity.AccountState
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.identity.currentAccountId
 import com.garfiec.librechat.core.common.identity.flatMapAccountOrEmpty
-import com.garfiec.librechat.core.data.prefetch.PrefetchDepth
 import com.garfiec.librechat.core.data.prefetch.PrefetchRunOutcome
 import com.garfiec.librechat.core.data.prefetch.ScheduledRunRecord
+import com.garfiec.librechat.core.model.ArtifactsMode
 import com.garfiec.librechat.core.model.ModelRef
+import com.garfiec.librechat.core.model.usage.ContextDetailPreset
+import com.garfiec.librechat.core.model.usage.ContextDetailSections
+import com.garfiec.librechat.core.model.usage.DEFAULT_COMPACT_NUDGE_THRESHOLD
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -38,6 +41,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.concurrent.Volatile
 
+@Suppress("TooManyFunctions") // debt: 67 functions
 class SettingsDataStore(
     private val dataStore: DataStore<Preferences>,
     private val activeAccountProvider: ActiveAccountProvider,
@@ -91,10 +95,6 @@ class SettingsDataStore(
         ChatFontSize.fromString(prefs[KEY_CHAT_FONT_SIZE])
     }
 
-    val chatParagraphSpacing: Flow<ChatParagraphSpacing> = dataStore.data.map { prefs ->
-        ChatParagraphSpacing.fromString(prefs[KEY_CHAT_PARAGRAPH_SPACING])
-    }
-
     val starredModelsDisplay: Flow<StarredModelsDisplay> = dataStore.data.map { prefs ->
         StarredModelsDisplay.fromString(prefs[KEY_STARRED_MODELS_DISPLAY])
     }
@@ -107,35 +107,15 @@ class SettingsDataStore(
         ChatHeaderAlignment.fromString(prefs[KEY_CHAT_HEADER_ALIGNMENT])
     }
 
-    val autoScrollEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_AUTO_SCROLL_ENABLED] ?: true
-    }
-
-    // Background prefetch. Deliberately global, not account-scoped — these are preferences about
-    // the device's bandwidth and battery. All default off: this spends the user's data on requests
-    // they did not make, which has to be asked for.
-
-    val prefetchEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_PREFETCH_ENABLED] ?: false
-    }
-
-    /** Nested under [prefetchEnabled]; far heavier than the text it accompanies. */
-    val prefetchAttachmentsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_PREFETCH_ATTACHMENTS] ?: false
-    }
-
-    /** Overrides the unmetered-only default, for users who are mostly on cellular. */
-    val prefetchOnMeteredEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_PREFETCH_ON_METERED] ?: false
-    }
-
-    /** Clamped on read, not trusted: this value is the request count for every pass. */
-    val prefetchDepth: Flow<Int> = dataStore.data.map { prefs ->
-        (prefs[KEY_PREFETCH_DEPTH] ?: PrefetchDepth.DEFAULT).coerceIn(PrefetchDepth.RANGE)
-    }
-
-    val showThinkingBlocks: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_SHOW_THINKING_BLOCKS] ?: true
+    /**
+     * Whether a reply's reasoning block starts expanded. The web's "Open Thinking Dropdowns by
+     * Default", and like it off by default: hiding reasoning outright was never an option here,
+     * so the block is always shown and this only decides its initial fold. The stored key keeps
+     * its original name; a user who switched it on before it did anything now gets what the
+     * label promises.
+     */
+    val thinkingOpenByDefault: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_SHOW_THINKING_BLOCKS] ?: false
     }
 
     /** Where the v0.8.7 context-usage gauge is surfaced. Default [ContextBarPlacement.OPTIONS_SHEET]. */
@@ -148,9 +128,48 @@ class SettingsDataStore(
         prefs[KEY_CONTEXT_GAUGE_EXPANDED] ?: false
     }
 
+    /** The context breakdown's detail preset. Default [ContextDetailPreset.STANDARD]. */
+    val contextDetailPreset: Flow<ContextDetailPreset> = dataStore.data.map { prefs ->
+        ContextDetailPreset.fromString(prefs[KEY_CONTEXT_DETAIL_PRESET])
+    }
+
+    /** Whether the user's own mix of sections ("Custom") replaces the preset. */
+    val contextDetailAdvanced: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_CONTEXT_DETAIL_ADVANCED] ?: false
+    }
+
     /**
-     * What the send control does mid-run (v0.8.8 steering). Default [DuringRunAction.QUEUE] —
-     * steering needs a server that has the route, queueing works everywhere.
+     * The user's own mix of sections, or null before Advanced was first turned on. Kept when
+     * Advanced is turned off, so turning it back on restores the mix.
+     */
+    val contextDetailCustom: Flow<ContextDetailSections?> = dataStore.data.map { prefs ->
+        decodeSections(prefs[KEY_CONTEXT_DETAIL_CUSTOM])
+    }
+
+    /** What the breakdown shows: the custom mix under Advanced, else the preset. One source for chat and Settings. */
+    val effectiveContextSections: Flow<ContextDetailSections> = dataStore.data.map { prefs ->
+        val preset = ContextDetailPreset.fromString(prefs[KEY_CONTEXT_DETAIL_PRESET])
+        val custom = decodeSections(prefs[KEY_CONTEXT_DETAIL_CUSTOM])
+        if (prefs[KEY_CONTEXT_DETAIL_ADVANCED] == true) custom ?: preset.sections else preset.sections
+    }.distinctUntilChanged()
+
+    /** Usage percentage at which compacting is suggested; 0 means never. Default 70. */
+    val compactNudgeThreshold: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[KEY_COMPACT_NUDGE_THRESHOLD] ?: DEFAULT_COMPACT_NUDGE_THRESHOLD
+    }
+
+    /**
+     * Per conversation, the compact-suggestion band the user answered "Not now" to. Device-wide
+     * on purpose: it holds conversation ids and a band, no account data, and is bounded by
+     * [MAX_COMPACT_SNOOZES].
+     */
+    val compactNudgeSnoozes: Flow<Map<String, Int>> = dataStore.data.map { prefs ->
+        decodeSnoozes(prefs[KEY_COMPACT_NUDGE_SNOOZES]).mapValues { it.value.band }
+    }.distinctUntilChanged()
+
+    /**
+     * What the send control does mid-run (v0.8.8 steering). Default [DuringRunAction.STEER],
+     * which falls back to queueing on a server without the route.
      */
     val duringRunAction: Flow<DuringRunAction> = dataStore.data.map { prefs ->
         DuringRunAction.fromString(prefs[KEY_DURING_RUN_ACTION])
@@ -179,10 +198,28 @@ class SettingsDataStore(
     // Account-scoped: the last endpoint/model is per-account (server A's pick must not seed server B).
     // Emits nothing while the account is Warming (NOT null) so a one-shot/wait-on-unresolved consumer
     // — the model seeder — blocks for the real value instead of mistaking Warming for "none saved" and
-    // seeding a lower tier; emits null only once the account resolves (logged out or genuinely absent).
-    val lastUsedEndpoint: Flow<String?> = scopedString(::endpointKey)
-
-    val lastUsedModel: Flow<String?> = scopedString(::modelKey)
+    // seeding a lower tier; emits [LastUsedSelection.NONE] only once the account resolves (logged out),
+    // and null fields when nothing was saved.
+    //
+    // One snapshot rather than a flow per key: [setLastUsedModel] writes the three in one edit, and
+    // three flows combined downstream can pair the new model with the old spec for an emission.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val lastUsedSelection: Flow<LastUsedSelection> =
+        activeAccountProvider.state.flatMapLatest { state ->
+            when (state) {
+                AccountState.Warming -> emptyFlow()
+                is AccountState.Resolved ->
+                    state.id?.let { id ->
+                        dataStore.data.map { prefs ->
+                            LastUsedSelection(
+                                endpoint = prefs[endpointKey(id.value)],
+                                model = prefs[modelKey(id.value)],
+                                spec = prefs[specKey(id.value)],
+                            )
+                        }.distinctUntilChanged() // any other preference write re-emits the file
+                    } ?: flowOf(LastUsedSelection.NONE)
+            }
+        }
 
     /**
      * The account's most-used endpoint/model pairs, ranked by send count (recency breaks ties),
@@ -207,7 +244,7 @@ class SettingsDataStore(
     }
 
     val ttsSource: Flow<String> = dataStore.data.map { prefs ->
-        prefs[KEY_TTS_SOURCE] ?: "device"
+        prefs[KEY_TTS_SOURCE] ?: TTS_SOURCE_DEVICE
     }
 
     val ttsSpeechRate: Flow<Float> = dataStore.data.map { prefs ->
@@ -263,18 +300,6 @@ class SettingsDataStore(
         prefs[KEY_STT_END_OF_SPEECH] ?: false
     }
 
-    val ttsEngine: Flow<String> = dataStore.data.map { prefs ->
-        prefs[KEY_TTS_ENGINE] ?: ""
-    }
-
-    val ttsVoice: Flow<String> = dataStore.data.map { prefs ->
-        prefs[KEY_TTS_VOICE] ?: ""
-    }
-
-    val ttsCaching: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[KEY_TTS_CACHING] ?: true
-    }
-
     val chatLayoutStyle: Flow<String> = dataStore.data.map { prefs ->
         prefs[KEY_CHAT_LAYOUT_STYLE] ?: "thread"
     }
@@ -322,35 +347,25 @@ class SettingsDataStore(
         )
     }
 
-    val artifactDisplayPrefs: Flow<ArtifactDisplayPrefs> = dataStore.data.map { prefs ->
-        ArtifactDisplayPrefs(
-            mode = ArtifactDisplayMode.fromString(prefs[KEY_ARTIFACT_DISPLAY_MODE]),
-        )
+    val selectedMcpServers: Flow<Set<String>> = dataStore.data.map { prefs ->
+        prefs[KEY_SELECTED_MCP_SERVERS]?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
     }
 
-    // Account-scoped: MCP names and tool availability are server-defined. A selection from one
-    // account must never be restored on another server merely because the names happen to match.
-    // Bare pre-scoping keys are deliberately ignored (and removed on the next write): their owner
-    // is unknowable, so attributing them to whichever account happens to be active would recreate
-    // the cross-server leak this namespace prevents.
-    val selectedMcpServers: Flow<Set<String>> = scopedStringSet(::mcpServersKey)
+    val enabledTools: Flow<Set<String>> = dataStore.data.map { prefs ->
+        prefs[KEY_ENABLED_TOOLS]?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+    }
 
-    val enabledTools: Flow<Set<String>> = scopedStringSet(::enabledToolsKey)
-
-    /**
-     * Server announcements are deployment-owned, so dismissal persists across restarts and
-     * accounts on that deployment without leaking to a different server that reused the same id.
-     */
-    fun dismissedBannerIds(serverId: String): Flow<Set<String>> = dataStore.data.map { prefs ->
-        prefs[dismissedBannerIdsKey(serverId)].orEmpty()
+    /** The mode the Artifacts tool sends while it is on; app-wide, like [enabledTools]. */
+    val artifactsMode: Flow<ArtifactsMode> = dataStore.data.map { prefs ->
+        ArtifactsMode.fromWire(prefs[KEY_ARTIFACTS_MODE]) ?: ArtifactsMode.DEFAULT
     }
 
     /**
-     * The backend version suppressed for one deployment. A different server advertising the same
-     * version remains visible; a changed version on this server also resurfaces.
+     * The backend version for which the user dismissed the version mismatch warning.
+     * When the backend updates to a new version, the dialog will appear again.
      */
-    fun dismissedVersionWarning(serverId: String): Flow<String?> = dataStore.data.map { prefs ->
-        prefs[dismissedVersionWarningKey(serverId)]
+    val dismissedVersionWarning: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[KEY_DISMISSED_VERSION_WARNING]
     }
 
     suspend fun setSelectedLanguage(languageCode: String) {
@@ -368,12 +383,6 @@ class SettingsDataStore(
     suspend fun setChatFontSize(size: ChatFontSize) {
         dataStore.edit { prefs ->
             prefs[KEY_CHAT_FONT_SIZE] = size.toStorageString()
-        }
-    }
-
-    suspend fun setChatParagraphSpacing(spacing: ChatParagraphSpacing) {
-        dataStore.edit { prefs ->
-            prefs[KEY_CHAT_PARAGRAPH_SPACING] = spacing.toStorageString()
         }
     }
 
@@ -395,39 +404,9 @@ class SettingsDataStore(
         }
     }
 
-    suspend fun setAutoScrollEnabled(enabled: Boolean) {
+    suspend fun setThinkingOpenByDefault(open: Boolean) {
         dataStore.edit { prefs ->
-            prefs[KEY_AUTO_SCROLL_ENABLED] = enabled
-        }
-    }
-
-    suspend fun setPrefetchEnabled(enabled: Boolean) {
-        dataStore.edit { prefs ->
-            prefs[KEY_PREFETCH_ENABLED] = enabled
-        }
-    }
-
-    suspend fun setPrefetchAttachmentsEnabled(enabled: Boolean) {
-        dataStore.edit { prefs ->
-            prefs[KEY_PREFETCH_ATTACHMENTS] = enabled
-        }
-    }
-
-    suspend fun setPrefetchDepth(depth: Int) {
-        dataStore.edit { prefs ->
-            prefs[KEY_PREFETCH_DEPTH] = depth.coerceIn(PrefetchDepth.RANGE)
-        }
-    }
-
-    suspend fun setPrefetchOnMeteredEnabled(enabled: Boolean) {
-        dataStore.edit { prefs ->
-            prefs[KEY_PREFETCH_ON_METERED] = enabled
-        }
-    }
-
-    suspend fun setShowThinkingBlocks(show: Boolean) {
-        dataStore.edit { prefs ->
-            prefs[KEY_SHOW_THINKING_BLOCKS] = show
+            prefs[KEY_SHOW_THINKING_BLOCKS] = open
         }
     }
 
@@ -455,6 +434,124 @@ class SettingsDataStore(
         }
     }
 
+    suspend fun setContextDetailPreset(preset: ContextDetailPreset) {
+        dataStore.edit { prefs -> prefs[KEY_CONTEXT_DETAIL_PRESET] = preset.name }
+    }
+
+    /**
+     * Turns the custom mix on or off. The first time it turns on, the mix starts as the current
+     * preset's sections, so switching to Custom changes nothing until a switch is flipped.
+     */
+    suspend fun setContextDetailAdvanced(advanced: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_CONTEXT_DETAIL_ADVANCED] = advanced
+            if (advanced && decodeSections(prefs[KEY_CONTEXT_DETAIL_CUSTOM]) == null) {
+                val preset = ContextDetailPreset.fromString(prefs[KEY_CONTEXT_DETAIL_PRESET])
+                prefs[KEY_CONTEXT_DETAIL_CUSTOM] = usageJson.encodeToString(preset.sections)
+            }
+        }
+    }
+
+    suspend fun setContextDetailCustom(sections: ContextDetailSections) {
+        dataStore.edit { prefs -> prefs[KEY_CONTEXT_DETAIL_CUSTOM] = usageJson.encodeToString(sections) }
+    }
+
+    suspend fun setCompactNudgeThreshold(threshold: Int) {
+        dataStore.edit { prefs -> prefs[KEY_COMPACT_NUDGE_THRESHOLD] = threshold.coerceAtLeast(0) }
+    }
+
+    /** "Not now" on the compact suggestion: hide it for [conversationId] until usage passes [band]. */
+    suspend fun snoozeCompactNudge(conversationId: String, band: Int) {
+        if (conversationId.isBlank()) return
+        // A durable write; keep it off the caller's cancellation, like incrementModelUsage.
+        withContext(NonCancellable) {
+            dataStore.edit { prefs ->
+                val current = decodeSnoozes(prefs[KEY_COMPACT_NUDGE_SNOOZES])
+                val nextSeq = (current.values.maxOfOrNull { it.seq } ?: 0L) + 1
+                val merged = current + (conversationId to SnoozeEntry(band, nextSeq))
+                // Bounded by recency: the oldest snoozes go first.
+                val trimmed = if (merged.size > MAX_COMPACT_SNOOZES) {
+                    merged.entries.sortedByDescending { it.value.seq }.take(MAX_COMPACT_SNOOZES).associate { it.toPair() }
+                } else {
+                    merged
+                }
+                prefs[KEY_COMPACT_NUDGE_SNOOZES] = usageJson.encodeToString(trimmed)
+            }
+        }
+    }
+
+    /** Usage fell back below the threshold (compacted, or a shorter branch): forget the "Not now". */
+    suspend fun clearCompactNudgeSnooze(conversationId: String) {
+        withContext(NonCancellable) {
+            dataStore.edit { prefs ->
+                val current = decodeSnoozes(prefs[KEY_COMPACT_NUDGE_SNOOZES])
+                if (conversationId in current) {
+                    prefs[KEY_COMPACT_NUDGE_SNOOZES] = usageJson.encodeToString(current - conversationId)
+                }
+            }
+        }
+    }
+
+    /**
+     * The chat Skills toggle stored for one slot: a conversation id, or one of the shared new-chat
+     * slots ([SKILLS_TOGGLE_NEW_CHAT_SLOT], [SKILLS_TOGGLE_SPEC_DEFAULTS_SLOT]). Null when nothing
+     * is stored for it, which callers read as off.
+     *
+     * Per conversation, the way web keeps `LAST_SKILLS_TOGGLE_<suffix>` (`BadgeRowContext.tsx`),
+     * where every other chat tool here stays global. Account-scoped, because conversation ids
+     * belong to one server and the logout prefix purge then sweeps the map with the account.
+     * Bounded by recency to [MAX_SKILLS_TOGGLES] conversation slots; the shared new-chat slots are
+     * always kept.
+     */
+    fun skillsToggle(slot: String): Flow<Boolean?> =
+        activeAccountProvider.flatMapAccountOrEmpty<Boolean?>(null) { id ->
+            val key = skillsToggleKey(id.value)
+            // Deduped on the raw blob first: every unrelated preference write re-emits `data`.
+            dataStore.data.map { prefs -> prefs[key] }
+                .distinctUntilChanged()
+                .map { raw -> decodeSkillsToggles(raw)[slot]?.on }
+        }.distinctUntilChanged()
+
+    /** Stores the Skills toggle for [slot]; see [skillsToggle]. No-ops without an account. */
+    suspend fun setSkillsToggle(slot: String, on: Boolean) {
+        if (slot.isBlank()) return
+        val accountId = activeAccountProvider.currentAccountId()?.value ?: return
+        val key = skillsToggleKey(accountId)
+        // A durable write: the new-chat handoff clears the landing ViewModel right after it.
+        withContext(NonCancellable) {
+            dataStore.edit { prefs ->
+                val current = decodeSkillsToggles(prefs[key])
+                val nextSeq = (current.values.maxOfOrNull { it.seq } ?: 0L) + 1
+                val merged = current + (slot to SkillsToggleEntry(on, nextSeq))
+                // The shared new-chat slots sit outside the budget: they are written only when the
+                // user toggles in a new chat, so by recency alone they would age out under the
+                // per-conversation writes and every fresh chat would silently start off again.
+                val (shared, conversations) = merged.entries.partition { it.key in SHARED_SKILLS_TOGGLE_SLOTS }
+                val trimmed = if (conversations.size > MAX_SKILLS_TOGGLES) {
+                    shared.associate { it.toPair() } +
+                        conversations.sortedByDescending { it.value.seq }.take(MAX_SKILLS_TOGGLES).associate { it.toPair() }
+                } else {
+                    merged
+                }
+                prefs[key] = usageJson.encodeToString(trimmed)
+            }
+        }
+    }
+
+    private fun skillsToggleKey(accountId: String) = accountScopedKey(accountId, SKILLS_TOGGLES)
+
+    private fun decodeSkillsToggles(raw: String?): Map<String, SkillsToggleEntry> =
+        raw?.let { runCatching { usageJson.decodeFromString<Map<String, SkillsToggleEntry>>(it) }.getOrNull() }
+            ?: emptyMap()
+
+    /** Tolerant decode — a malformed or absent blob reads as "no custom mix". */
+    private fun decodeSections(raw: String?): ContextDetailSections? =
+        raw?.let { runCatching { usageJson.decodeFromString<ContextDetailSections>(it) }.getOrNull() }
+
+    private fun decodeSnoozes(raw: String?): Map<String, SnoozeEntry> =
+        raw?.let { runCatching { usageJson.decodeFromString<Map<String, SnoozeEntry>>(it) }.getOrNull() }
+            ?: emptyMap()
+
     suspend fun setAutoReadEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[KEY_AUTO_READ_ENABLED] = enabled
@@ -479,59 +576,26 @@ class SettingsDataStore(
         }
     }
 
-    suspend fun setLastUsedModel(endpoint: String, model: String) {
+    suspend fun setLastUsedModel(endpoint: String, model: String, spec: String? = null) {
         val accountId = activeAccountProvider.currentAccountId()?.value ?: return
         dataStore.edit { prefs ->
             prefs[endpointKey(accountId)] = endpoint
             prefs[modelKey(accountId)] = model
+            if (spec != null) prefs[specKey(accountId)] = spec else prefs.remove(specKey(accountId))
             // Reset migration: drop the pre-keying bare entries (they'd mis-attribute A's model to B).
             prefs.remove(stringPreferencesKey(LAST_USED_ENDPOINT))
             prefs.remove(stringPreferencesKey(LAST_USED_MODEL))
         }
     }
 
-    // Suspends (emits nothing) while Warming; once Resolved emits the account's scoped value, or null
-    // when logged out. flatMapLatest re-subscribes on every identity transition so a switch re-emits.
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun scopedString(keyFor: (String) -> Preferences.Key<String>): Flow<String?> =
-        activeAccountProvider.state.flatMapLatest { state ->
-            when (state) {
-                AccountState.Warming -> emptyFlow()
-                is AccountState.Resolved ->
-                    state.id?.let { id -> dataStore.data.map { it[keyFor(id.value)] } } ?: flowOf(null)
-            }
-        }
-
     private fun endpointKey(accountId: String) = accountScopedKey(accountId, LAST_USED_ENDPOINT)
 
     private fun modelKey(accountId: String) = accountScopedKey(accountId, LAST_USED_MODEL)
 
+    private fun specKey(accountId: String) = accountScopedKey(accountId, LAST_USED_SPEC)
+
     private fun usageKey(accountId: String) = accountScopedKey(accountId, MODEL_USAGE)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun scopedStringSet(keyFor: (String) -> Preferences.Key<String>): Flow<Set<String>> =
-        activeAccountProvider.state.flatMapLatest { state ->
-            when (state) {
-                AccountState.Warming -> emptyFlow()
-                is AccountState.Resolved ->
-                    state.id?.let { id ->
-                        dataStore.data.map { prefs -> decodeStringSet(prefs[keyFor(id.value)]) }
-                    } ?: flowOf(emptySet())
-            }
-        }
-
-    private fun mcpServersKey(accountId: String) = accountScopedKey(accountId, SELECTED_MCP_SERVERS)
-
-    private fun enabledToolsKey(accountId: String) = accountScopedKey(accountId, ENABLED_TOOLS)
-
-    private fun dismissedBannerIdsKey(serverId: String) =
-        stringSetPreferencesKey(serverScopedName(serverId, DISMISSED_BANNER_IDS))
-
-    private fun dismissedVersionWarningKey(serverId: String) =
-        serverScopedKey(serverId, DISMISSED_VERSION_WARNING)
-
-    private fun decodeStringSet(raw: String?): Set<String> =
-        raw?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
     private fun listRefreshKey(accountId: String) =
         accountScopedKey(accountId, PREFETCH_LIST_REFRESHED_AT)
 
@@ -594,8 +658,11 @@ class SettingsDataStore(
      * usage signal (a passively auto-restored model that's never chatted with must not climb the
      * ranking). Read-modify-write of the account-scoped counts map; a monotonically increasing
      * [UsageEntry.seq] provides the recency tie-break and bounds map growth via [MAX_USAGE_ENTRIES].
+     *
+     * A send through a model spec counts apart from the raw model, under [spec], so its shortcut
+     * reopens the spec; [label] is kept for the shortcut's title, the latest one a send carried.
      */
-    suspend fun incrementModelUsage(endpoint: String, model: String) {
+    suspend fun incrementModelUsage(endpoint: String, model: String, spec: String? = null, label: String? = null) {
         if (endpoint.isBlank() || model.isBlank()) return
         // Await account resolution instead of snapshotting it: the first send right after a fresh
         // login can fire before the active account has re-homed (the bearer is already staged, so the
@@ -609,9 +676,11 @@ class SettingsDataStore(
             dataStore.edit { prefs ->
                 val current = decodeUsage(prefs[key])
                 val nextSeq = (current.values.maxOfOrNull { it.seq } ?: 0L) + 1
-                val composite = usageCompositeKey(endpoint, model)
-                val incremented = current[composite]?.let { it.copy(count = it.count + 1, seq = nextSeq) }
-                    ?: UsageEntry(count = 1, seq = nextSeq)
+                val specName = spec?.takeIf { it.isNotBlank() }
+                val composite = usageCompositeKey(endpoint, model, specName)
+                val specLabel = label?.takeIf { it.isNotBlank() && specName != null }
+                val incremented = current[composite]?.let { it.copy(count = it.count + 1, seq = nextSeq, label = specLabel ?: it.label) }
+                    ?: UsageEntry(count = 1, seq = nextSeq, label = specLabel)
                 val merged = current + (composite to incremented)
                 // Keep the map bounded: retain the strongest entries by the same (count, recency) order
                 // the ranking uses, so a long tail of one-off models can't grow the pref without limit.
@@ -628,31 +697,6 @@ class SettingsDataStore(
             }
         }
     }
-
-    private fun usageCompositeKey(endpoint: String, model: String) =
-        "$endpoint$USAGE_KEY_SEPARATOR$model"
-
-    /** Tolerant decode — a malformed/absent blob yields an empty map, never a crash. */
-    private fun decodeUsage(raw: String?): Map<String, UsageEntry> =
-        raw?.let { runCatching { usageJson.decodeFromString<Map<String, UsageEntry>>(it) }.getOrNull() }
-            ?: emptyMap()
-
-    /** Decode + rank by (count desc, recency desc), take [limit], split composite keys to [ModelRef]. */
-    private fun rankUsage(raw: String?, limit: Int): List<ModelRef> =
-        decodeUsage(raw).entries
-            .sortedWith(
-                compareByDescending<Map.Entry<String, UsageEntry>> { it.value.count }
-                    .thenByDescending { it.value.seq },
-            )
-            .take(limit)
-            .mapNotNull { (composite, _) ->
-                val sep = composite.indexOf(USAGE_KEY_SEPARATOR)
-                if (sep <= 0 || sep >= composite.lastIndex) {
-                    null
-                } else {
-                    ModelRef(composite.substring(0, sep), composite.substring(sep + 1))
-                }
-            }
 
     suspend fun setTtsSource(source: String) {
         dataStore.edit { prefs ->
@@ -720,24 +764,6 @@ class SettingsDataStore(
         }
     }
 
-    suspend fun setTtsEngine(engine: String) {
-        dataStore.edit { prefs ->
-            prefs[KEY_TTS_ENGINE] = engine
-        }
-    }
-
-    suspend fun setTtsVoice(voice: String) {
-        dataStore.edit { prefs ->
-            prefs[KEY_TTS_VOICE] = voice
-        }
-    }
-
-    suspend fun setTtsCaching(enabled: Boolean) {
-        dataStore.edit { prefs ->
-            prefs[KEY_TTS_CACHING] = enabled
-        }
-    }
-
     suspend fun setChatLayoutStyle(style: String) {
         dataStore.edit { prefs ->
             prefs[KEY_CHAT_LAYOUT_STYLE] = style
@@ -795,61 +821,38 @@ class SettingsDataStore(
         dataStore.edit { prefs -> prefs[KEY_INLINE_ARTIFACT_MARKDOWN] = enabled }
     }
 
-    suspend fun setArtifactDisplayMode(mode: ArtifactDisplayMode) {
-        dataStore.edit { prefs -> prefs[KEY_ARTIFACT_DISPLAY_MODE] = mode.toStorageString() }
-    }
-
-    suspend fun dismissBanner(serverId: String, bannerId: String) {
-        dataStore.edit { prefs ->
-            val key = dismissedBannerIdsKey(serverId)
-            prefs[key] = prefs[key].orEmpty() + bannerId
-            prefs.remove(stringSetPreferencesKey(DISMISSED_BANNER_IDS))
-        }
-    }
-
     /**
-     * Saves the backend version for which the user chose "Don't warn again" on [serverId].
-     * If that backend later updates to a different version, the warning will reappear.
+     * Saves the backend version for which the user chose "Don't warn again".
+     * If the backend later updates to a different version, the warning will reappear.
      */
-    suspend fun setDismissedVersionWarning(serverId: String, version: String) {
+    suspend fun setDismissedVersionWarning(version: String) {
         dataStore.edit { prefs ->
-            prefs[dismissedVersionWarningKey(serverId)] = version
-            prefs.remove(stringPreferencesKey(DISMISSED_VERSION_WARNING))
-        }
-    }
-
-    /** Drops server-owned announcement and compatibility-warning decisions when a profile is forgotten. */
-    suspend fun clearServerBannerDismissals(serverId: String) {
-        dataStore.edit { prefs ->
-            prefs.remove(dismissedBannerIdsKey(serverId))
-            prefs.remove(dismissedVersionWarningKey(serverId))
+            prefs[KEY_DISMISSED_VERSION_WARNING] = version
         }
     }
 
     suspend fun setSelectedMcpServers(servers: Set<String>) {
-        val accountId = activeAccountProvider.currentAccountId()?.value ?: return
         dataStore.edit { prefs ->
-            val key = mcpServersKey(accountId)
             if (servers.isEmpty()) {
-                prefs.remove(key)
+                prefs.remove(KEY_SELECTED_MCP_SERVERS)
             } else {
-                prefs[key] = servers.joinToString(",")
+                prefs[KEY_SELECTED_MCP_SERVERS] = servers.joinToString(",")
             }
-            prefs.remove(stringPreferencesKey(SELECTED_MCP_SERVERS))
         }
     }
 
     suspend fun setEnabledTools(tools: Set<String>) {
-        val accountId = activeAccountProvider.currentAccountId()?.value ?: return
         dataStore.edit { prefs ->
-            val key = enabledToolsKey(accountId)
             if (tools.isEmpty()) {
-                prefs.remove(key)
+                prefs.remove(KEY_ENABLED_TOOLS)
             } else {
-                prefs[key] = tools.joinToString(",")
+                prefs[KEY_ENABLED_TOOLS] = tools.joinToString(",")
             }
-            prefs.remove(stringPreferencesKey(ENABLED_TOOLS))
         }
+    }
+
+    suspend fun setArtifactsMode(mode: ArtifactsMode) {
+        dataStore.edit { prefs -> prefs[KEY_ARTIFACTS_MODE] = mode.wire }
     }
 
     companion object {
@@ -860,33 +863,49 @@ class SettingsDataStore(
          */
         const val DEFAULT_LANGUAGE = "system"
 
+        /** The Skills toggle slot every new chat shares (web's `Constants.NEW_CONVO`). */
+        const val SKILLS_TOGGLE_NEW_CHAT_SLOT = "new"
+
+        /**
+         * The new-chat slot while the server offers model specs and none is selected (web's
+         * `Constants.spec_defaults_key`), kept apart from [SKILLS_TOGGLE_NEW_CHAT_SLOT].
+         */
+        const val SKILLS_TOGGLE_SPEC_DEFAULTS_SLOT = "__defaults__"
+
+        /** The stored [ttsSource] values: the device's own engine, or the server's TTS route. */
+        const val TTS_SOURCE_DEVICE = "device"
+        const val TTS_SOURCE_SERVER = "server"
+
         private val KEY_SELECTED_LANGUAGE = stringPreferencesKey("selected_language")
         private val KEY_LATEX_RENDERER = stringPreferencesKey("latex_renderer")
         private val KEY_CHAT_FONT_SIZE = stringPreferencesKey("chat_font_size")
-        private val KEY_CHAT_PARAGRAPH_SPACING = stringPreferencesKey("chat_paragraph_spacing")
         private val KEY_STARRED_MODELS_DISPLAY = stringPreferencesKey("starred_models_display")
         private val KEY_CHAT_HEADER_CONTENT = stringPreferencesKey("chat_header_content")
         private val KEY_CHAT_HEADER_ALIGNMENT = stringPreferencesKey("chat_header_alignment")
-        private val KEY_AUTO_SCROLL_ENABLED = booleanPreferencesKey("auto_scroll_enabled")
-        private val KEY_PREFETCH_ENABLED = booleanPreferencesKey("prefetch_enabled")
-        private val KEY_PREFETCH_ATTACHMENTS = booleanPreferencesKey("prefetch_attachments")
-        private val KEY_PREFETCH_ON_METERED = booleanPreferencesKey("prefetch_on_metered")
-        private val KEY_PREFETCH_DEPTH = intPreferencesKey("prefetch_depth")
         private val KEY_SHOW_THINKING_BLOCKS = booleanPreferencesKey("show_thinking_blocks")
         private val KEY_CONTEXT_BAR_PLACEMENT = stringPreferencesKey("context_bar_placement")
         private val KEY_DURING_RUN_ACTION = stringPreferencesKey("during_run_action")
         private val KEY_UPLOAD_ROUTING_MODE = stringPreferencesKey("upload_routing_mode")
         private val KEY_CONTEXT_GAUGE_EXPANDED = booleanPreferencesKey("context_gauge_expanded")
+        private val KEY_CONTEXT_DETAIL_PRESET = stringPreferencesKey("context_detail_preset")
+        private val KEY_CONTEXT_DETAIL_ADVANCED = booleanPreferencesKey("context_detail_advanced")
+        private val KEY_CONTEXT_DETAIL_CUSTOM = stringPreferencesKey("context_detail_custom")
+        private val KEY_COMPACT_NUDGE_THRESHOLD = intPreferencesKey("compact_nudge_threshold")
+        private val KEY_COMPACT_NUDGE_SNOOZES = stringPreferencesKey("compact_nudge_snoozes")
+        private const val MAX_COMPACT_SNOOZES = 200
+        private const val SKILLS_TOGGLES = "skills_toggles"
+        private const val MAX_SKILLS_TOGGLES = 200
+        private val SHARED_SKILLS_TOGGLE_SLOTS = setOf(SKILLS_TOGGLE_NEW_CHAT_SLOT, SKILLS_TOGGLE_SPEC_DEFAULTS_SLOT)
         private val KEY_AUTO_READ_ENABLED = booleanPreferencesKey("auto_read_enabled")
         private val KEY_SHOW_IMAGE_DESCRIPTIONS = booleanPreferencesKey("show_image_descriptions")
         private val KEY_SELECTED_VOICE_ID = stringPreferencesKey("selected_voice_id")
         private const val LAST_USED_ENDPOINT = "last_used_endpoint"
         private const val LAST_USED_MODEL = "last_used_model"
+        private const val LAST_USED_SPEC = "last_used_spec"
         private const val MODEL_USAGE = "model_usage"
         private const val PREFETCH_LIST_REFRESHED_AT = "prefetch_list_refreshed_at"
         private const val PREFETCH_LAST_SCHEDULED_RUN = "prefetch_last_scheduled_run"
         private const val MAX_USAGE_ENTRIES = 50
-        private const val USAGE_KEY_SEPARATOR = '\u0000'
         private val KEY_DISMISS_KEYBOARD_ON_SEND = booleanPreferencesKey("dismiss_keyboard_on_send")
         private val KEY_TTS_SOURCE = stringPreferencesKey("tts_source")
         private val KEY_TTS_SPEECH_RATE = floatPreferencesKey("tts_speech_rate")
@@ -899,9 +918,6 @@ class SettingsDataStore(
         private val KEY_STT_LANGUAGE = stringPreferencesKey("stt_language")
         private val KEY_STT_ON_DEVICE = booleanPreferencesKey("stt_on_device")
         private val KEY_STT_END_OF_SPEECH = booleanPreferencesKey("stt_end_of_speech")
-        private val KEY_TTS_ENGINE = stringPreferencesKey("tts_engine")
-        private val KEY_TTS_VOICE = stringPreferencesKey("tts_voice")
-        private val KEY_TTS_CACHING = booleanPreferencesKey("tts_caching")
         private val KEY_CHAT_LAYOUT_STYLE = stringPreferencesKey("chat_layout_style")
         private val KEY_FILES_VIEW_MODE = stringPreferencesKey("files_view_mode")
         private val KEY_FILES_SORT_FIELD = stringPreferencesKey("files_sort_field")
@@ -914,16 +930,61 @@ class SettingsDataStore(
         private val KEY_INLINE_ARTIFACT_HTML = booleanPreferencesKey("inline_artifact_html")
         private val KEY_INLINE_ARTIFACT_REACT = booleanPreferencesKey("inline_artifact_react")
         private val KEY_INLINE_ARTIFACT_MARKDOWN = booleanPreferencesKey("inline_artifact_markdown")
-        private val KEY_ARTIFACT_DISPLAY_MODE = stringPreferencesKey("artifact_display_mode")
-        private const val SELECTED_MCP_SERVERS = "selected_mcp_servers"
-        private const val ENABLED_TOOLS = "enabled_tools"
-        private const val DISMISSED_BANNER_IDS = "dismissed_banner_ids"
-        private const val DISMISSED_VERSION_WARNING = "dismissed_version_warning"
+        private val KEY_DISMISSED_VERSION_WARNING = stringPreferencesKey("dismissed_version_warning")
+        private val KEY_SELECTED_MCP_SERVERS = stringPreferencesKey("selected_mcp_servers")
+        private val KEY_ENABLED_TOOLS = stringPreferencesKey("enabled_tools")
+        private val KEY_ARTIFACTS_MODE = stringPreferencesKey("artifacts_mode")
     }
 }
 
-/** Per-model usage record: total send [count], plus a monotonic [seq] for the recency tie-break. */
+private const val USAGE_KEY_SEPARATOR = '\u0000'
+
+/** `endpoint␀model`, plus `␀spec` for a spec's sends; a raw pair keeps the two-part key it always had. */
+private fun usageCompositeKey(endpoint: String, model: String, spec: String?) =
+    "$endpoint$USAGE_KEY_SEPARATOR$model" + (spec?.let { "$USAGE_KEY_SEPARATOR$it" } ?: "")
+
+/** Tolerant decode — a malformed/absent blob yields an empty map, never a crash. */
+private fun decodeUsage(raw: String?): Map<String, UsageEntry> =
+    raw?.let { runCatching { usageJson.decodeFromString<Map<String, UsageEntry>>(it) }.getOrNull() }
+        ?: emptyMap()
+
+/** Decode + rank by (count desc, recency desc), take [limit], split composite keys to [ModelRef]. */
+private fun rankUsage(raw: String?, limit: Int): List<ModelRef> =
+    decodeUsage(raw).entries
+        .sortedWith(
+            compareByDescending<Map.Entry<String, UsageEntry>> { it.value.count }
+                .thenByDescending { it.value.seq },
+        )
+        .asSequence()
+        .mapNotNull { (composite, entry) ->
+            val parts = composite.split(USAGE_KEY_SEPARATOR)
+            val endpoint = parts.getOrNull(0)?.takeIf { it.isNotEmpty() }
+            val model = parts.getOrNull(1)?.takeIf { it.isNotEmpty() }
+            val spec = parts.getOrNull(2)?.takeIf { it.isNotEmpty() }
+            if (endpoint == null || model == null || parts.size > 3) {
+                null
+            } else {
+                ModelRef(endpoint, model, spec, entry.label.takeIf { spec != null })
+            }
+        }
+        // A spec counted on two pairs (an admin moved it) reopens the same spec either way: one shortcut.
+        .distinctBy { ref -> ref.spec ?: "${ref.endpoint}$USAGE_KEY_SEPARATOR${ref.model}" }
+        .take(limit)
+        .toList()
+
+/**
+ * Per-model usage record: total send [count], plus a monotonic [seq] for the recency tie-break.
+ * [label] is a spec entry's display label, absent from entries written before specs were counted.
+ */
 @Serializable
-private data class UsageEntry(val count: Int, val seq: Long)
+private data class UsageEntry(val count: Int, val seq: Long, val label: String? = null)
+
+/** One slot's Skills toggle; [seq] orders entries for the size cap. */
+@Serializable
+private data class SkillsToggleEntry(val on: Boolean, val seq: Long)
+
+/** A "Not now" on the compact suggestion; [seq] orders entries for the size cap. */
+@Serializable
+private data class SnoozeEntry(val band: Int, val seq: Long)
 
 private val usageJson = Json { ignoreUnknownKeys = true }

@@ -9,22 +9,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -37,9 +36,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.model.Conversation
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.conversations.resources.*
 import com.garfiec.librechat.feature.conversations.resources.Res
 import org.jetbrains.compose.resources.stringResource
@@ -52,126 +56,142 @@ fun ConversationActions(
     onRename: (String) -> Unit,
     onArchive: () -> Unit,
     onDelete: () -> Unit,
+    // Required: a call site that leaves it out would offer Favorite and Bookmarks… to a gated user.
+    bookmarksEnabled: Boolean,
     modifier: Modifier = Modifier,
-    onTags: () -> Unit = {},
+    /** Opens the chat's bookmark checklist; null leaves "Bookmarks…" out. */
+    onBookmarks: (() -> Unit)? = null,
     onShare: () -> Unit = {},
     onDuplicate: () -> Unit = {},
     onExport: () -> Unit = {},
-    onBookmarkToggle: () -> Unit = {},
-    isBookmarked: Boolean = false,
+    onFavoriteToggle: () -> Unit = {},
+    isFavorite: Boolean = false,
     showShareAction: Boolean = false,
-    bookmarksEnabled: Boolean = true,
 ) {
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    // Rename and delete hand off to a dialog this composable hosts, so only the sheet goes away:
+    // dismissing here would make the caller drop the conversation and take the dialog with it.
+    var sheetVisible by remember { mutableStateOf(true) }
 
     val sheetState = rememberModalBottomSheetState()
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        dragHandle = { LowProfileDragHandle() },
-        modifier = modifier,
-        sheetState = sheetState,
-    ) {
-        Column(
-            modifier = Modifier.padding(bottom = 32.dp),
+    if (sheetVisible) {
+        AdaptiveModalBottomSheet(
+            onDismissRequest = onDismiss,
+            dragHandle = { LowProfileDragHandle() },
+            modifier = modifier,
+            sheetState = sheetState,
         ) {
-            Text(
-                text = conversation.title ?: stringResource(Res.string.new_chat),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                maxLines = 1,
-            )
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 32.dp),
+            ) {
+                Text(
+                    text = conversation.title ?: stringResource(Res.string.new_chat),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
 
-            ActionRow(
-                icon = Icons.Default.Edit,
-                label = stringResource(Res.string.rename),
-                onClick = {
-                    onDismiss()
-                    showRenameDialog = true
-                },
-            )
-
-            if (bookmarksEnabled) {
                 ActionRow(
-                    icon = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                    label = if (isBookmarked) stringResource(Res.string.remove_bookmark) else stringResource(Res.string.bookmark),
-                    iconTint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    icon = Icons.Default.Edit,
+                    label = stringResource(Res.string.rename),
                     onClick = {
+                        sheetVisible = false
+                        showRenameDialog = true
+                    },
+                )
+
+                // The favorite star is the reserved Saved tag, so it is gated with bookmarks.
+                if (bookmarksEnabled) {
+                    ActionRow(
+                        icon = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                        label = if (isFavorite) stringResource(Res.string.remove_favorite) else stringResource(Res.string.favorite),
+                        iconTint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        onClick = {
+                            onFavoriteToggle()
+                            onDismiss()
+                        },
+                    )
+                    if (onBookmarks != null) {
+                        ActionRow(
+                            icon = Icons.Default.Bookmark,
+                            label = stringResource(Res.string.bookmarks_ellipsis),
+                            onClick = {
+                                onBookmarks()
+                                onDismiss()
+                            },
+                        )
+                    }
+                }
+
+                if (showShareAction) {
+                    ActionRow(
+                        icon = Icons.Default.Share,
+                        label = stringResource(Res.string.share),
+                        onClick = {
+                            onShare()
+                            onDismiss()
+                        },
+                    )
+                }
+
+                ActionRow(
+                    icon = Icons.Default.ContentCopy,
+                    label = stringResource(Res.string.duplicate),
+                    onClick = {
+                        onDuplicate()
                         onDismiss()
-                        onBookmarkToggle()
+                    },
+                )
+
+                ActionRow(
+                    icon = Icons.Default.FileDownload,
+                    label = stringResource(Res.string.export),
+                    onClick = {
+                        onExport()
+                        onDismiss()
+                    },
+                )
+
+                ActionRow(
+                    icon = Icons.Default.Archive,
+                    label = stringResource(Res.string.archive),
+                    onClick = {
+                        onArchive()
+                        onDismiss()
+                    },
+                )
+
+                ActionRow(
+                    icon = Icons.Default.Delete,
+                    label = stringResource(Res.string.delete),
+                    iconTint = MaterialTheme.colorScheme.error,
+                    labelColor = MaterialTheme.colorScheme.error,
+                    onClick = {
+                        sheetVisible = false
+                        showDeleteConfirmation = true
                     },
                 )
             }
-
-            ActionRow(
-                icon = Icons.AutoMirrored.Filled.Label,
-                label = stringResource(Res.string.tags),
-                onClick = {
-                    onDismiss()
-                    onTags()
-                },
-            )
-
-            if (showShareAction) {
-                ActionRow(
-                    icon = Icons.Default.Share,
-                    label = stringResource(Res.string.share),
-                    onClick = {
-                        onDismiss()
-                        onShare()
-                    },
-                )
-            }
-
-            ActionRow(
-                icon = Icons.Default.ContentCopy,
-                label = stringResource(Res.string.duplicate),
-                onClick = {
-                    onDismiss()
-                    onDuplicate()
-                },
-            )
-
-            ActionRow(
-                icon = Icons.Default.FileDownload,
-                label = stringResource(Res.string.export),
-                onClick = {
-                    onDismiss()
-                    onExport()
-                },
-            )
-
-            ActionRow(
-                icon = Icons.Default.Archive,
-                label = stringResource(Res.string.archive),
-                onClick = {
-                    onDismiss()
-                    onArchive()
-                },
-            )
-
-            ActionRow(
-                icon = Icons.Default.Delete,
-                label = stringResource(Res.string.delete),
-                iconTint = MaterialTheme.colorScheme.error,
-                labelColor = MaterialTheme.colorScheme.error,
-                onClick = {
-                    onDismiss()
-                    showDeleteConfirmation = true
-                },
-            )
         }
     }
 
     if (showRenameDialog) {
         RenameDialog(
             currentTitle = conversation.title ?: "",
-            onDismiss = { showRenameDialog = false },
+            onDismiss = {
+                showRenameDialog = false
+                onDismiss()
+            },
             onConfirm = { newTitle ->
                 showRenameDialog = false
                 onRename(newTitle)
+                onDismiss()
             },
         )
     }
@@ -179,10 +199,14 @@ fun ConversationActions(
     if (showDeleteConfirmation) {
         DeleteConfirmationDialog(
             conversationTitle = conversation.title ?: stringResource(Res.string.this_conversation),
-            onDismiss = { showDeleteConfirmation = false },
+            onDismiss = {
+                showDeleteConfirmation = false
+                onDismiss()
+            },
             onConfirm = {
                 showDeleteConfirmation = false
                 onDelete()
+                onDismiss()
             },
         )
     }
@@ -225,7 +249,8 @@ internal fun RenameDialog(
 ) {
     var title by remember { mutableStateOf(currentTitle) }
 
-    AlertDialog(
+    AdaptiveAlertDialog(
+        modifier = Modifier.clearFocusOnTap(),
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.rename_conversation)) },
         text = {
@@ -236,7 +261,7 @@ internal fun RenameDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(
+                AdaptiveOutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     singleLine = true,
@@ -267,7 +292,7 @@ internal fun DeleteConfirmationDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    AdaptiveAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.delete_conversation)) },
         text = {

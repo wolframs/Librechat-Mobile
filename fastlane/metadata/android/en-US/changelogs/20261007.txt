@@ -1,0 +1,9 @@
+- Let new chats start on the last-used model, and hide the picker as web does
+- Overhaul the Skills screens and bring skills into chat
+- Redesign the Memories page and reach web parity
+- One share sheet, a Shared chats page and an in-app shared chat viewer
+- Pin model specs as favourites
+- Scroll Compare's side-by-side panes together
+- Redesign the agent index and agent page
+- Pick the second model when Compare Models turns on
+- And 20 more; see the release notes on GitHub.

@@ -3,35 +3,104 @@ package com.garfiec.librechat.feature.agents.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.BackendVersion
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AgentRepository
-import com.garfiec.librechat.core.model.Agent
-import com.garfiec.librechat.feature.agents.AgentContactDisplayData
+import com.garfiec.librechat.core.data.repository.ConfigRepository
+import com.garfiec.librechat.core.data.repository.FavoritesRepository
+import com.garfiec.librechat.core.data.repository.RoleRepository
+import com.garfiec.librechat.core.model.AgentCategory
+import com.garfiec.librechat.core.model.FavoritesLimits
+import com.garfiec.librechat.core.model.UserFavorite
+import com.garfiec.librechat.core.model.permissions.Permission
+import com.garfiec.librechat.core.model.permissions.PermissionType
+import com.garfiec.librechat.core.model.permissions.hasAccessOrPermissive
 import com.garfiec.librechat.feature.agents.AgentDetailDisplayData
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 
 @Immutable
 data class AgentDetailUiState(
     val agent: AgentDetailDisplayData? = null,
     val isLoading: Boolean = false,
-    val error: String? = null,
+    /** The page could not be loaded at all; a failed refresh of a shown page leaves this null. */
+    val loadError: AgentLoadError? = null,
+    /**
+     * The edit-gated `/expanded` read answered, so the tools are the agent's own. The VIEW read
+     * sends none, and a list row only a cut-down projection, so the page shows Tools only then.
+     * Model is on the VIEW read too and doesn't wait for this.
+     */
+    val isFullRecord: Boolean = false,
     val canEdit: Boolean = false,
+    /** The role's AGENTS.CREATE. Permissive until the role says otherwise. */
+    val canCreate: Boolean = true,
+    /** Pinned to the chat model menu (`/api/user/settings/favorites`). */
+    val isPinned: Boolean = false,
+    /** The server's categories, for an admin's own category label. Empty until (unless) they load. */
+    val categories: List<AgentCategory> = emptyList(),
     val showDeleteDialog: Boolean = false,
     val isDeleting: Boolean = false,
     val isDuplicating: Boolean = false,
-)
+    /** A Delete, Duplicate or pin that failed. Shown once as a snackbar; the page stays. */
+    val actionError: AgentActionError? = null,
+    /**
+     * The server enables agent tool approval modes (v0.8.9-rc1+ and `agents.toolApproval.agentModes`),
+     * so "Reset my remembered approvals" is offered. VIEW access is enough for it, so every viewer gets it.
+     */
+    val canResetApprovals: Boolean = false,
+    val isResettingApprovals: Boolean = false,
+    /** How the last reset ended; shown once as a snackbar. */
+    val approvalResetNotice: ApprovalResetNotice? = null,
+) {
+    /** The duplicate route needs AGENTS.CREATE and EDIT on the source (upstream routes/agents/v1.js). */
+    val canDuplicate: Boolean get() = canEdit && canCreate
+
+    /**
+     * Edit opens the editor, whose save (`PATCH /api/agents/:id`) needs AGENTS.CREATE as well as EDIT
+     * (upstream routes/agents/v1.js). Without CREATE every save would 403, so Edit isn't offered.
+     */
+    val canOpenEditor: Boolean get() = canEdit && canCreate
+
+    /**
+     * The delete route needs AGENTS.CREATE and the agent's DELETE bit. Nothing reports DELETE on its
+     * own, so EDIT stands in for it; a 403 still lands in the action-error snackbar.
+     */
+    val canDelete: Boolean get() = canEdit && canCreate
+}
+
+/**
+ * The page could not load. The screen says so in its own words; [serverMessage] is the server's
+ * explanation, added under them only when the server wrote one.
+ */
+@Immutable
+data class AgentLoadError(val serverMessage: String?)
+
+/**
+ * An action on the page that failed. The screen names the action in its own words;
+ * [serverMessage] is the server's explanation, added under them only when the server wrote one.
+ */
+@Immutable
+sealed interface AgentActionError {
+    data class Delete(val serverMessage: String?) : AgentActionError
+    data class Duplicate(val serverMessage: String?) : AgentActionError
+    data class Pin(val serverMessage: String?) : AgentActionError
+
+    /** The pin list is full ([max] favorites); nothing was sent. */
+    data class PinLimit(val max: Int) : AgentActionError
+}
 
 sealed interface AgentDetailEvent {
     data object Deleted : AgentDetailEvent
@@ -41,6 +110,9 @@ sealed interface AgentDetailEvent {
 class AgentDetailViewModel(
     private val agentRepository: AgentRepository,
     private val serverDataStore: ServerDataStore,
+    private val favoritesRepository: FavoritesRepository,
+    private val roleRepository: RoleRepository,
+    private val configRepository: ConfigRepository,
     initialAgentId: String? = null,
 ) : ViewModel() {
 
@@ -52,25 +124,120 @@ class AgentDetailViewModel(
     private val _events = MutableSharedFlow<AgentDetailEvent>()
     val events: SharedFlow<AgentDetailEvent> = _events.asSharedFlow()
 
+    /**
+     * Whether [FavoritesRepository.favorites] has been read from the server since this page
+     * opened. A pin is a write of the WHOLE list, so one built on the empty not-yet-loaded list
+     * would replace every other pin the user has.
+     */
+    private var favoritesLoaded = false
+    private var pinJob: Job? = null
+    private var categoriesRequested = false
+
     init {
         loadAgent()
+        observeRole()
+        observePins()
+        observeApprovalModes()
+        viewModelScope.launch { refreshFavorites() }
+        // Saving in the editor pops back to this page rather than opening a fresh copy of it.
+        viewModelScope.launch {
+            agentRepository.revision.drop(1).collect { fetchAgent(isRefresh = true) }
+        }
     }
 
-    fun loadAgent() {
+    fun loadAgent() = fetchAgent(isRefresh = false)
+
+    /** The web link that opens a new chat with this agent. */
+    fun chatLink(): String = agentChatLink(serverDataStore.getBaseUrl(), agentId)
+
+    private fun observeRole() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            // Try the expanded endpoint first (returns full agent data including
-            // description, category, tools, conversation_starters). It requires
-            // EDIT permission server-side, so a 403 there means the user may view
-            // but not edit this agent. Any other failure is transient/unknown, so
-            // stay optimistic rather than hiding Edit from an owner during a flaky
-            // request — the editor re-checks permission on entry. Fall back to the
-            // standard view-only endpoint for the displayed data.
-            val expanded = agentRepository.getAgentForEditing(agentId)
-            val canEdit = expanded !is Result.Error || !expanded.isPermissionDenied()
+            roleRepository.userPermissions.collect { role ->
+                _uiState.update {
+                    it.copy(canCreate = role.hasAccessOrPermissive(PermissionType.AGENTS, Permission.CREATE))
+                }
+            }
+        }
+    }
+
+    /** Same gate as the editor's mode picker; see VERSION_GATES.md. */
+    private fun observeApprovalModes() {
+        viewModelScope.launch {
+            combine(configRepository.detectedBackendVersion, configRepository.endpointConfigs) { version, configs ->
+                version != null &&
+                    BackendVersion.isCompatibleOrNewer(version, "0.8.9-rc1") &&
+                    configs["agents"]?.toolApproval?.agentModes == true
+            }.distinctUntilChanged().collect { available ->
+                _uiState.update { it.copy(canResetApprovals = available) }
+            }
+        }
+    }
+
+    /** Forgets the user's own remembered tool approvals for this agent (every tool, every chat). */
+    fun resetApprovals() {
+        val state = _uiState.value
+        if (!state.canResetApprovals || state.isResettingApprovals) return
+        _uiState.update { it.copy(isResettingApprovals = true) }
+        viewModelScope.launch {
+            val result = agentRepository.resetToolApprovals(agentId)
+            _uiState.update {
+                it.copy(isResettingApprovals = false, approvalResetNotice = result.toApprovalResetNotice())
+            }
+        }
+    }
+
+    fun dismissApprovalResetNotice() {
+        _uiState.update { it.copy(approvalResetNotice = null) }
+    }
+
+    /** Pins made anywhere (the chat model menu, Settings) show here, since all read one list. */
+    private fun observePins() {
+        viewModelScope.launch {
+            favoritesRepository.favorites.collect { list ->
+                _uiState.update { state -> state.copy(isPinned = list.any { it.agentId == agentId }) }
+            }
+        }
+    }
+
+    private suspend fun refreshFavorites(): Boolean = when (val result = favoritesRepository.refresh()) {
+        is Result.Success -> {
+            favoritesLoaded = true
+            true
+        }
+        is Result.Error -> {
+            Logger.d(result.exception) { "Failed to load favorites: ${result.message}" }
+            false
+        }
+        is Result.Loading -> false
+    }
+
+    /** A refresh keeps the page on screen: no spinner, and a failure leaves the last good copy. */
+    private fun fetchAgent(isRefresh: Boolean) {
+        viewModelScope.launch {
+            val showsAgent = isRefresh && _uiState.value.agent != null
+            if (!showsAgent) _uiState.update { it.copy(isLoading = true, loadError = null) }
+            // The expanded read doubles as the edit-permission probe: it requires EDIT, so a 403
+            // means the user may view but not edit. Only it carries tools and the agent's own
+            // category; description, starters, model and contacts come from the VIEW read too.
+            // Any other failure is transient, so Edit stays shown rather than vanishing for an
+            // owner on a flaky request; a wrong guess surfaces as the server's error when the
+            // editor loads or an action is sent.
+            // When the agent list already said this user can't edit it, the probe could only 403.
+            val listedVerdict = agentRepository.listedEditVerdict(agentId)
+            val expanded = if (listedVerdict == false) {
+                null
+            } else {
+                agentRepository.getAgentForEditing(agentId)
+            }
+            // A skipped probe leaves the verdict to `serverSaysEditable` below, which is false
+            // unless the agent's own copy says otherwise.
+            val canEdit = expanded == null || expanded !is Result.Error || !expanded.isPermissionDenied()
             val result = when (expanded) {
                 is Result.Success -> expanded
-                else -> agentRepository.getAgent(agentId)
+                // The VIEW read, which every viewer may make: the agent's own model, Public flag,
+                // update time and contacts, with the tapped list row's category and Top pick.
+                // Its tools are not the agent's; `isFullRecord` stays false and Tools stay hidden.
+                else -> agentRepository.getAgentForViewing(agentId)
             }
             when (result) {
                 is Result.Success -> {
@@ -80,53 +247,104 @@ class AgentDetailViewModel(
                     // every server that predates it.
                     //
                     // Read from the LIST's answer, since neither endpoint loaded above stamps the
-                    // field; the agent's own copy still wins where it exists, because `getAgent`
-                    // can serve a list-projection row from the cache.
+                    // field; the agent's own copy still wins should a server ever send it there.
                     val serverSaysEditable =
-                        result.data.isEditable ?: agentRepository.listedEditVerdict(agentId)
-                    _uiState.value = _uiState.value.copy(
-                        agent = result.data.toDetailDisplayData(),
-                        canEdit = canEdit && serverSaysEditable != false,
-                        isLoading = false,
-                    )
+                        result.data.isEditable ?: listedVerdict
+                    val agent = result.data.toDetailDisplayData(serverDataStore.getBaseUrl())
+                    _uiState.update {
+                        it.copy(
+                            agent = agent,
+                            isFullRecord = expanded is Result.Success,
+                            canEdit = canEdit && serverSaysEditable != false,
+                            isLoading = false,
+                        )
+                    }
+                    loadCategoriesFor(agent)
                 }
                 is Result.Error -> {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        canEdit = false,
-                        error = result.message ?: "Failed to load agent",
-                    )
+                    if (showsAgent) return@launch
+                    _uiState.update {
+                        it.copy(isLoading = false, canEdit = false, loadError = AgentLoadError(result.serverMessage()))
+                    }
                 }
                 is Result.Loading -> { /* no-op */ }
             }
         }
     }
 
+    /**
+     * Reads the categories once, and only for an agent with a category to label: the route is the
+     * only place an admin's own category names its label. A failure leaves the value's own label.
+     */
+    private fun loadCategoriesFor(agent: AgentDetailDisplayData) {
+        val category = agent.categoryValue ?: return
+        if (category == GENERAL_CATEGORY || categoriesRequested) return
+        categoriesRequested = true
+        viewModelScope.launch {
+            when (val result = agentRepository.getAgentCategories()) {
+                is Result.Success -> _uiState.update { it.copy(categories = result.data) }
+                is Result.Error -> categoriesRequested = false
+                is Result.Loading -> Unit
+            }
+        }
+    }
+
+    /**
+     * Pins or unpins this agent in the chat model menu, as the menu's own star does
+     * (`FavoritesDelegate.toggleAgent` in feature/chat). The repository publishes the new list
+     * at once and rolls back on failure; a tap while a write is in flight is ignored.
+     */
+    fun togglePin() {
+        if (pinJob?.isActive == true) return
+        pinJob = viewModelScope.launch {
+            if (!favoritesLoaded && !refreshFavorites()) {
+                _uiState.update { it.copy(actionError = AgentActionError.Pin(serverMessage = null)) }
+                return@launch
+            }
+            val current = favoritesRepository.favorites.value
+            val pinned = current.any { it.agentId == agentId }
+            val next = if (pinned) {
+                current.filterNot { it.agentId == agentId }
+            } else {
+                if (current.size >= FavoritesLimits.MAX_FAVORITES) {
+                    _uiState.update { it.copy(actionError = AgentActionError.PinLimit(FavoritesLimits.MAX_FAVORITES)) }
+                    return@launch
+                }
+                current + UserFavorite(agentId = agentId)
+            }
+            when (val result = favoritesRepository.setFavorites(next)) {
+                is Result.Error -> _uiState.update { it.copy(actionError = AgentActionError.Pin(result.serverMessage())) }
+                else -> Unit
+            }
+        }
+    }
+
+    fun dismissActionError() {
+        _uiState.update { it.copy(actionError = null) }
+    }
+
     fun showDeleteConfirmation() {
-        _uiState.value = _uiState.value.copy(showDeleteDialog = true)
+        if (!_uiState.value.canDelete) return
+        _uiState.update { it.copy(showDeleteDialog = true) }
     }
 
     fun dismissDeleteConfirmation() {
-        _uiState.value = _uiState.value.copy(showDeleteDialog = false)
+        _uiState.update { it.copy(showDeleteDialog = false) }
     }
 
     fun deleteAgent() {
+        val state = _uiState.value
+        if (state.isDeleting || !state.canDelete) return
+        // Set before the launch, so a second tap is refused whatever the dispatcher.
+        _uiState.update { it.copy(isDeleting = true, showDeleteDialog = false, actionError = null) }
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(
-                isDeleting = true,
-                showDeleteDialog = false,
-                error = null,
-            )
             when (val result = agentRepository.deleteAgent(agentId)) {
                 is Result.Success -> {
-                    _uiState.value = _uiState.value.copy(isDeleting = false)
+                    _uiState.update { it.copy(isDeleting = false) }
                     _events.emit(AgentDetailEvent.Deleted)
                 }
-                is Result.Error -> {
-                    _uiState.value = _uiState.value.copy(
-                        isDeleting = false,
-                        error = result.message ?: "Failed to delete agent",
-                    )
+                is Result.Error -> _uiState.update {
+                    it.copy(isDeleting = false, actionError = AgentActionError.Delete(result.serverMessage()))
                 }
                 is Result.Loading -> { /* no-op */ }
             }
@@ -134,18 +352,18 @@ class AgentDetailViewModel(
     }
 
     fun duplicateAgent() {
+        val state = _uiState.value
+        if (state.isDuplicating || !state.canDuplicate) return
+        // Set before the launch, so a second tap is refused whatever the dispatcher.
+        _uiState.update { it.copy(isDuplicating = true, actionError = null) }
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isDuplicating = true, error = null)
             when (val result = agentRepository.duplicateAgent(agentId)) {
                 is Result.Success -> {
-                    _uiState.value = _uiState.value.copy(isDuplicating = false)
+                    _uiState.update { it.copy(isDuplicating = false) }
                     _events.emit(AgentDetailEvent.Duplicated(result.data.id))
                 }
-                is Result.Error -> {
-                    _uiState.value = _uiState.value.copy(
-                        isDuplicating = false,
-                        error = result.message ?: "Failed to duplicate agent",
-                    )
+                is Result.Error -> _uiState.update {
+                    it.copy(isDuplicating = false, actionError = AgentActionError.Duplicate(result.serverMessage()))
                 }
                 is Result.Loading -> { /* no-op */ }
             }
@@ -155,50 +373,10 @@ class AgentDetailViewModel(
     private fun Result.Error.isPermissionDenied(): Boolean =
         (exception as? ApiException)?.statusCode == HTTP_FORBIDDEN
 
-    private fun Agent.toDetailDisplayData(): AgentDetailDisplayData {
-        val resolvedUrl = avatarUrl?.let { url ->
-            if (url.startsWith("http")) {
-                url
-            } else {
-                "${serverDataStore.getBaseUrl()}$url"
-            }
-        }
-        return AgentDetailDisplayData(
-            id = id,
-            name = name ?: "Unnamed Agent",
-            description = description,
-            avatarUrl = resolvedUrl,
-            author = author,
-            authorName = authorName,
-            model = model,
-            category = category,
-            tools = tools,
-            conversationStarters = conversationStarters,
-            contact = resolveContact(supportContact, ownerContact),
-        )
-    }
-
-    /**
-     * Picks the contact to show: the agent's own support contact, falling back to the owner's.
-     *
-     * The fallback is whole rather than field-by-field — an agent that names a support contact
-     * has answered the question, and mixing its name with the owner's email would invent a
-     * person. An entry with neither a name nor an email says nothing and resolves to null.
-     */
-    private fun resolveContact(
-        support: JsonElement?,
-        owner: JsonElement?,
-    ): AgentContactDisplayData? = support.toContact() ?: owner.toContact()
-
-    private fun JsonElement?.toContact(): AgentContactDisplayData? {
-        val obj = this as? JsonObject ?: return null
-        val name = (obj["name"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
-        val email = (obj["email"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
-        if (name == null && email == null) return null
-        return AgentContactDisplayData(name = name, email = email)
-    }
-
     private companion object {
         const val HTTP_FORBIDDEN = 403
+
+        /** The category every uncategorised agent has; the page doesn't label it. */
+        const val GENERAL_CATEGORY = "general"
     }
 }

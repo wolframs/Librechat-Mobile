@@ -4,8 +4,8 @@ import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.logging.LogOrigin
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.LineEnding
-import io.ktor.utils.io.readLine
+import io.ktor.utils.io.readUTF8Line
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -15,6 +15,7 @@ class SseLineParser(
     private val lineReadTimeoutMs: Long = DEFAULT_LINE_READ_TIMEOUT_MS,
 ) {
 
+    @Suppress("TooGenericExceptionCaught") // logs, then rethrows
     fun parse(channel: ByteReadChannel): Flow<SseEvent> = flow {
         var currentEvent = ""
         val currentData = StringBuilder()
@@ -23,7 +24,7 @@ class SseLineParser(
             while (!channel.isClosedForRead) {
                 val line = try {
                     withTimeout(lineReadTimeoutMs) {
-                        channel.readLine(lineEnding = LineEnding.Lenient)
+                        channel.readUTF8Line()
                     }
                 } catch (e: TimeoutCancellationException) {
                     Diag.w(
@@ -35,7 +36,9 @@ class SseLineParser(
                 } ?: break
 
                 when {
-                    // Comment lines (keepalive pings)
+                    // Comment lines: v0.8.9-rc1's keepalive (`:\n\n` after 25 s of quiet,
+                    // packages/api/src/stream/keepalive.ts). Skipped, but the read itself restarts
+                    // the stall timeout below, which is what keeps a silent run attached.
                     line.startsWith(":") -> continue
 
                     // Event type
@@ -69,10 +72,13 @@ class SseLineParser(
                 }
             }
         } catch (e: SseStreamException) {
-            Logger.e(e, tag = "SSE") { "SSE parse error" }
+            Logger.e("SSE", e) { "SSE parse error" }
+            throw e
+        } catch (e: CancellationException) {
+            // The collector going away (a hand-off, backgrounding) is not a parse failure.
             throw e
         } catch (e: Exception) {
-            Logger.e(e, tag = "SSE") { "SSE parse error" }
+            Logger.e("SSE", e) { "SSE parse error" }
             throw e
         }
 
@@ -86,7 +92,11 @@ class SseLineParser(
     }
 
     companion object {
-        /** Default timeout: 120 seconds to accommodate long AI thinking/agent blocks. */
+        /**
+         * Default timeout: 120 seconds to accommodate long AI thinking/agent blocks. Not lowered for
+         * v0.8.9-rc1's 25 s keepalive: older servers send nothing while a run is quiet, and an
+         * operator can set `endpoints.agents.streamKeepaliveIntervalMs` to 0 or past this window.
+         */
         const val DEFAULT_LINE_READ_TIMEOUT_MS = 120_000L
     }
 }

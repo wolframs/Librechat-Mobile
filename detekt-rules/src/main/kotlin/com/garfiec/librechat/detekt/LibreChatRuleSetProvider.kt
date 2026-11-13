@@ -12,7 +12,9 @@ class LibreChatRuleSetProvider : RuleSetProvider {
             ruleSetId,
             listOf(
                 AccountScopedDaoRule(config),
-                IconButtonContentDescriptionRule(config),
+                AlertDialogNestedScrollRule(config),
+                HardcodedColorRule(config),
+                MaskedFieldKeyboardRule(config),
             ),
         )
 }

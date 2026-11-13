@@ -15,6 +15,8 @@
     <string name="login_title">تسجيل الدخول</string>
     <string name="email_label">البريد الإلكتروني</string>
     <string name="password_label">كلمة المرور</string>
+    <string name="cd_show_password">إظهار كلمة المرور</string>
+    <string name="cd_hide_password">إخفاء كلمة المرور</string>
     <string name="continue_button">متابعة</string>
     <string name="forgot_password">هل نسيت كلمة المرور؟</string>
     <string name="no_account_sign_up">ليس لديك حساب؟ سجّل الآن</string>
@@ -68,7 +70,11 @@
 
     <!-- Terms -->
     <string name="terms_title">شروط الخدمة</string>
+    <string name="terms_no_content">لم يُرفق هذا الخادم نص شروط الخدمة.</string>
     <string name="i_accept">أوافق</string>
+    <string name="terms_decline">رفض</string>
+    <string name="privacy_policy">سياسة الخصوصية</string>
+    <string name="terms_of_service">شروط الخدمة</string>
     <string name="retry">إعادة المحاولة</string>
 
     <!-- Common -->
@@ -76,4 +82,62 @@
 
     <!-- Custom server headers (issue #287) -->
     <string name="server_headers_advanced">متقدم</string>
+    <!-- SSO (in-app WebView) -->
+    <string name="sso_risk_title">تسجيل الدخول داخل التطبيق؟</string>
+    <string name="sso_risk_body">بعض المزوّدين، ومنهم Google، لا يدعمون ذلك رسميًا وقد يحظرونه في أي وقت. استخدمه على مسؤوليتك الخاصة.</string>
+    <string name="sso_sign_in_failed">فشل تسجيل الدخول. يرجى المحاولة مرة أخرى.</string>
+    <string name="diagnostic_log_export">تصدير سجلات التشخيص</string>
+    <string name="diagnostic_log_exported">تم تصدير السجل. أرفقه عند الإبلاغ عن المشكلة.</string>
+    <string name="diagnostic_log_failed">تعذّر تصدير السجل.</string>
+    <string name="user_ca_notice">يُوثق بشهادة هذا الخادم عبر جهة إصدار شهادات مثبّتة على هذا الجهاز، وليست مدمجة في Android. لا تتابع إلا إذا كنت أنت أو مؤسستك من ثبّتها.</string>
+    <string name="continue_with_provider">المتابعة باستخدام %1$s</string>
+    <string name="two_factor_setup_title">إعداد المصادقة الثنائية</string>
+    <string name="two_factor_setup_required_description">يتطلب هذا الخادم المصادقة الثنائية. أعِدّها للمتابعة.</string>
+    <string name="two_factor_setup_begin">بدء الإعداد</string>
+    <string name="two_factor_setup_authenticator_heading">أضف هذا الحساب إلى تطبيق المصادقة</string>
+    <string name="two_factor_setup_authenticator_body">افتحه في تطبيق المصادقة، أو أدخل مفتاح الإعداد، أو امسح رمز QR من جهاز آخر.</string>
+    <string name="two_factor_setup_open_authenticator">فتح تطبيق المصادقة</string>
+    <string name="two_factor_setup_no_authenticator">لم يتمكن أي تطبيق مصادقة على هذا الجهاز من فتح الرابط. أدخل مفتاح الإعداد بدلًا من ذلك.</string>
+    <string name="two_factor_setup_key">مفتاح الإعداد</string>
+    <string name="two_factor_setup_show_qr">إظهار رمز QR</string>
+    <string name="two_factor_setup_hide_qr">إخفاء رمز QR</string>
+    <string name="two_factor_setup_qr_description">رمز QR لتطبيق المصادقة</string>
+    <string name="two_factor_setup_next">التالي</string>
+    <string name="two_factor_setup_verify_heading">أدخل الرمز من تطبيق المصادقة</string>
+    <string name="two_factor_setup_backup_heading">احفظ رموز النسخ الاحتياطي</string>
+    <string name="two_factor_setup_backup_body">يتيح لك كل رمز تسجيل الدخول مرة واحدة إذا فقدت تطبيق المصادقة. احتفظ بها في مكان آمن؛ فلن تظهر مرة أخرى.</string>
+    <string name="two_factor_setup_save_codes">حفظ في ملف</string>
+    <string name="two_factor_setup_codes_saved">تم حفظ رموز النسخ الاحتياطي.</string>
+    <string name="two_factor_setup_codes_acknowledged">لقد حفظت هذه الرموز</string>
+    <string name="two_factor_setup_complete">إكمال الإعداد</string>
+    <string name="two_factor_setup_expired">انتهت صلاحية جلسة الإعداد. سجّل الدخول مجددًا للمتابعة.</string>
+    <string name="two_factor_setup_back_to_sign_in">العودة إلى تسجيل الدخول</string>
+    <string name="two_factor_setup_error_start">تعذّر بدء الإعداد. حاول مرة أخرى.</string>
+    <string name="two_factor_setup_error_invalid">هذا الرمز غير مطابق. أدخل الرمز الحالي من تطبيق المصادقة.</string>
+    <string name="two_factor_setup_error_rate_limited">محاولات كثيرة جدًا. انتظر قليلًا ثم حاول مرة أخرى.</string>
+    <string name="two_factor_setup_error_finalize">تعذّر إكمال الإعداد. حاول مرة أخرى.</string>
+    <string name="two_factor_setup_error_connection">تعذّر الوصول إلى الخادم. تحقق من اتصالك وحاول مرة أخرى.</string>
+    <string name="login_error_federated_blocked">يسجّل هذا الحساب الدخول عبر مزوّد الهوية الخاص به. استخدم خيار تسجيل الدخول ذلك بدلًا من هذا.</string>
+    <string name="auth_error_tenant_required">يحتاج هذا الخادم إلى معرفة المؤسسة التي تنتمي إليها. استخدم عنوان مؤسستك لهذا الخادم.</string>
+    <string name="login_two_factor_setup_required">يتطلب هذا الخادم الآن المصادقة الثنائية لـ %1$s. سجّل الدخول لإعدادها.</string>
+    <string name="use_another_account">استخدم حسابًا آخر</string>
+    <string name="server_url_known_servers">خوادمك</string>
+    <string name="server_url_known_server_cd">الاتصال بـ %1$s</string>
+    <plurals name="server_url_known_server_accounts">
+        <item quantity="zero">%1$d حساب</item>
+        <item quantity="one">حساب واحد</item>
+        <item quantity="two">حسابان</item>
+        <item quantity="few">%1$d حسابات</item>
+        <item quantity="many">%1$d حسابًا</item>
+        <item quantity="other">%1$d حساب</item>
+    </plurals>
+    <string name="progress_connecting">جارٍ الاتصال…</string>
+    <string name="progress_signing_in">جارٍ تسجيل الدخول…</string>
+    <string name="progress_creating_account">جارٍ إنشاء الحساب…</string>
+    <string name="progress_sending">جارٍ الإرسال…</string>
+    <string name="progress_resetting_password">جارٍ إعادة تعيين كلمة المرور…</string>
+    <string name="progress_verifying">جارٍ التحقق…</string>
+    <string name="progress_accepting">جارٍ القبول…</string>
+    <string name="progress_starting">جارٍ البدء…</string>
+    <string name="progress_finishing">جارٍ الإنهاء…</string>
 </resources>

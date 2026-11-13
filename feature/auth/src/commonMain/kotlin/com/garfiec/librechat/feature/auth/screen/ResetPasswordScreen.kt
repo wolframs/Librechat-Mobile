@@ -12,29 +12,32 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
-import androidx.compose.ui.autofill.contentType
+import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.garfiec.librechat.core.ui.components.AdaptiveButton
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.AdaptiveScaffold
+import com.garfiec.librechat.core.ui.components.IosTextContentType
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBar
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBarSpec
+import com.garfiec.librechat.core.ui.components.topbar.BarIcons
+import com.garfiec.librechat.core.ui.components.topbar.BarNavigation
+import com.garfiec.librechat.core.ui.components.topbar.BarTitle
+import com.garfiec.librechat.core.ui.components.withIosTextContentType
+import com.garfiec.librechat.feature.auth.diagnostics.DiagnosticLogLink
 import com.garfiec.librechat.feature.auth.resources.*
 import com.garfiec.librechat.feature.auth.resources.Res
 import com.garfiec.librechat.feature.auth.viewmodel.ResetPasswordViewModel
@@ -54,20 +57,16 @@ fun ResetPasswordScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    Scaffold(
+    AdaptiveScaffold(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(Res.string.reset_password_screen_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(Res.string.back),
-                        )
-                    }
-                },
+            AdaptiveTopBar(
+                spec = AdaptiveTopBarSpec(
+                    navigation = BarNavigation(BarIcons.Back, stringResource(Res.string.back), onBack),
+                    title = BarTitle(stringResource(Res.string.reset_password_screen_title)),
+                    actions = emptyList(),
+                ),
             )
         },
     ) { innerPadding ->
@@ -99,7 +98,7 @@ fun ResetPasswordScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
+                AdaptiveButton(
                     onClick = onResetComplete,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -122,66 +121,62 @@ fun ResetPasswordScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                OutlinedTextField(
+                AdaptiveOutlinedTextField(
                     value = uiState.password,
                     onValueChange = viewModel::onPasswordChanged,
                     label = { Text(stringResource(Res.string.new_password_label)) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .contentType(ContentType.NewPassword),
+                    modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.NewPassword },
                     singleLine = true,
-                    visualTransformation = passwordMaskTransformation(),
+                    visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Password,
                         autoCorrectEnabled = false,
-                    ),
+                    ).withIosTextContentType(IosTextContentType.NewPassword),
                     enabled = !uiState.isLoading,
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
+                AdaptiveOutlinedTextField(
                     value = uiState.confirmPassword,
                     onValueChange = viewModel::onConfirmPasswordChanged,
                     label = { Text(stringResource(Res.string.confirm_new_password_label)) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .contentType(ContentType.NewPassword),
+                    modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.NewPassword },
                     singleLine = true,
-                    visualTransformation = passwordMaskTransformation(),
+                    visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Password,
                         autoCorrectEnabled = false,
-                    ),
+                    ).withIosTextContentType(IosTextContentType.NewPassword),
                     enabled = !uiState.isLoading,
                 )
 
-                if (uiState.error != null) {
+                val errorText = authErrorText(uiState.refusal, uiState.error)
+                if (errorText != null) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = uiState.error!!,
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    if (uiState.offerDiagnosticLog) DiagnosticLogLink()
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
+                AdaptiveButton(
                     onClick = viewModel::resetPassword,
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !uiState.isLoading,
+                    loading = uiState.isLoading,
                 ) {
-                    if (uiState.isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.height(20.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        Text(stringResource(Res.string.reset_password_button))
-                    }
+                    Text(
+                        stringResource(
+                            if (uiState.isLoading) Res.string.progress_resetting_password else Res.string.reset_password_button,
+                        ),
+                    )
                 }
+
+                PolicyLinksFooter(uiState.policyLinks, modifier = Modifier.padding(top = 16.dp))
             }
         }
     }

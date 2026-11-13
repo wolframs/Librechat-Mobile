@@ -45,8 +45,7 @@ class VersionCheckStateHolder(
                     val checkResult = result.data
                     val detectedVersion = checkResult.backendVersion
                     if (!checkResult.isCompatible && detectedVersion != null) {
-                        val dismissedVersion = serverId
-                            ?.let { settingsDataStore.dismissedVersionWarning(it).first() }
+                        val dismissedVersion = settingsDataStore.dismissedVersionWarning.first()
                         if (dismissedVersion != detectedVersion) {
                             _versionMismatch.value = VersionMismatchState(
                                 supportedVersion = checkResult.supportedVersion,
@@ -83,11 +82,10 @@ class VersionCheckStateHolder(
 
     fun dismissVersionWarningPermanently() {
         val backendVersion = _versionMismatch.value?.backendVersion
-        val serverId = mismatchServerId
         clearBanner()
-        if (backendVersion != null && serverId != null) {
+        if (backendVersion != null) {
             scope.launch {
-                settingsDataStore.setDismissedVersionWarning(serverId, backendVersion)
+                settingsDataStore.setDismissedVersionWarning(backendVersion)
             }
         }
     }

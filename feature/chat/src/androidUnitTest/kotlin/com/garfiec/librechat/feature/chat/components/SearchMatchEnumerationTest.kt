@@ -3,7 +3,10 @@ package com.garfiec.librechat.feature.chat.components
 import com.garfiec.librechat.core.model.ContentType
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.content.MessageContentPart
+import com.garfiec.librechat.feature.chat.components.artifact.ArtifactSegment
+import com.garfiec.librechat.feature.chat.components.artifact.detectArtifacts
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
 
 /**
@@ -14,21 +17,22 @@ import org.junit.Test
  */
 class SearchMatchEnumerationTest {
 
-    private fun message(text: String = "", parts: List<MessageContentPart>? = null) = Message(
+    private fun message(
+        text: String = "",
+        parts: List<MessageContentPart>? = null,
+        isCreatedByUser: Boolean = false,
+    ) = Message(
         messageId = "m1",
         conversationId = "c1",
         text = text,
         content = parts,
+        isCreatedByUser = isCreatedByUser,
     )
 
     private fun textPart(text: String) = MessageContentPart(type = ContentType.TEXT, text = text)
     private fun thinkPart(think: String) = MessageContentPart(type = ContentType.THINK, think = think)
 
     // --- artifacts (see the render-order contract in SearchMatchEnumeration.kt) ---
-
-    // NB: these must go through a TEXT *part*. A message with no content parts renders
-    // message.text via MarkdownContent with no artifact split at all (clause 1 of the contract) —
-    // that gap is #304, tracked separately.
 
     @Test
     fun `complete artifact content is not counted`() {
@@ -60,6 +64,65 @@ class SearchMatchEnumerationTest {
             ),
         )
         assertThat(countMessageOccurrences(msg, "match")).isEqualTo(3)
+    }
+
+    // --- artifacts in a message without parts (legacy pre-v0.7.9 replies keep them in text) ---
+
+    private val completeArtifact =
+        "before match\n\n" +
+            ":::artifact{identifier=\"a\" type=\"text/html\" title=\"A\"}\n" +
+            "```html\n<p>match match match</p>\n```\n:::\n\nafter match"
+
+    private val incompleteArtifact =
+        "before match\n\n" +
+            ":::artifact{identifier=\"a\" type=\"text/html\" title=\"A\"}\n" +
+            "```html\n<p>match match</p>"
+
+    /** The renderer's walk: TextContentPart's per-segment offset table, summed. */
+    private fun rendererWalk(text: String, query: String): Int =
+        detectArtifacts(text).sumOf { segment ->
+            when (segment) {
+                is ArtifactSegment.Text -> countMarkdownOccurrences(segment.text, query)
+                is ArtifactSegment.ArtifactReference -> countArtifactOccurrences(segment.artifact, query)
+            }
+        }
+
+    @Test
+    fun `only assistant text falls back to the artifact split`() {
+        assertThat(message().textFallbackSplitsArtifacts()).isTrue()
+        assertThat(message(isCreatedByUser = true).textFallbackSplitsArtifacts()).isFalse()
+    }
+
+    @Test
+    fun `no-parts assistant message excludes complete artifact content`() {
+        assertThat(countMessageOccurrences(message(text = completeArtifact), "match")).isEqualTo(2)
+    }
+
+    @Test
+    fun `no-parts assistant message counts incomplete artifact content`() {
+        assertThat(countMessageOccurrences(message(text = incompleteArtifact), "match")).isEqualTo(3)
+    }
+
+    @Test
+    fun `no-parts assistant message matches the renderer walk`() {
+        for (text in listOf(completeArtifact, incompleteArtifact)) {
+            assertThat(countMessageOccurrences(message(text = text), "match"))
+                .isEqualTo(rendererWalk(text, "match"))
+        }
+    }
+
+    @Test
+    fun `no-parts assistant message leaves an unfenced directive mention as prose`() {
+        val text = "Use :::artifact{identifier=\"a\" type=\"text/html\"} to match match"
+        assertThat(countMessageOccurrences(message(text = text), "match"))
+            .isEqualTo(countMarkdownOccurrences(text, "match"))
+    }
+
+    @Test
+    fun `no-parts user message is never split on artifacts`() {
+        val msg = message(text = completeArtifact, isCreatedByUser = true)
+        assertThat(countMessageOccurrences(msg, "match")).isEqualTo(countMarkdownOccurrences(completeArtifact, "match"))
+        assertThat(countMessageOccurrences(msg, "match")).isEqualTo(5)
     }
 
     // --- plain text / fallback (no parts) ---
@@ -248,5 +311,147 @@ class SearchMatchEnumerationTest {
             ),
         )
         assertThat(countMessageOccurrences(message(parts = parts), "beta")).isEqualTo(1)
+    }
+
+    /**
+     * A wake-up renders as a system row and is deliberately not searched — not even the task results
+     * an expanded row shows — because a jump cannot expand a collapsed row to reach a match.
+     */
+    @Test
+    fun `a wake-up turn contributes nothing`() {
+        val wakeup = Message(
+            messageId = "m-w",
+            conversationId = "c-1",
+            isCreatedByUser = true,
+            text = "A background tool task has finished. Continue using its durable result below.\n" +
+                """[{"background_task_id":"bg","tool_call_id":"c","tool":"web_search","status":"completed","result":"found it"}]""",
+        )
+        assertThat(countMessageOccurrences(wakeup, "found")).isEqualTo(0)
+        assertThat(countMessageOccurrences(wakeup, "background")).isEqualTo(0)
+    }
+
+    /** A persisted failed turn renders its classified error, not the raw payload it was saved with. */
+    @Test
+    fun `a persisted failed turn contributes nothing`() {
+        val failed = Message(
+            messageId = "m-e",
+            conversationId = "c-1",
+            error = true,
+            text = """{"code":"code_workspace_unavailable","message":"workspace down"}""",
+        )
+        assertThat(countMessageOccurrences(failed, "workspace")).isEqualTo(0)
+    }
+
+    // --- find words (see occurrenceRanges) ---
+
+    @Test
+    fun `each word of a query is found on its own and overlaps merge`() {
+        val text = "Kotlin flow and a Kotlin flowchart"
+
+        assertThat(occurrenceRanges(text, "kotlin flow").map { text.substring(it) })
+            .containsExactly("Kotlin", "flow", "Kotlin", "flow").inOrder()
+        assertThat(occurrenceRanges("overflowing", "flow over").map { "overflowing".substring(it) })
+            .containsExactly("overflow")
+    }
+
+    @Test
+    fun `a word under three characters matches whole words only`() {
+        assertThat(countOccurrences("SoftEther is so good, some say so.", "so")).isEqualTo(2)
+        assertThat(countOccurrences("SoftEther is so good", "sof")).isEqualTo(1)
+    }
+
+    @Test
+    fun `the focused range follows the same walk as the count`() {
+        val text = "alpha beta alpha"
+        assertThat(findOccurrenceRange(text, "beta alpha", 1)).isEqualTo(6..9)
+        assertThat(findOccurrenceRange(text, "beta alpha", 3)).isNull()
+    }
+
+    // --- legacy :::thinking (rendered as a reasoning block ahead of the reply) ---
+
+    @Test
+    fun `a legacy thinking block counts first and is marked as reasoning`() {
+        val msg = message(text = ":::thinking\nabout pelicans\n:::\nPelicans fly")
+
+        assertThat(countMessageOccurrences(msg, "pelicans")).isEqualTo(2)
+        assertThat(occurrencesInReasoning(msg, "pelicans")).containsExactly(true, false).inOrder()
+        assertThat(msg.legacyTextRuns().answer).isEqualTo("Pelicans fly")
+    }
+
+    @Test
+    fun `reasoning parts are marked as reasoning in render order`() {
+        val msg = message(parts = listOf(thinkPart("pelican thoughts"), textPart("a pelican")))
+
+        assertThat(occurrencesInReasoning(msg, "pelican")).containsExactly(true, false).inOrder()
+    }
+
+    // --- rendered markdown (see SearchableMarkdown): matches count in what is displayed ---
+
+    @Test
+    fun `markup is not counted and a link's address is never found`() {
+        val markdown = "**bold** and [a link](https://bold.example)"
+
+        assertThat(countMarkdownOccurrences(markdown, "bold")).isEqualTo(1)
+        assertThat(countMarkdownOccurrences(markdown, "**")).isEqualTo(0)
+    }
+
+    @Test
+    fun `headings, paragraphs and list items are runs in render order`() {
+        val markdown = "# Kotlin tips\n\nUse Kotlin flow.\n\n- one kotlin\n- two\n\n> quoted kotlin"
+
+        assertThat(markdownRuns(markdown).map { it.text })
+            .containsExactly("Kotlin tips", "Use Kotlin flow.", "one kotlin", "two", "quoted kotlin").inOrder()
+        assertThat(countMarkdownOccurrences(markdown, "kotlin")).isEqualTo(4)
+    }
+
+    @Test
+    fun `each run is keyed by the node the renderer draws`() {
+        val runs = markdownRuns("first para\n\nsecond para")
+
+        assertThat(runs.map { it.nodeStart }).containsExactly(0, 12).inOrder()
+    }
+
+    // --- quoted phrases: a regex jump carries its matched text in quotes ---
+
+    @Test
+    fun `a quoted query is one phrase, not its words`() {
+        val text = "SoftEther VPN Protocol, OpenVPN and vpncmd"
+
+        assertThat(occurrenceRanges(text, "\"SoftEther VPN\"")).containsExactly(0 until 13)
+        assertThat(countOccurrences(text, "SoftEther VPN")).isEqualTo(4)
+    }
+
+    @Test
+    fun `a quoted phrase matches case-insensitively`() {
+        assertThat(countOccurrences("softether vpn and SOFTETHER VPN", "\"SoftEther VPN\"")).isEqualTo(2)
+    }
+
+    @Test
+    fun `empty quotes find nothing`() {
+        assertThat(countOccurrences("text", "\"\"")).isEqualTo(0)
+    }
+
+    // --- the prefilter must not hide what the markdown displays ---
+
+    /** What the highlighter marks: the query counted in each displayed run. */
+    private fun highlighted(markdown: String, query: String) = markdownRuns(markdown).sumOf { countOccurrences(it.text, query) }
+
+    @Test
+    fun `a match the source spells differently is counted as it is highlighted`() {
+        listOf(
+            "**foo** bar" to "\"foo bar\"",
+            "a\\_b is here" to "a_b",
+            "see [the docs](https://x.test) now" to "\"the docs now\"",
+        ).forEach { (markdown, query) ->
+            val shown = highlighted(markdown, query)
+            assertWithMessage(markdown).that(shown).isGreaterThan(0)
+            assertWithMessage(markdown).that(countMarkdownOccurrences(markdown, query)).isEqualTo(shown)
+        }
+    }
+
+    @Test
+    fun `text without the query is still skipped`() {
+        assertThat(mayContain("plain words here", "quokka")).isFalse()
+        assertThat(mayContain("**bold** words", "quokka")).isFalse()
     }
 }

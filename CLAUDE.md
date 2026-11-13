@@ -2,18 +2,16 @@
 
 Native mobile client for LibreChat (Android & iOS). Connects to existing LibreChat backend servers (no backend changes). Users specify server URL during onboarding.
 
-## Deployed backend compatibility
+## This fork
 
-Read `docs/SURPLUS_MCP_UPSTREAM_SYNC.md` for the September 2026 Surplus/MCP audit,
-provider/TTL contracts, cost-dashboard behavior, and the fork-specific Room v10
-migration. The Mac backend is an independent working tree; mobile work does not
-imply deployment there.
-
-## Active UX Work
-
-Read `UX_GAP_WORKLOG.md` before starting UX-gap implementation. It is the persistent
-status, evidence, acceptance-test, and session ledger for the current reliability and
-polish backlog. Update it whenever an item changes state.
+This checkout is a fork of the community app (`upstream` = garfiec/Librechat-Mobile); everything
+below this section is upstream's text. The fork's own features, where each one lives and how it
+hooks into upstream's files are in `docs/FORK_FEATURE_LEDGER.md`: read it before changing a fork
+feature, and update it in the same commit. While `docs/UPSTREAM_CATCHUP_PLAN.md` exists, a catch-up
+with upstream is open: read it first. A fork feature goes into fork-only files with a few hook lines
+in upstream's files, so the next merge stays small. `docs/SURPLUS_MCP_UPSTREAM_SYNC.md` and
+`UX_GAP_WORKLOG.md` describe the fork as it was before November 2026. The deployed backend on the
+Mac is an independent working tree; mobile work does not imply deployment there.
 
 ## Tech Stack
 
@@ -22,7 +20,7 @@ polish backlog. Update it whenever an item changes state.
 - **Network**: Ktor Client (OkHttp engine)
 - **Serialization**: Kotlinx Serialization
 - **Local Storage**: Room (cache), DataStore (prefs), EncryptedSharedPreferences (tokens)
-- **Build**: Gradle 9.5.1, AGP 9.2.1, Kotlin 2.4.10, compileSdk 36, minSdk 26
+- **Build**: Gradle 9.8.2, AGP 9.5.1, Kotlin 2.4.10, compileSdk 37, minSdk 26
 
 ## Module Layout
 
@@ -35,15 +33,31 @@ core/model/           → @Serializable data classes (pure Kotlin, no Android de
 core/network/         → Ktor client, 16 API services, SSE client, auth interceptor
 core/data/            → Room DB, DataStore, EncryptedSharedPrefs, repository impls
 core/ui/              → Material 3 theme, shared composables
+core/notifications/   → Reply and scheduled-chat notifications (system + in-app), permission, background watchers
 feature/auth/         → Server URL, Login, Register, 2FA, OAuth, Forgot Password
 feature/chat/         → Real-time chat with SSE streaming, message rendering
 feature/conversations/→ Paginated list, CRUD, tags, search, export/import
 feature/settings/     → Account, appearance, about, danger zone
 feature/agents/       → Agent marketplace with search and categories
 feature/files/        → File upload, management, image viewer
+testing/speech-fixture/ → Stand-in speech provider APK for scripts/verify-speech-services.py (never ships)
 ```
 
 Each module has its own `CLAUDE.md` with specific guidance.
+
+## Writing code here
+
+- **Build for what users hit.** Handle an edge case when a user on a supported server reaches it in
+  normal use, or when it loses data, leaks a credential or strands the session. A rare glitch that a
+  retry, refresh or reopen clears doesn't earn new state, a Job, a flag or a new test file. Fix the
+  reported scenario with the smallest change, not its hypothetical neighbours; reuse or delete code
+  before adding it. This applies to review findings too, including `/code-review --fix`.
+- **Comments state present-tense rules** a plausible edit would break, in a line or two. No history,
+  no story of how a bug was found or fixed, no issue numbers as narrative: that goes in the commit and PR.
+- **A module `CLAUDE.md` holds rules, not history.** Every agent touching the module loads it, so add
+  only a rule that governs many files, once, with its condition in the same sentence. A rule that
+  guards one line belongs at that line, or in a test or detekt rule.
+- **Tests go in the class's existing test file**; a new test file is for a new class.
 
 ## Architecture Rules
 
@@ -52,6 +66,19 @@ Each module has its own `CLAUDE.md` with specific guidance.
 - Unidirectional data flow: UI → ViewModel → Repository → API/Room
 - Room is a read-through cache; server is source of truth
 - Custom SSE parser over raw ByteReadChannel (not Ktor SSE plugin)
+- UI is style-agnostic: the user's Material / Liquid Glass choice flows down as a CompositionLocal
+  from `LibreChatTheme`, and `Adaptive*` components in `:core:ui` self-theme into one of two variants.
+  Screens use `Adaptive*` (detekt bans raw M3 chrome) and don't branch on style. See "The pattern"
+  in `core/ui/CLAUDE.md`.
+- Distribution channels: open source (`foss` flavor, `com.garfiec.librechat`; Xcode `Release`) vs
+  store (`play` flavor, `com.garfiec.librechat.play`; Xcode `Release-AppStore`). A behaviour that
+  differs between them is a field on `ChannelPolicy` (`:core:common`), injected where needed; a
+  preference default that differs is a `perChannel(…)` default in `AppPreferences` (`:core:data`).
+  Never branch on `BuildConfig.FLAVOR` or `DistributionChannel` at a call site (detekt bans the
+  import in non-test code; `:core:common` uses it from its own package), and don't call
+  `ChannelPolicy.pick` from a feature either: add a field. A channel that can't be determined fails
+  at launch by design.
+  See `docs/RELEASING.md` "Distribution channels".
 
 ## Adding a New Feature Module
 
@@ -74,12 +101,13 @@ Each module has its own `CLAUDE.md` with specific guidance.
 
 ## Upstream Sync
 
-- **`upstream/`** — Git submodule of the [official LibreChat repo](https://github.com/danny-avila/LibreChat). Read-only reference for API and web app parity. Do not modify.
+- **`upstream/`** — Git submodule of the [official LibreChat repo](https://github.com/LibreChat-AI/LibreChat). Read-only reference for API and web app parity. Do not modify.
 - **`UPSTREAM_VERSION`** — Tracks which official tag/commit this mobile build is based on. Updated by the `/sync-upstream` skill.
 - **`backendTargetVersion`** (root `version.properties`) — single source of truth for the targeted backend; must match the tag in `UPSTREAM_VERSION` (without `v` prefix). A core/common Gradle task code-generates `BackendVersion.SUPPORTED_BACKEND_VERSION` from it, and `release.yml` reads it for release notes. Edit the property, not the constant.
 - **`/sync-upstream`** — Claude Code skill to diff upstream releases, identify gaps, propose changes, and implement them with user approval. Uses Agent Teams (investigator, android-expert, implementer, verifier).
 - **`scripts/web-assets.json`** — registry of the third-party JavaScript the artifact/diagram/math
-  WebViews execute (KaTeX, mermaid, marked, highlight.js, Tailwind, Babel, React). All of it is
+  WebViews execute (KaTeX, mermaid, marked, highlight.js, Tailwind, Babel, React, and the npm
+  modules React artifacts may import, bundled from `scripts/artifact-modules/`). All of it is
   **vendored into the app**; none of it is fetched at render time. This is required for F-Droid,
   which rejects apps that download executable code without explicit opt-in consent — a
   `<script src="https://cdn…">` in a WebView is exactly that. It also closes a silent-drift hole:

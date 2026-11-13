@@ -1,0 +1,550 @@
+package com.garfiec.librechat.feature.chat.viewmodel.delegate
+
+import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.common.result.getOrNull
+import com.garfiec.librechat.core.data.repository.ConversationRepository
+import com.garfiec.librechat.core.data.repository.DraftRepository
+import com.garfiec.librechat.core.data.repository.MessageRepository
+import com.garfiec.librechat.core.logging.Diag
+import com.garfiec.librechat.core.logging.LogOrigin
+import com.garfiec.librechat.core.model.Conversation
+import com.garfiec.librechat.core.model.Message
+import com.garfiec.librechat.core.model.config.ModelSpecs
+import com.garfiec.librechat.core.model.hasParameters
+import com.garfiec.librechat.core.model.isCodeConversation
+import com.garfiec.librechat.core.model.parametersStale
+import com.garfiec.librechat.core.model.request.MAX_MANUAL_SKILLS
+import com.garfiec.librechat.feature.chat.util.MessageNode
+import com.garfiec.librechat.feature.chat.util.NEW_CHAT_DRAFT_KEY
+import com.garfiec.librechat.feature.chat.util.buildActiveMessagePath
+import com.garfiec.librechat.feature.chat.util.displayPath
+import com.garfiec.librechat.feature.chat.util.hasParallelParts
+import com.garfiec.librechat.feature.chat.util.stabilizeMessageInstances
+import com.garfiec.librechat.feature.chat.util.withoutLivePartial
+import com.garfiec.librechat.feature.chat.viewmodel.ChatScreenState
+import com.garfiec.librechat.feature.chat.viewmodel.ComposerSnapshot
+import com.garfiec.librechat.feature.chat.viewmodel.ConversationLoadHandle
+import com.garfiec.librechat.feature.chat.viewmodel.isRealTitle
+import com.garfiec.librechat.feature.chat.viewmodel.isServerCopyOf
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+
+/**
+ * Brings a conversation onto the screen: subscribes the Room read-through, revalidates it from
+ * the server, keeps a handed-off chat's seeded user message visible until the server's copy
+ * lands, and reconciles a failed turn's text back into the composer. Also the conversation
+ * model load and the draft restore that an open performs, and the explicit pull-to-refresh.
+ *
+ * `ChatViewModel.init` seeds the handoff and decides `cacheFirst`; the send, streaming and
+ * completion paths reload through [loadConversation] when the server holds a turn the cache
+ * does not (see feature/chat/CLAUDE.md, "Cache-first open").
+ */
+class ConversationLoadDelegate(
+    private val handle: ConversationLoadHandle,
+    private val messageRepository: MessageRepository,
+    private val conversationRepository: ConversationRepository,
+    private val draftRepository: DraftRepository,
+    private val defaultDispatcher: CoroutineDispatcher,
+    /** ModelSelectionDelegate.applyConversationModel: seeds the selection from a fetched conversation. */
+    private val applyConversationModel: (Conversation) -> Boolean,
+    /** Whether this screen takes the conversation's stored parameters (not a handed-off new chat). */
+    private val wantsStoredParameters: () -> Boolean = { false },
+    /** Writes the conversation's parameters, with the web-search switch this device remembered (if any). */
+    private val restoreParameters: (Conversation, Boolean?) -> Unit = { _, _ -> },
+    /**
+     * The web-search switch this device remembered for a conversation. Read before the model is
+     * applied, so nothing suspends between that and [restoreParameters] for a user change to land in.
+     */
+    private val rememberedWebSearch: suspend (String) -> Boolean? = { null },
+    /**
+     * Marks the conversation-model load attempted (never "resolved") and refilters the model list;
+     * see ModelSelectionDelegate.conversationModelLoaded. Runs on every path out of
+     * [loadConversationModel], including the temp-chat short-circuit and the not-readable 404.
+     */
+    private val onModelLoadSettled: () -> Unit,
+    /** ComparisonModeDelegate.rehydrateFromMessage, for a reopened Compare Models conversation. */
+    private val rehydrateComparison: (Message) -> Unit,
+    /**
+     * AttachmentPreviewDelegate.onMessagesSettled: polls the deferred previews the displayed
+     * messages still list as pending. Called on every settled emission; the delegate dedupes.
+     */
+    private val onMessagesSettled: (List<MessageNode>) -> Unit,
+    /**
+     * The server's spec config as last fetched. Read directly rather than from the selection,
+     * which the seeder fills in only after the conversation has loaded.
+     */
+    private val currentModelSpecs: () -> ModelSpecs?,
+    /** The active account's id, which keys [specBackfillDone]: conversation ids repeat across servers. */
+    private val currentAccountId: () -> String?,
+    /**
+     * Whether the server looks up pull requests. A cached row that doesn't know whether the chat is
+     * a code chat (cached before that was recorded) is then read once in full, so its pull request
+     * can show.
+     */
+    private val pullRequestsAvailable: () -> Boolean = { false },
+    /**
+     * ModelSelectionDelegate.selectionWatches ([SelectionWatches]). The default sees no config
+     * rewrites, so it counts a spec drop as the user's change: pass the shared watches.
+     */
+    private val watchSelection: () -> () -> Boolean = {
+        SelectionWatches { handle.state.selection.let { it.choice to it.modelParameters } }.watch()
+    },
+    private val newChatDraftKey: String = NEW_CHAT_DRAFT_KEY,
+    /** SendCompletionDelegate.lastCachedTurn: the turn a stream last finalized and cached. */
+    private val lastCachedTurn: () -> CachedTurn? = { null },
+) {
+    private var roomObserverJob: Job? = null
+
+    /**
+     * `onSettled` callbacks not yet run. Kept outside any one load so a load that replaces another
+     * before it settles runs them too. Confined to the handle's Main scope.
+     */
+    private val settleWaiters = mutableListOf<() -> Unit>()
+
+    /**
+     * A comparison tail that settled while Compare setup was open. Rehydrating then would replace
+     * the setup, so it waits: Cancel restores it ([releaseRehydrateHeldForSetup]), Start replaces it.
+     */
+    private var rehydrateHeldForSetup: Message? = null
+
+    /** Compare setup ended. [started] is false for Cancel, which restores a held comparison. */
+    fun releaseRehydrateHeldForSetup(started: Boolean) {
+        val tail = rehydrateHeldForSetup ?: return
+        rehydrateHeldForSetup = null
+        val state = handle.state
+        if (!started && !state.isStreaming && !state.comparisonState.isEnabled) rehydrateComparison(tail)
+    }
+
+    fun stopObserving() {
+        roomObserverJob?.cancel()
+        roomObserverJob = null
+        rehydrateHeldForSetup = null
+    }
+
+    /**
+     * Fetches the conversation's messages and records the outcome.
+     *
+     * `getMessages` is `safeApiCall`-wrapped: it reports failure by RETURNING [Result.Error] and
+     * lets only `CancellationException` propagate, so the result must be consumed — a `try/catch`
+     * around it can never see a network failure. An `Error` also means the cache was empty: the
+     * repository falls back to cached rows and returns those as `Success`.
+     */
+    private suspend fun revalidateMessages(conversationId: String) {
+        val cachedBefore = lastCachedTurn()
+        val result = messageRepository.getMessages(conversationId, toolPreviews = true)
+        // A turn finalized while the fetch was out: the server answered before it saved that turn,
+        // and the fetch's upsert just overwrote the cached copy (a reply whose stream lost a
+        // subscriber comes back as its `unfinished` partial, shown as stopped). The final frame is
+        // newer than anything the fetch read, so it goes back on top.
+        lastCachedTurn()
+            ?.takeIf { it !== cachedBefore && result is Result.Success }
+            ?.takeIf { turn -> turn.messages.all { it.conversationId == conversationId } }
+            ?.let { turn -> messageRepository.cacheMessages(turn.messages, turn.originAccount) }
+        when (result) {
+            is Result.Error -> {
+                Logger.e(result.exception) { "Failed to fetch messages for $conversationId" }
+                handle.update {
+                    // Only report when the failure actually leaves the screen empty. A revalidate
+                    // that fails over cached rows is the ordinary offline case, and a handed-off
+                    // new chat streams with just its seeded user message while the server persists
+                    // the request only on completion — this fetch is *expected* to fail there.
+                    if (content.isStreaming || content.displayMessages.isNotEmpty()) return@update
+                    // App-authored copy only — Ktor builds exception messages out of
+                    // the request URL, so result.message can leak an access gateway's
+                    // redirect JWT on screen (#287).
+                    error = "Could not load messages"
+                    content = content.copy(
+                        screenState = ChatScreenState.ACTIVE,
+                        messagesLoadFailed = true,
+                    )
+                }
+            }
+            else -> handle.update {
+                content = content.copy(messagesLoadFailed = false)
+            }
+        }
+    }
+
+    /**
+     * Subscribes the Room read-through for [conversationId] and revalidates it from the server.
+     *
+     * [cacheFirst] picks the ordering. `false` (the default) awaits the fetch before subscribing,
+     * so the first emission is the authoritative one. Every other caller reloads precisely because
+     * the server holds something the cache does not — a just-finalized turn, a just-created branch,
+     * a stream that ended server-side, or an explicit refresh — so a cache emission there serves a
+     * snapshot that predates the thing being fetched. After a Final that is also the completion
+     * flash: the finalized turn is in memory and Room stays stale until `cacheMessages` lands, so
+     * painting the cache would re-render the pre-Final tree. `true` subscribes first and revalidates
+     * in the background; `init` is the only opt-in (#300).
+     *
+     * [unsavedTurn] is a failed turn's optimistic user message whose persistence is unknown: once
+     * the fetch settles, its text goes back into the composer if the server kept no copy of it.
+     *
+     * [onSettled] runs once, after the settled read is on screen. A later load that replaces this
+     * one first takes it over and runs it when it settles. Never in a temporary chat (nothing loads).
+     */
+    fun loadConversation(
+        conversationId: String,
+        cacheFirst: Boolean = false,
+        unsavedTurn: Message? = null,
+        onSettled: (() -> Unit)? = null,
+    ) {
+        // SECURITY: do not remove — temp-chat data-at-rest guard.
+        // Defense-in-depth for temporary chats: never route a temp conversation
+        // through the Room read-through, which would upsert its message rows to disk (the
+        // convo is hidden from history but the text would persist). The temp chat's
+        // display is finalized in memory by finalizeChatDisplay; any stray
+        // loadConversation call (safety-net, error/abort paths) must not touch the DB.
+        if (handle.state.isTemporaryChat) return
+        // Cancel any previous Room observer to avoid duplicate collectors
+        roomObserverJob?.cancel()
+        // Latch so comparison auto-rehydration runs at most once per load — on the first
+        // non-empty emission (the authoritative tail) — so a later Room re-emit can't
+        // re-enable comparison after the user has toggled it off for the session.
+        var autoRehydrateHandled = false
+        rehydrateHeldForSetup = null
+        var pendingUnsavedTurn = unsavedTurn
+        onSettled?.let(settleWaiters::add)
+        roomObserverJob = handle.scope.launch {
+            // A flow, not a plain flag: it is a `combine` input below, so settling re-runs the
+            // transform even when Room never emits again — a conversation with genuinely zero
+            // messages upserts nothing, and an empty cache offline emits `[]` once. Read as a
+            // flag inside `collect`, both spin forever.
+            val revalidated = MutableStateFlow(false)
+            if (cacheFirst) {
+                // A child of roomObserverJob, so re-entering loadConversation cancels it with the
+                // observer.
+                launch {
+                    handle.update { content = content.copy(isRefreshingMessages = true) }
+                    try {
+                        revalidateMessages(conversationId)
+                    } finally {
+                        handle.update { content = content.copy(isRefreshingMessages = false) }
+                    }
+                    revalidated.value = true
+                }
+            } else {
+                revalidateMessages(conversationId)
+                revalidated.value = true
+            }
+            // buildActiveMessagePath is pure/synchronous CPU work; computing it on the Default
+            // dispatcher keeps the tree walk off Main. Combining the active-branch selection in
+            // (rather than peeking handle.state inside the map) keeps the branch snapshot
+            // consistent with the emission — no torn read — and means switchBranch only has to
+            // mutate activeBranches: the heavy recompute happens here off Main, not on the click
+            // thread. The result feeds a StateFlow (not a Compose snapshot), so it's safe off-Main.
+            combine(
+                messageRepository.observeMessages(conversationId),
+                handle.stateFlow.map { it.activeBranches }.distinctUntilChanged(),
+                revalidated,
+            ) { messages, branches, settled ->
+                // Reuse on-screen Message instances that changed only in volatile fields, so
+                // the rebuilt path stays value-equal and the cosmetic Room reconcile conflates
+                // instead of re-rendering the list (see [stabilizeMessageInstances]). The
+                // baseline is read straight from handle.state, not a combine input: the
+                // completion path writes finalized messages into the state *outside* this flow
+                // (finalizeChatDisplay) and happens-before the cacheMessages write that
+                // triggers this emission, so handle.state reflects the true on-screen state.
+                val baseline = handle.state
+                val stabilized = stabilizeMessageInstances(messages, baseline.messages)
+                // A handed-off new chat seeds the just-sent user message (pendingResumeUserMessage):
+                // the server persists the request only when the reply completes or a client drops its
+                // stream, so the Room read can be empty mid-stream and the user's message would otherwise
+                // vanish for the whole stream.
+                // Keep that seed appended until the server's own copy arrives, then drop it. The copy
+                // is matched by content as well as id (isServerCopyOf): rc3+ re-mints the id, so an
+                // id-only match never fires, and a run ending with no Final (a resume that 404s) would
+                // leave the seed as a newer root sibling that hides the persisted turn. finalizeChatDisplay
+                // also clears the seed at Final. Done here, off Main, so the path build stays on the
+                // Default dispatcher. The takeIf guarantees no copy of the seed is in stabilized, so
+                // this is a plain append — no by-id reconcile needed.
+                val pending = baseline.pendingResumeUserMessage
+                val retainedPending = pending?.takeIf { seed ->
+                    stabilized.none { it.messageId == seed.messageId || it.isServerCopyOf(seed) }
+                }
+                val merged = retainedPending?.let { stabilized + it } ?: stabilized
+                // An attached run's reply is in the bubble, and may also be in this read as the
+                // partial the server saved when the last subscriber left: keep that copy off the
+                // path, or the reply shows twice until the run ends.
+                val attachedRun = baseline.content.attachedRun?.takeIf { baseline.isStreaming }
+                // A resumed run's saved partial: the streaming bubble shows that text already.
+                val liveReplyId = baseline.content.resumedReplyId.takeIf { baseline.isStreaming }
+                MessagePathEmission(
+                    messages = merged,
+                    displayMessages = (
+                        attachedRun?.displayPath(merged, branches)
+                            ?: buildActiveMessagePath(merged, branches)
+                        ).withoutLivePartial(liveReplyId),
+                    retainedPending = retainedPending,
+                    revalidated = settled,
+                )
+            }
+                .flowOn(defaultDispatcher)
+                .collect { emission ->
+                    val displayMessages = emission.displayMessages
+                    val settled = emission.revalidated
+                    handle.update {
+                        content = content.copy(
+                            messages = emission.messages,
+                            displayMessages = displayMessages,
+                            // Cached rows go straight to ACTIVE; an empty cache keeps
+                            // spinning, so an uncached online open never flashes a blank
+                            // thread first. Settling releases it either way.
+                            screenState = if (displayMessages.isNotEmpty() || settled) {
+                                ChatScreenState.ACTIVE
+                            } else {
+                                content.screenState
+                            },
+                            // Null once the server's copy arrives (or there was never a seed) →
+                            // a later server-side delete can then still remove the row.
+                            pendingResumeUserMessage = emission.retainedPending,
+                        )
+                    }
+                    // Judged on the settled read only: a cached emission predates the failed turn
+                    // and would always look like the server dropped it. A fetch that failed also
+                    // settles, and then restores — duplicating text the server did keep is the
+                    // recoverable mistake; losing text it did not keep is not.
+                    // A reply that finished while nobody was watching may have left its generated
+                    // files pending; the settled read is the one that names them.
+                    if (settled) onMessagesSettled(displayMessages)
+                    if (settled && settleWaiters.isNotEmpty()) {
+                        val waiters = settleWaiters.toList()
+                        settleWaiters.clear()
+                        waiters.forEach { it() }
+                    }
+                    pendingUnsavedTurn?.takeIf { settled }?.let { unsent ->
+                        pendingUnsavedTurn = null
+                        val kept = emission.messages.any {
+                            it.messageId == unsent.messageId || it.isServerCopyOf(unsent)
+                        }
+                        if (!kept) {
+                            restoreUnsentInput(unsent.text, unsent.quotes.orEmpty(), unsent.manualSkills.orEmpty())
+                        }
+                    }
+                    // Restore comparison mode when reopening a Compare Models conversation: the
+                    // last assistant message carries both agents' attributed parts but nothing
+                    // else records it was a comparison. Only when not streaming and not already
+                    // comparing (respects a session toggle-off); the branched-away case has a
+                    // single-agent tail, so it naturally shows the normal view.
+                    // Gated on `settled` so the latch burns on the AUTHORITATIVE tail, not a stale
+                    // cached one: a comparison tail that exists only server-side would otherwise
+                    // never rehydrate.
+                    if (!autoRehydrateHandled && settled && displayMessages.isNotEmpty()) {
+                        autoRehydrateHandled = true
+                        val state = handle.state
+                        val tail = displayMessages.lastOrNull()?.message
+                        if (!state.isStreaming && !state.comparisonState.isEnabled &&
+                            tail != null && hasParallelParts(tail)
+                        ) {
+                            if (state.comparisonState.isSettingUp) {
+                                rehydrateHeldForSetup = tail
+                            } else {
+                                rehydrateComparison(tail)
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    /**
+     * Puts an early-aborted turn's text back into the composer (the un-send flow: the Stop
+     * landed before the server persisted anything, so the optimistic bubble was removed).
+     * Yields to anything the user has since typed — same rule as [restoreDraft] — and persists
+     * as a draft so the restored text survives process death, same as `ChatViewModel.onInputChanged`.
+     * A turn with no text (files only) still puts its quote and skill chips back.
+     */
+    fun restoreUnsentInput(
+        text: String,
+        quotes: List<String> = emptyList(),
+        manualSkills: List<String> = emptyList(),
+    ) {
+        val stashed = handle.state.editingQueuedItem?.stashed
+        if (stashed != null) {
+            restoreUnsentInputToStash(stashed, text, quotes, manualSkills)
+            return
+        }
+        handle.update {
+            if (inputText.isBlank() || text.isBlank()) {
+                if (text.isNotBlank()) inputText = text
+                // The chips were taken (and cleared) when the spec was minted, so an
+                // un-send has to put them back or the retry silently loses the excerpts.
+                // Anything staged since wins — same yield-to-the-user rule as the text.
+                pendingQuotes = pendingQuotes.ifEmpty { quotes }
+                // The skill chips likewise, or the retry runs without the picked skills. Merged
+                // rather than yielded: chips the send held back are still staged beside them.
+                pendingManualSkills = (manualSkills + pendingManualSkills).distinct().take(MAX_MANUAL_SKILLS)
+            }
+        }
+        if (text.isBlank() || handle.state.inputText != text) return
+        val draftKey = handle.state.conversationId ?: newChatDraftKey
+        handle.scope.launch {
+            draftRepository.saveDraft(draftKey, text)
+        }
+    }
+
+    /**
+     * During a queued edit the turn goes back to the stashed draft it came from
+     * (`ComposerState.draftRestore`), its yield rules judged against that draft, not the item on screen.
+     */
+    private fun restoreUnsentInputToStash(
+        stashed: ComposerSnapshot,
+        text: String,
+        quotes: List<String>,
+        manualSkills: List<String>,
+    ) {
+        if (stashed.text.isNotBlank() && text.isNotBlank()) return
+        var restoredText = false
+        handle.update {
+            val textGoesBack = text.isNotBlank() && draftRestore.text.isBlank()
+            restoredText = textGoesBack
+            draftRestore = draftRestore.copy(
+                text = if (textGoesBack) text else draftRestore.text,
+                quotes = if (stashed.quotes.isEmpty()) draftRestore.quotes.ifEmpty { quotes } else draftRestore.quotes,
+                manualSkills = (manualSkills + draftRestore.manualSkills).distinct().take(MAX_MANUAL_SKILLS),
+            )
+        }
+        if (!restoredText) return
+        // The new-message draft on disk, so the text survives process death as the plain restore does.
+        val draftKey = handle.state.conversationId ?: newChatDraftKey
+        handle.scope.launch {
+            draftRepository.saveDraft(draftKey, text)
+        }
+    }
+
+    /**
+     * Restores a previously saved draft for the given key (conversation ID or the landing's key).
+     */
+    fun restoreDraft(draftKey: String) {
+        handle.scope.launch {
+            // awaitDraft (not getDraft) so a first launch that opens the chat screen while identity is
+            // still warming — e.g. straight after a cold start or the pre-tenancy DB migration — waits
+            // for the account to resolve instead of reading null and leaving a saved draft hidden until
+            // the next launch. The blank-check below still yields to anything the user has since typed.
+            val draft = draftRepository.awaitDraft(draftKey)
+            if (!draft.isNullOrBlank()) {
+                handle.update { if (inputText.isBlank()) inputText = draft }
+            }
+        }
+    }
+
+    fun loadConversationModel(conversationId: String) {
+        // SECURITY: do not remove — temp-chat data-at-rest guard. getConversation below
+        // round-trips through refreshConversation, which upserts the conversation row to Room.
+        // Temp chats must never persist, and their model/endpoint was already seeded from the
+        // NewChatSelectionHandoff in init — so there is nothing to load and nothing to write.
+        if (handle.state.isTemporaryChat) {
+            onModelLoadSettled()
+            return
+        }
+        handle.scope.launch {
+            val result = conversationRepository.getConversation(conversationId, originAccount = null)
+            var conversation = result.getOrNull()
+            val wantsParameters = wantsStoredParameters()
+            val remembered = if (wantsParameters) rememberedWebSearch(conversationId) else null
+            fun apply(loaded: Conversation, restore: Boolean): Boolean {
+                // A handed-off new chat's row is read while its title is still generating: a
+                // placeholder must not replace the title TitleUpdate already showed.
+                handle.update { if (isRealTitle(loaded.title) || !isRealTitle(conversationTitle)) conversationTitle = loaded.title }
+                val applied = applyConversationModel(loaded)
+                // After the model, so the conversation's own parameters are what stays.
+                if (applied && restore) restoreParameters(loaded, remembered)
+                return applied
+            }
+            // The cached row applies at once, so an open never waits on the network for its model.
+            var applied = conversation?.let { apply(it, restore = wantsParameters) } ?: false
+            // Rows cached before the spec column have none, and an enforced server rejects a send
+            // without it. The list route sends no parameters, so a row it synced has none, or older
+            // ones once the chat changed elsewhere. Ask the server once per process and version of
+            // the chat: one that has neither there either would otherwise cost a request every open.
+            val cached = conversation
+            val backfillKey = currentAccountId()?.let { "$it:$conversationId:${cached?.updatedAt}" }
+            val selectionIncomplete = cached != null && selectionIncomplete(cached, wantsParameters)
+            // Whether this is a code chat (for its pull request) is learned from the fetch's row write
+            // alone: it re-applies no model or parameters, so a chat opened mid-run keeps the
+            // selection the cached row gave it. The row isn't read by the message observer, so the
+            // write is safe mid-stream (the streaming anchor depends on the messages alone).
+            val codeUnknown = cached != null && cached.isCodeConversation == null && pullRequestsAvailable()
+            if ((selectionIncomplete || codeUnknown) && backfillKey != null && backfillKey !in conversationBackfillDone) {
+                val unchanged = watchSelection()
+                val fetched = conversationRepository.refreshConversation(conversationId, originAccount = null).getOrNull()
+                // A model or parameter set while the fetch was out is the user's and stays.
+                val userUnchanged = unchanged()
+                fetched?.let {
+                    // Only a successful fetch settles it: a failed one is retried on the next open.
+                    conversationBackfillDone.add(backfillKey)
+                    conversation = it
+                    if (selectionIncomplete && userUnchanged) {
+                        applied = apply(it, restore = wantsParameters && it.hasParameters)
+                    }
+                }
+            }
+            if (conversation != null) {
+                Diag.d(
+                    tag = "ModelSel",
+                    attrs = mapOf(
+                        "found" to "true",
+                        "applied" to applied.toString(),
+                        "endpoint" to (conversation.endpoint ?: "null"),
+                    ),
+                ) { "loadConversationModel resolved for $conversationId" }
+            } else {
+                // The just-created conversation isn't readable yet: the server emits the
+                // `created` SSE event before the unawaited save persists it, so this GET can
+                // race that save and 404. The in-process handoff already seeded the correct
+                // selection in init, so we deliberately leave it untouched here. Only mark
+                // "load attempted" — never "resolved" — so handleFinal can re-derive later.
+                Diag.w(
+                    tag = "ModelSel",
+                    origin = LogOrigin.SERVER,
+                    attrs = mapOf("found" to "false"),
+                ) { "loadConversationModel: conversation not readable for $conversationId" }
+            }
+            onModelLoadSettled()
+        }
+    }
+
+    /** The cached row lacks the spec an enforced server needs, or the parameters a reopen restores. */
+    private fun selectionIncomplete(cached: Conversation, wantsParameters: Boolean): Boolean =
+        (cached.spec == null && currentModelSpecs()?.enforce == true) ||
+            (wantsParameters && (!cached.hasParameters || cached.parametersStale))
+
+    fun refreshMessages(onRefreshed: (conversationId: String) -> Unit = {}) {
+        val conversationId = handle.state.conversationId ?: return
+        // SECURITY: do not remove — temp-chat data-at-rest guard.
+        // Temp chats aren't persisted server- or client-side; a pull-to-refresh would
+        // call refreshMessages → replaceAllForConversation, writing the temp message rows
+        // to Room. Skip — there's nothing to refresh for a temporary chat.
+        if (handle.state.isTemporaryChat) return
+        if (handle.state.isRefreshingMessages) return
+        handle.update { content = content.copy(isRefreshingMessages = true) }
+        handle.scope.launch {
+            // Foreground pull-to-refresh: the user is looking at this conversation now, so entry is
+            // land time and the live account is the right one to attribute to.
+            messageRepository.refreshMessages(conversationId, originAccount = null, toolPreviews = true)
+            loadConversation(conversationId)
+            handle.update { content = content.copy(isRefreshingMessages = false) }
+            onRefreshed(conversationId)
+        }
+    }
+}
+
+/**
+ * Conversations the server has been asked for their spec and parameters this process, keyed
+ * `accountId:conversationId:updatedAt`. Touched only on the main thread.
+ */
+private val conversationBackfillDone = HashSet<String>()
+
+private data class MessagePathEmission(
+    val messages: List<Message>,
+    val displayMessages: List<MessageNode>,
+    val retainedPending: Message?,
+    val revalidated: Boolean,
+)

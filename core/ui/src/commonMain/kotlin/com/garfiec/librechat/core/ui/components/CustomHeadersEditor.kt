@@ -7,16 +7,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,9 +24,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.ui.resources.Res
@@ -165,7 +157,7 @@ fun CustomHeadersEditor(
                 }
                 if (stacked && index != headers.lastIndex) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider()
+                    AdaptiveDivider()
                 }
             }
 
@@ -281,12 +273,13 @@ private fun HeaderNameField(
     onNameChange: (Int, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedTextField(
+    AdaptiveOutlinedTextField(
         value = name,
         onValueChange = { onNameChange(index, it) },
         label = { Text(stringResource(Res.string.server_headers_name)) },
         modifier = modifier.testTag("server_header_name_$index"),
         singleLine = true,
+        keyboardOptions = VerbatimKeyboardOptions,
         enabled = enabled,
         isError = rejection == CustomHeaderRowError.InvalidName ||
             rejection == CustomHeaderRowError.ReservedName,
@@ -304,41 +297,20 @@ private fun HeaderValueField(
     onToggleReveal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedTextField(
+    // A gateway token is a credential — masked by default so it stays out of screenshots and
+    // accessibility dumps, as MCP server headers and provider API keys already are.
+    SecretTextField(
         value = value,
         onValueChange = { onValueChange(index, it) },
+        revealed = revealed,
+        onRevealedChange = { onToggleReveal() },
         label = { Text(stringResource(Res.string.server_headers_value)) },
         modifier = modifier.testTag("server_header_value_$index"),
-        singleLine = true,
         enabled = enabled,
         isError = rejection == CustomHeaderRowError.InvalidValue,
-        // A gateway token is a credential — masked by default so it stays out of screenshots and
-        // accessibility dumps, as MCP server headers and provider API keys already are.
-        visualTransformation = if (revealed) {
-            VisualTransformation.None
-        } else {
-            PasswordVisualTransformation()
-        },
-        // Keeps the IME from learning, suggesting or autocorrecting the secret.
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        trailingIcon = {
-            IconButton(
-                onClick = onToggleReveal,
-                enabled = enabled,
-                modifier = Modifier.testTag("server_header_reveal_$index"),
-            ) {
-                Icon(
-                    imageVector = if (revealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                    contentDescription = stringResource(
-                        if (revealed) {
-                            Res.string.server_headers_hide_value
-                        } else {
-                            Res.string.server_headers_show_value
-                        },
-                    ),
-                )
-            }
-        },
+        showDescription = Res.string.server_headers_show_value,
+        hideDescription = Res.string.server_headers_hide_value,
+        revealButtonModifier = Modifier.testTag("server_header_reveal_$index"),
     )
 }
 

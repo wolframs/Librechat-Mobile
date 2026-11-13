@@ -3,6 +3,8 @@ package com.garfiec.librechat.core.data.repository
 import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.common.extensions.serverHostLabel
 import com.garfiec.librechat.core.common.identity.AccountId
+import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
+import com.garfiec.librechat.core.common.identity.currentAccountId
 import com.garfiec.librechat.core.common.identity.deriveAccountId
 import com.garfiec.librechat.core.common.identity.deriveServerId
 import com.garfiec.librechat.core.data.datastore.AccountEntry
@@ -33,6 +35,8 @@ class AccountSessionEstablisher(
     private val claimReconciler: AccountClaimReconciler,
     private val serverUrlProvider: ServerUrlProvider,
     private val tokenManager: TokenManager,
+    private val activeAccountProvider: ActiveAccountProvider,
+    private val switchCacheCleaner: SwitchCacheCleaner,
     private val ioDispatcher: CoroutineDispatcher,
 ) {
 
@@ -62,7 +66,7 @@ class AccountSessionEstablisher(
      * establish (cold-start restore or a re-login). A session that logs in once and stays logged in
      * never re-establishes, so on that path the orphaned pre-migration history is hidden until the user
      * re-auths — not just for a brief window. That is still strictly better than a dead session;
-     * bounding it with a foreground/sync-time claim retry is left to a follow-up (SessionWriter / PR1-B).
+     * bounding it with a foreground/sync-time claim retry is not implemented (deferred with SessionWriter).
      */
     suspend fun establish(user: User): AccountId = withContext(ioDispatcher) {
         val baseUrl = serverUrlProvider.awaitBaseUrl()
@@ -80,6 +84,10 @@ class AccountSessionEstablisher(
         // keyed slot + repoints the sync mirror) before publishing identity, so a cold-start restore
         // resolving the same account is a no-op and the next launch seeds the right bearer.
         tokenManager.onAccountResolved(accountId.value)
+        // Signing in as someone other than the account whose session ended is an identity change: its
+        // web state must go, or the sign-in WebView's next re-auth would reuse its provider session.
+        val previous = activeAccountProvider.currentAccountId()
+        if (previous != null && previous != accountId) switchCacheCleaner.clearOnIdentityChange()
         // Record the roster entry (with the display label/avatar from the live user) and publish it.
         accountRegistry.upsertActive(
             AccountEntry(

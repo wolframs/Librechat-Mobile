@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,11 +29,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveCircularProgressIndicator
+import com.garfiec.librechat.core.ui.components.BlockDrawerGestures
 import com.garfiec.librechat.core.ui.components.PlatformBackHandler
+import com.garfiec.librechat.core.ui.media.FileAction
+import com.garfiec.librechat.core.ui.media.FileActionsMenu
+import com.garfiec.librechat.core.ui.media.rememberOpenFileIn
+import com.garfiec.librechat.core.ui.media.rememberSaveFile
 import com.garfiec.librechat.core.ui.media.rememberShareFile
 import com.garfiec.librechat.feature.chat.resources.Res
 import com.garfiec.librechat.feature.chat.resources.cd_close
-import com.garfiec.librechat.feature.chat.resources.cd_share_pdf
 import com.garfiec.librechat.feature.chat.resources.pdf_load_failed
 import com.garfiec.librechat.feature.chat.resources.retry
 import org.jetbrains.compose.resources.stringResource
@@ -57,10 +60,12 @@ private sealed interface PdfLoadState {
     class Loaded(val bytes: ByteArray) : PdfLoadState
 }
 
+private const val PDF_MIME = "application/pdf"
+
 /**
  * Full-screen PDF preview rendered at the chat screen root (by [ChatRoot]). Downloads the file's
  * bytes via [onDownload], checks they actually look like a PDF, then hands them to the platform-native
- * [PdfViewer]. A slim top bar carries close + share; system back dismisses on Android, and the
+ * [PdfViewer]. A slim top bar carries close + file actions; system back dismisses on Android, and the
  * explicit close covers iOS (which has no system back). Mirrors the media-viewer overlay pattern.
  *
  * Share stays available whenever bytes were downloaded — even if they aren't previewable or the
@@ -93,6 +98,8 @@ internal fun PdfPreviewOverlay(
         }
     }
     val shareFile = rememberShareFile()
+    val openFileIn = rememberOpenFileIn()
+    val saveFile = rememberSaveFile()
 
     // Bytes are shareable whenever the download produced them, even if the native engine later
     // failed to render them or they aren't a PDF — the user can still get the file out to another app.
@@ -102,7 +109,12 @@ internal fun PdfPreviewOverlay(
         else -> null
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+    // The overlay sits inside the navigation drawer, which would open on the viewer's sideways drags.
+    BlockDrawerGestures()
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp),
@@ -123,16 +135,17 @@ internal fun PdfPreviewOverlay(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(
-                    onClick = { shareBytes?.let { shareFile(it, filename, "application/pdf") } },
+                FileActionsMenu(
                     enabled = shareBytes != null,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Share,
-                        contentDescription = stringResource(Res.string.cd_share_pdf),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                    onAction = { action ->
+                        val bytes = shareBytes ?: return@FileActionsMenu
+                        when (action) {
+                            FileAction.OPEN_IN -> openFileIn(bytes, filename, PDF_MIME)
+                            FileAction.SAVE -> saveFile(bytes, filename, PDF_MIME)
+                            FileAction.SHARE -> shareFile(bytes, filename, PDF_MIME)
+                        }
+                    },
+                )
             }
 
             Box(
@@ -140,7 +153,7 @@ internal fun PdfPreviewOverlay(
                 contentAlignment = Alignment.Center,
             ) {
                 when (val state = loadState) {
-                    is PdfLoadState.Loading -> CircularProgressIndicator()
+                    is PdfLoadState.Loading -> AdaptiveCircularProgressIndicator()
                     // Only a failed download is worth retrying; re-downloading won't fix bad bytes.
                     is PdfLoadState.DownloadFailed -> PdfErrorContent(onRetry = { attempt++ })
                     is PdfLoadState.Unrenderable -> PdfErrorContent(onRetry = null)

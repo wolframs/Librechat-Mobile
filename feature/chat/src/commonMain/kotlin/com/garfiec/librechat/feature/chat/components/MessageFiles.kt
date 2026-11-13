@@ -7,43 +7,38 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.BrokenImage
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.TableChart
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
+import com.garfiec.librechat.core.model.Attachment
+import com.garfiec.librechat.core.model.FILE_SOURCE_TEXT
 import com.garfiec.librechat.core.model.FileReference
+import com.garfiec.librechat.core.model.files.fileKindOf
 import com.garfiec.librechat.core.model.media.resolveFileReferenceUrl
+import com.garfiec.librechat.core.ui.components.AdaptiveCircularProgressIndicator
+import com.garfiec.librechat.core.ui.components.FileTypeChip
+import com.garfiec.librechat.core.ui.components.fileTypeSubtitle
+import com.garfiec.librechat.core.ui.media.mediaThumbnail
+import com.garfiec.librechat.core.ui.theme.themeShapes
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import org.jetbrains.compose.resources.stringResource
@@ -54,6 +49,9 @@ import org.jetbrains.compose.resources.stringResource
  *
  * This mirrors the official LibreChat web app's `Files` component which renders
  * `message.files` above the message text for user messages.
+ *
+ * [alignImagesEnd] puts the image previews at the end edge while the file chips stay at the start,
+ * as upstream does for a user turn (`Image`'s `alignRight`).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -61,8 +59,10 @@ fun MessageFiles(
     files: List<FileReference>,
     modifier: Modifier = Modifier,
     baseUrl: String = "",
+    alignImagesEnd: Boolean = false,
 ) {
     if (files.isEmpty()) return
+    val openFile = LocalOpenMessageFile.current
 
     val imageFiles = remember(files) {
         files.filter { it.type?.startsWith("image/") == true }
@@ -74,14 +74,24 @@ fun MessageFiles(
     Column(modifier = modifier) {
         // Non-image file chips
         if (otherFiles.isNotEmpty()) {
+            val toolFileActions = rememberToolFileActions(baseUrl)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 otherFiles.forEach { file ->
+                    val attachment = remember(file) { file.toAttachment() }
                     FileChip(
                         filename = file.filename ?: file.filepath?.substringAfterLast('/') ?: stringResource(Res.string.file_fallback),
                         type = file.type,
+                        bytes = file.bytes,
+                        onClick = when {
+                            openFile != null -> { { openFile(file) } }
+                            // A text-source file has no stored bytes to download or preview.
+                            file.source != FILE_SOURCE_TEXT && toolFileActions.canOpen(attachment) ->
+                                { { toolFileActions.openToolFile(attachment) } }
+                            else -> null
+                        },
                     )
                 }
             }
@@ -96,7 +106,8 @@ fun MessageFiles(
             if (imageUrl != null) {
                 MessageImagePreview(
                     imageUrl = imageUrl,
-                    altText = file.filename ?: "Attached image",
+                    altText = file.filename ?: stringResource(Res.string.cd_attached_image),
+                    modifier = if (alignImagesEnd) Modifier.align(Alignment.End) else Modifier,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -122,7 +133,7 @@ internal fun MessageImagePreview(
         modifier = modifier
             .widthIn(max = 300.dp)
             .heightIn(max = 300.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .mediaThumbnail(imageUrl, themeShapes().fileChip)
             .clickable { openMedia(imageUrl) }
             .semantics {
                 role = Role.Image
@@ -135,11 +146,11 @@ internal fun MessageImagePreview(
                     .height(120.dp)
                     .background(
                         MaterialTheme.colorScheme.surfaceContainerHigh,
-                        RoundedCornerShape(12.dp),
+                        themeShapes().fileChip,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                AdaptiveCircularProgressIndicator(modifier = Modifier.size(24.dp))
             }
         },
         error = {
@@ -149,7 +160,7 @@ internal fun MessageImagePreview(
                     .height(120.dp)
                     .background(
                         MaterialTheme.colorScheme.surfaceContainerHigh,
-                        RoundedCornerShape(12.dp),
+                        themeShapes().fileChip,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -165,62 +176,44 @@ internal fun MessageImagePreview(
 }
 
 /**
- * A chip that shows a non-image file with an icon and filename.
+ * A non-image file as a [FileTypeChip]: its type tile, its name, and its type and size.
  *
  * When [onClick] is non-null the chip is tappable (e.g. to download + share a generated file);
- * [isLoading] swaps the leading icon for a spinner while that action is in flight.
+ * [isLoading] swaps the tile's glyph for a spinner while that action is in flight. An [expired]
+ * file is dimmed, shows a clock and says "Expired", and stays tappable to explain why.
  */
 @Composable
 internal fun FileChip(
     filename: String,
     type: String?,
     modifier: Modifier = Modifier,
+    bytes: Long? = null,
     isLoading: Boolean = false,
+    expired: Boolean = false,
+    outlined: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp,
-            )
-        } else {
-            Icon(
-                imageVector = fileTypeIcon(type),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = filename,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 200.dp),
-        )
-    }
+    val kind = remember(filename, type) { fileKindOf(filename, type) }
+    FileTypeChip(
+        filename = filename,
+        kind = kind,
+        subtitle = if (expired) stringResource(Res.string.expired) else fileTypeSubtitle(kind, filename, bytes),
+        modifier = modifier,
+        isLoading = isLoading,
+        dimmed = expired,
+        glyph = if (expired) Icons.Outlined.Schedule else null,
+        outlined = outlined,
+        onClick = onClick,
+    )
 }
 
-/**
- * Returns an appropriate icon for the given MIME type.
- */
-private fun fileTypeIcon(type: String?): ImageVector {
-    if (type == null) return Icons.AutoMirrored.Filled.InsertDriveFile
-    return when {
-        type.startsWith("application/pdf") -> Icons.Default.PictureAsPdf
-        type.startsWith("text/") -> Icons.Default.Description
-        type.contains("spreadsheet") || type.contains("csv") || type.contains("excel") -> Icons.Default.TableChart
-        type.contains("document") || type.contains("word") -> Icons.Default.Description
-        else -> Icons.Default.AttachFile
-    }
-}
+internal fun FileReference.toAttachment(): Attachment = Attachment(
+    fileId = fileId,
+    filename = filename,
+    filepath = filepath,
+    type = type,
+    width = width,
+    height = height,
+    bytes = bytes,
+    source = source,
+)

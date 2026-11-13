@@ -1,0 +1,683 @@
+package com.garfiec.librechat.core.ui.components.topbar
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.garfiec.librechat.core.model.ui.GlassCapability
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveCircularProgressIndicator
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveDropdownMenu
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.CornerStatusDot
+import com.garfiec.librechat.core.ui.components.LocalInSeparateWindow
+import com.garfiec.librechat.core.ui.components.MenuDragSelection
+import com.garfiec.librechat.core.ui.components.consumeUnhandledTouches
+import com.garfiec.librechat.core.ui.components.dragSelectRowIcon
+import com.garfiec.librechat.core.ui.components.menuDragAnchor
+import com.garfiec.librechat.core.ui.components.menuDragPressEffect
+import com.garfiec.librechat.core.ui.components.menuDragTarget
+import com.garfiec.librechat.core.ui.components.rememberMenuDragSelection
+import com.garfiec.librechat.core.ui.glass.LocalGlassBackdrop
+import com.garfiec.librechat.core.ui.glass.glassSurface
+import com.garfiec.librechat.core.ui.glass.rememberGlassStyle
+import com.garfiec.librechat.core.ui.theme.LocalGlassLevel
+
+private val ControlSize = 44.dp
+
+/** A text action's leading status glyph, its gap to the label, and the dot on its corner. */
+private val TextActionIconSize = 16.dp
+private val TextActionIconGap = 4.dp
+private val TextActionBadgeSize = 6.dp
+
+/**
+ * An M3 `TopAppBar` in Material, the system glass bar on iOS 26+, a simulated glass bar elsewhere.
+ * [belowBar] holds Compose content that can't be bar data (a search field, a tab row).
+ */
+@Composable
+fun AdaptiveTopBar(
+    spec: AdaptiveTopBarSpec,
+    modifier: Modifier = Modifier,
+    materialStyle: MaterialBarStyle = MaterialBarStyle(),
+    belowBar: (@Composable () -> Unit)? = null,
+) {
+    val level = LocalGlassLevel.current
+    if (level == null) {
+        if (materialStyle.translucent) {
+            TranslucentMaterialTopBar(spec, materialStyle, modifier, belowBar)
+        } else if (belowBar == null) {
+            MaterialTopBar(spec, materialStyle, modifier)
+        } else {
+            Column(modifier = modifier) {
+                MaterialTopBar(spec, materialStyle)
+                belowBar()
+            }
+        }
+        return
+    }
+    Column(modifier = modifier) {
+        Box {
+            // The native bar's scroll-edge effect only follows a UIScrollView, and a Compose list is not
+            // one, so the fade that keeps the title legible over scrolling content is drawn here.
+            Box(Modifier.matchParentSize().background(glassEdgeScrim()))
+            if (level == GlassCapability.NATIVE && !LocalInSeparateWindow.current) {
+                TitleFirstBar(spec, nativeBarMetrics(spec), Modifier.fillMaxWidth()) {
+                    NativeGlassTopBar(spec = it, modifier = Modifier.fillMaxWidth())
+                }
+            } else {
+                SimulatedGlassTopBar(spec = spec, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        belowBar?.invoke()
+    }
+}
+
+@Composable
+private fun TranslucentMaterialTopBar(
+    spec: AdaptiveTopBarSpec,
+    style: MaterialBarStyle,
+    modifier: Modifier = Modifier,
+    belowBar: (@Composable () -> Unit)? = null,
+) {
+    Box(modifier = modifier) {
+        val surface = MaterialTheme.colorScheme.surface
+        Box(
+            Modifier.matchParentSize().drawWithCache {
+                // Hold the scrim near-opaque behind the title and belowBar so their text stays readable over
+                // the list; only a fixed band at the bottom edge fades, however tall belowBar makes the bar.
+                val fadeStart = ((size.height - TranslucentFade.toPx()) / size.height).coerceIn(0f, 1f)
+                val brush = Brush.verticalGradient(
+                    0f to surface.copy(alpha = 0.92f),
+                    fadeStart to surface.copy(alpha = 0.82f),
+                    1f to Color.Transparent,
+                )
+                onDrawBehind { drawRect(brush) }
+            },
+        )
+        Column {
+            MaterialTopBar(spec, style.copy(containerColor = Color.Transparent))
+            belowBar?.invoke()
+        }
+    }
+}
+
+@Composable
+private fun MaterialTopBar(spec: AdaptiveTopBarSpec, style: MaterialBarStyle, modifier: Modifier = Modifier) {
+    val typography = MaterialTheme.typography
+    val metrics = BarMetrics(
+        // M3's 4dp bar insets and the title's 4dp sides, plus the 48dp navigation button.
+        fixed = (if (spec.navigation != null) 48.dp else 0.dp) + 16.dp,
+        iconAction = 48.dp,
+        textActionPadding = TextActionPadding,
+        textActionMinWidth = TextActionMinWidth,
+        titleStyle = typography.titleLarge,
+        labelStyle = typography.labelLarge,
+    )
+    TitleFirstBar(spec, metrics, modifier) { MaterialTopBarContent(it, style) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MaterialTopBarContent(spec: AdaptiveTopBarSpec, style: MaterialBarStyle) {
+    var renaming by remember { mutableStateOf(false) }
+    val title: @Composable () -> Unit = {
+        val text = spec.title.text
+        if (text != null) {
+            val onTitleClick = spec.title.onClick ?: spec.title.rename?.let { { renaming = true } }
+            Text(
+                text = text,
+                maxLines = spec.title.lines,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = if (spec.title.alignment == BarTitleAlignment.CENTER) TextAlign.Center else null,
+                modifier = if (onTitleClick != null) Modifier.clickable(onClick = onTitleClick) else Modifier,
+            )
+        }
+    }
+    val navigationIcon: @Composable () -> Unit = {
+        spec.navigation?.let { nav ->
+            IconButton(onClick = nav.onClick) {
+                Icon(imageVector = nav.icon.vector, contentDescription = nav.contentDescription)
+            }
+        }
+    }
+    val actions: @Composable RowScope.() -> Unit = {
+        val colors = BarActionColors(default = Color.Unspecified, accent = MaterialTheme.colorScheme.primary)
+        spec.actions.forEach { BarActionButton(it, colors) }
+    }
+    val customColor = style.containerColor.takeIf { it != Color.Unspecified }
+    if (spec.title.alignment == BarTitleAlignment.CENTER) {
+        CenterAlignedTopAppBar(
+            title = title,
+            navigationIcon = navigationIcon,
+            actions = actions,
+            colors = if (customColor != null) {
+                TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = customColor)
+            } else {
+                TopAppBarDefaults.centerAlignedTopAppBarColors()
+            },
+        )
+    } else {
+        TopAppBar(
+            title = title,
+            navigationIcon = navigationIcon,
+            actions = actions,
+            colors = if (customColor != null) {
+                TopAppBarDefaults.topAppBarColors(containerColor = customColor)
+            } else {
+                TopAppBarDefaults.topAppBarColors()
+            },
+        )
+    }
+    spec.title.rename?.let { rename ->
+        if (renaming) BarRenameDialog(rename = rename, onDismiss = { renaming = false })
+    }
+}
+
+/**
+ * What separates the two Compose renderers' controls. An unspecified [default] keeps the button's
+ * own content colour (Material), which dims a disabled icon.
+ */
+private class BarActionColors(val default: Color, val accent: Color, val glass: Boolean = false)
+
+@Composable
+private fun BarActionButton(action: BarAction, colors: BarActionColors) {
+    when (action) {
+        is BarAction.Icon -> IconButton(onClick = action.onClick, enabled = action.enabled && !action.busy) {
+            if (action.busy) {
+                AdaptiveCircularProgressIndicator(modifier = Modifier.size(20.dp))
+            } else {
+                Icon(
+                    imageVector = action.icon.vector,
+                    contentDescription = action.label,
+                    tint = when (action.tint) {
+                        BarTint.DEFAULT -> colors.default.takeOrElse { LocalContentColor.current }
+                        BarTint.DESTRUCTIVE -> if (action.enabled) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    },
+                )
+            }
+        }
+
+        is BarAction.Text -> TextButton(
+            onClick = action.onClick,
+            enabled = action.enabled,
+            modifier = action.accessibilityLabel?.let { description ->
+                Modifier.semantics { contentDescription = description }
+            } ?: Modifier,
+        ) {
+            action.leadingIcon?.let { icon ->
+                Box(modifier = Modifier.size(TextActionIconSize)) {
+                    Icon(
+                        imageVector = icon.vector,
+                        contentDescription = null,
+                        tint = action.iconTint ?: LocalContentColor.current,
+                        modifier = Modifier.size(TextActionIconSize),
+                    )
+                    action.badgeTint?.let { badge ->
+                        CornerStatusDot(
+                            color = badge,
+                            size = TextActionBadgeSize,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .offset(x = TextActionBadgeSize / 4, y = TextActionBadgeSize / 4),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(TextActionIconGap))
+            }
+            // Glass labels its text actions in the accent, as iOS does; Material keeps TextButton's own.
+            Text(
+                text = action.label,
+                color = if (colors.glass && action.enabled) colors.accent else Color.Unspecified,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = if (action.accessibilityLabel != null) Modifier.clearAndSetSemantics {} else Modifier,
+            )
+        }
+
+        is BarAction.Toggle -> IconButton(
+            onClick = { action.onCheckedChange(!action.checked) },
+            modifier = action.onAnchor?.let { report -> Modifier.onGloballyPositioned { report(it.boundsInRoot()) } }
+                ?: Modifier,
+        ) {
+            Icon(
+                imageVector = if (action.checked) action.iconOn.vector else action.iconOff.vector,
+                contentDescription = action.label,
+                tint = when {
+                    action.checked && action.checkedTint != null -> action.checkedTint
+                    colors.glass && action.checked -> colors.accent
+                    else -> colors.default.takeOrElse { LocalContentColor.current }
+                },
+            )
+        }
+
+        is BarAction.Menu -> {
+            var expanded by remember { mutableStateOf(false) }
+            val drag = if (action.dragToSelect) rememberMenuDragSelection() else null
+            Box(
+                modifier = if (drag != null) {
+                    Modifier.menuDragAnchor(drag, onOpen = { expanded = true }, onCancel = { expanded = false })
+                } else {
+                    Modifier
+                },
+            ) {
+                // Material only: ⋮ turns into ⋯ while its menu is open, as in the chat bar.
+                val rotation by animateFloatAsState(
+                    targetValue = if (expanded && !colors.glass && action.icon == BarIcons.More) 90f else 0f,
+                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f),
+                    label = "menuIconRotation",
+                )
+                IconButton(
+                    onClick = { expanded = true },
+                    modifier = if (drag != null) Modifier.menuDragPressEffect(drag) else Modifier,
+                ) {
+                    Icon(
+                        imageVector = action.icon.vector,
+                        contentDescription = action.label,
+                        modifier = Modifier.graphicsLayer { rotationZ = rotation },
+                    )
+                }
+                BarMenu(action, expanded, onDismiss = { expanded = false }, drag, colors)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarMenu(
+    action: BarAction.Menu,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    drag: MenuDragSelection?,
+    colors: BarActionColors,
+) {
+    AdaptiveDropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        offset = BarMenuOffset,
+        dragSelection = drag,
+    ) {
+        action.sections.filter { it.items.isNotEmpty() }.forEachIndexed { index, section ->
+            if (index > 0) {
+                AdaptiveDivider(modifier = if (colors.glass) Modifier.padding(vertical = 4.dp) else Modifier)
+            }
+            section.items.forEach { item ->
+                BarDropdownItem(item = item, onSelect = onDismiss, checkTint = colors.accent, drag = drag)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarDropdownItem(item: BarMenuItem, onSelect: () -> Unit, checkTint: Color, drag: MenuDragSelection?) {
+    val error = MaterialTheme.colorScheme.error
+    val select = {
+        onSelect()
+        item.onClick()
+    }
+    DropdownMenuItem(
+        modifier = if (item.enabled) Modifier.menuDragTarget(drag, select) else Modifier,
+        text = {
+            if (item.subtitle == null) {
+                Text(item.label, color = if (item.destructive) error else Color.Unspecified)
+            } else {
+                Column {
+                    Text(item.label, color = if (item.destructive) error else Color.Unspecified)
+                    Text(
+                        text = item.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        onClick = select,
+        enabled = item.enabled,
+        leadingIcon = item.icon?.let { icon ->
+            {
+                if (item.destructive) {
+                    Icon(icon.vector, contentDescription = null, tint = error, modifier = Modifier.dragSelectRowIcon())
+                } else {
+                    Icon(icon.vector, contentDescription = null, modifier = Modifier.dragSelectRowIcon())
+                }
+            }
+        },
+        trailingIcon = if (item.checked) {
+            { Icon(Icons.Default.Check, contentDescription = null, tint = checkTint) }
+        } else {
+            null
+        },
+    )
+}
+
+// The chat bar's menu measures, so every bar menu looks the same.
+private val BarMenuOffset = DpOffset(x = 0.dp, y = 8.dp)
+
+/** The UIKit bar on iOS; never reached on Android, whose actual forwards to the simulated bar. */
+@Composable
+internal expect fun NativeGlassTopBar(spec: AdaptiveTopBarSpec, modifier: Modifier = Modifier)
+
+// Within the space M3 leaves under a bar title or a tab label, so the fade never reaches text.
+private val TranslucentFade = 12.dp
+
+@Composable
+private fun glassEdgeScrim(): Brush {
+    val surface = MaterialTheme.colorScheme.surface
+    return remember(surface) {
+        // Nearly opaque through the bar, so a title never sits on legible text, then a short fade at
+        // the bottom edge where content slides under.
+        Brush.verticalGradient(
+            0f to surface.copy(alpha = 0.97f),
+            0.8f to surface.copy(alpha = 0.93f),
+            1f to Color.Transparent,
+        )
+    }
+}
+
+@Composable
+internal fun SimulatedGlassTopBar(spec: AdaptiveTopBarSpec, modifier: Modifier = Modifier) {
+    val metrics = BarMetrics(
+        // The row's 16dp sides, the navigation control and its gap, the title's padding, the actions' gap.
+        fixed = 32.dp + (if (spec.navigation != null) ControlSize + 8.dp else 0.dp) + 16.dp + spec.title.glassEndPadding + 8.dp,
+        iconAction = 48.dp,
+        textActionPadding = TextActionPadding,
+        textActionMinWidth = TextActionMinWidth,
+        titleStyle = glassTitleStyle(),
+        labelStyle = MaterialTheme.typography.labelLarge,
+    )
+    TitleFirstBar(spec, metrics, modifier) { SimulatedGlassTopBarContent(it) }
+}
+
+@Composable
+private fun glassTitleStyle() = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+
+@Composable
+private fun SimulatedGlassTopBarContent(spec: AdaptiveTopBarSpec) {
+    val style = rememberGlassStyle() ?: return
+    val backdrop = LocalGlassBackdrop.current
+    var renaming by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .consumeUnhandledTouches()
+            .statusBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        spec.navigation?.let { nav ->
+            Box(Modifier.size(ControlSize).glassSurface(style, CircleShape, backdrop), contentAlignment = Alignment.Center) {
+                IconButton(onClick = nav.onClick) {
+                    Icon(nav.icon.vector, contentDescription = nav.contentDescription)
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+        }
+
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = when (spec.title.alignment) {
+                BarTitleAlignment.CENTER -> Alignment.Center
+                BarTitleAlignment.LEADING, BarTitleAlignment.FILL -> Alignment.CenterStart
+            },
+        ) {
+            val title = spec.title
+            val text = title.text
+            if (text != null) {
+                val onTitleClick = title.onClick ?: title.rename?.let { { renaming = true } }
+                val fill = title.alignment == BarTitleAlignment.FILL
+                Text(
+                    text = text,
+                    style = glassTitleStyle(),
+                    maxLines = title.lines,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = if (title.alignment == BarTitleAlignment.CENTER) TextAlign.Center else null,
+                    modifier = Modifier
+                        .then(if (fill) Modifier.fillMaxWidth() else Modifier)
+                        .then(
+                            if (title.style == BarTitleStyle.CHIP) {
+                                Modifier.glassSurface(style, CircleShape, backdrop)
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .then(if (onTitleClick != null) Modifier.clickable(onClick = onTitleClick) else Modifier)
+                        .then(
+                            // A title that may wrap keeps the controls' height and spends its padding on the second line.
+                            if (title.lines > 1) {
+                                Modifier
+                                    .padding(start = 16.dp, end = title.glassEndPadding)
+                                    .heightIn(min = ControlSize)
+                                    .wrapContentHeight()
+                            } else {
+                                Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                            },
+                        ),
+                )
+            }
+        }
+
+        if (spec.actions.isNotEmpty()) {
+            Spacer(Modifier.width(8.dp))
+            Row(
+                modifier = Modifier.glassSurface(style, CircleShape, backdrop, flare = spec.actionsFlare),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val colors = BarActionColors(
+                    default = MaterialTheme.colorScheme.onSurface,
+                    accent = MaterialTheme.colorScheme.primary,
+                    glass = true,
+                )
+                spec.actions.forEach { action -> BarActionButton(action, colors) }
+            }
+        }
+    }
+
+    spec.title.rename?.let { rename ->
+        if (renaming) BarRenameDialog(rename = rename, onDismiss = { renaming = false })
+    }
+}
+
+/**
+ * The lines the title is drawn on. A fixed title may take [BarTitle.maxLines] before it ellipsizes.
+ * A tappable title (the chat header's chip) stays on one, so it keeps the bar's height and its pill shape.
+ */
+internal val BarTitle.lines: Int
+    get() = if (style == BarTitleStyle.PLAIN && onClick == null && rename == null) maxLines else 1
+
+/**
+ * The glass title's end padding. A pill needs it; a plain leading title that may wrap gives it to
+ * the text, since the gap before the actions already separates them.
+ */
+private val BarTitle.glassEndPadding: Dp
+    get() = if (lines > 1 && alignment != BarTitleAlignment.CENTER) 0.dp else 16.dp
+
+/**
+ * The narrowest a title gets at 1.0x before text actions give up their labels. It grows by the
+ * title font's own scale rather than being given in sp: Android scales large text less than small
+ * text, so a 120sp floor would barely move.
+ */
+private val TitleFloor = 120.dp
+
+// TextButton's own minimum width and horizontal content padding, which both Compose renderers draw.
+private val TextActionMinWidth = ButtonDefaults.MinWidth
+private val TextActionPadding = ButtonDefaults.TextButtonContentPadding.let {
+    it.calculateStartPadding(LayoutDirection.Ltr) + it.calculateEndPadding(LayoutDirection.Ltr)
+}
+
+/** What a renderer spends besides the title, for [TitleFirstBar] to work out how much the title keeps. */
+private data class BarMetrics(
+    /** Insets, the navigation control and the gaps: everything but the actions and the title text. */
+    val fixed: Dp,
+    val iconAction: Dp,
+    val textActionPadding: Dp,
+    val textActionMinWidth: Dp,
+    val titleStyle: TextStyle,
+    val labelStyle: TextStyle,
+    /** False where the bar's text ignores the font scale: the UIKit bar keeps its items at 17pt. */
+    val scalesWithFont: Boolean = true,
+)
+
+private fun nativeBarMetrics(spec: AdaptiveTopBarSpec) = BarMetrics(
+    fixed = 32.dp + (if (spec.navigation != null) ControlSize + 8.dp else 0.dp) + 8.dp,
+    iconAction = ControlSize,
+    textActionPadding = 20.dp,
+    textActionMinWidth = ControlSize,
+    titleStyle = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
+    labelStyle = TextStyle(fontSize = 17.sp),
+    scalesWithFont = false,
+)
+
+/**
+ * Hands [content] the spec with its text actions drawn as their compact icons when their labels
+ * would squeeze a title that doesn't fit below [TitleFloor]. The title wins: it says which screen
+ * this is, and an icon described by the label still says what the action does.
+ */
+@Composable
+private fun TitleFirstBar(
+    spec: AdaptiveTopBarSpec,
+    metrics: BarMetrics,
+    modifier: Modifier = Modifier,
+    content: @Composable (AdaptiveTopBarSpec) -> Unit,
+) {
+    val measurer = rememberTextMeasurer()
+    val base = LocalDensity.current
+    val density = if (metrics.scalesWithFont) base else Density(base.density, 1f)
+    BoxWithConstraints(modifier) {
+        // Keyed on the strings, not the spec, whose lambdas are new on every recomposition.
+        val labels = spec.actions.map { (it as? BarAction.Text)?.label }
+        val compact = remember(spec.title.text, labels, maxWidth, density, metrics) {
+            labelsSqueezeTitle(spec, metrics, maxWidth, measurer, density)
+        }
+        content(if (compact) spec.withCompactTextActions() else spec)
+    }
+}
+
+private fun labelsSqueezeTitle(
+    spec: AdaptiveTopBarSpec,
+    metrics: BarMetrics,
+    barWidth: Dp,
+    measurer: TextMeasurer,
+    density: Density,
+): Boolean {
+    val title = spec.title.text
+    if (title == null || spec.actions.none { it is BarAction.Text }) return false
+    fun width(text: String, style: TextStyle): Dp = with(density) {
+        measurer.measure(text, style, maxLines = 1, softWrap = false, density = density).size.width.toDp()
+    }
+    val actions = spec.actions.fold(0.dp) { sum, action ->
+        sum + when (action) {
+            is BarAction.Text -> {
+                val icon = if (action.leadingIcon != null) TextActionIconSize + TextActionIconGap else 0.dp
+                maxOf(metrics.textActionMinWidth, width(action.label, metrics.labelStyle) + icon + metrics.textActionPadding)
+            }
+            else -> metrics.iconAction
+        }
+    }
+    val room = barWidth - metrics.fixed - actions
+    val titleSize = metrics.titleStyle.fontSize
+    val fontScale = with(density) { titleSize.toDp() / titleSize.value.dp }
+    return room < TitleFloor * fontScale && room < width(title, metrics.titleStyle)
+}
+
+internal fun AdaptiveTopBarSpec.withCompactTextActions() = copy(
+    actions = actions.map { action ->
+        if (action is BarAction.Text) {
+            BarAction.Icon(
+                id = action.id,
+                icon = action.compactIcon,
+                label = action.accessibilityLabel ?: action.label,
+                enabled = action.enabled,
+                onClick = action.onClick,
+            )
+        } else {
+            action
+        }
+    },
+)
+
+/** The text prompt behind [BarRename] on the Compose renderer; the native bar uses a UIAlertController. */
+@Composable
+internal fun BarRenameDialog(rename: BarRename, onDismiss: () -> Unit) {
+    var value by remember(rename.initial) { mutableStateOf(rename.initial) }
+    AdaptiveAlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(rename.dialogTitle) },
+        text = { AdaptiveOutlinedTextField(value = value, onValueChange = { value = it }, singleLine = true) },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val trimmed = value.trim()
+                    if (trimmed.isNotEmpty() && trimmed != rename.initial) rename.onCommit(trimmed)
+                    onDismiss()
+                },
+            ) { Text(rename.confirmLabel) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(rename.cancelLabel) } },
+    )
+}

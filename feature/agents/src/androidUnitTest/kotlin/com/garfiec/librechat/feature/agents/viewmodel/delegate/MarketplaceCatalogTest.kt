@@ -3,6 +3,7 @@ package com.garfiec.librechat.feature.agents.viewmodel.delegate
 import com.garfiec.librechat.core.common.ToolConstants
 import com.garfiec.librechat.core.model.SkillSummary
 import com.garfiec.librechat.core.model.mcp.McpTool
+import com.garfiec.librechat.core.ui.websearch.WebSearchKeysState
 import com.garfiec.librechat.feature.agents.AgentToolDisplayData
 import com.garfiec.librechat.feature.agents.components.model.MarketplaceKind
 import com.garfiec.librechat.feature.agents.viewmodel.AgentEditorUiState
@@ -43,6 +44,36 @@ class MarketplaceCatalogTest {
             MarketplaceKind.MCP,
             MarketplaceKind.SKILL,
         )
+    }
+
+    @Test
+    fun `builtins the role may not use are not listed`() {
+        val catalog = state()
+            .copy(canUseRunCode = false, canUseWebSearch = false, canUseFileSearch = false)
+            .marketplaceCatalog()
+
+        val builtinIds = catalog.filter { it.kind == MarketplaceKind.BUILTIN }.map { it.id }
+        assertThat(builtinIds).containsNoneOf(ToolConstants.EXECUTE_CODE, ToolConstants.WEB_SEARCH, ToolConstants.FILE_SEARCH)
+    }
+
+    @Test
+    fun `web search reads needs setup only while the user's own keys are missing`() {
+        val missing = WebSearchKeysState(authenticated = false, userCategories = listOf("providers"))
+        fun webSearch(keys: WebSearchKeysState?) =
+            state().copy(webSearchKeys = keys).marketplaceCatalog().single { it.id == ToolConstants.WEB_SEARCH }
+
+        assertThat(webSearch(missing).needsSetup).isTrue()
+        assertThat(webSearch(missing.copy(authenticated = true)).needsSetup).isFalse()
+        assertThat(webSearch(WebSearchKeysState(authenticated = true, userCategories = emptyList())).needsSetup).isFalse()
+        assertThat(webSearch(null).needsSetup).isFalse()
+    }
+
+    @Test
+    fun `file search follows its capability`() {
+        val builtinIds = state().copy(isFileSearchAvailable = false).marketplaceCatalog()
+            .filter { it.kind == MarketplaceKind.BUILTIN }.map { it.id }
+
+        assertThat(builtinIds).doesNotContain(ToolConstants.FILE_SEARCH)
     }
 
     @Test

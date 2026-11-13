@@ -1,12 +1,14 @@
 package com.garfiec.librechat.feature.agents.screen
 
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.DiscardChangesDialog
+import com.garfiec.librechat.core.ui.websearch.WebSearchKeysSheet
 import com.garfiec.librechat.feature.agents.components.AgentVersionHistory
 import com.garfiec.librechat.feature.agents.components.ToolAuthDialog
 import com.garfiec.librechat.feature.agents.components.ToolsMarketplaceDialog
@@ -20,7 +22,7 @@ import com.garfiec.librechat.feature.agents.viewmodel.delegate.marketplaceCatalo
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * The editor's modal layer: delete/duplicate confirmations, version history,
+ * The editor's modal layer: discard/delete/duplicate confirmations, version history,
  * tool selection, and the Code Interpreter API-key dialog. Each is gated on its
  * own state flag, so this composable renders nothing when no dialog is active.
  */
@@ -31,32 +33,17 @@ internal fun AgentEditorDialogs(
     viewModel: AgentEditorViewModel,
     showToolDialog: Boolean,
     onDismissToolDialog: () -> Unit,
-    onDiscardDraft: () -> Unit,
 ) {
     if (uiState.showDiscardConfirm) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissDiscardConfirmation,
-            title = { Text(stringResource(Res.string.discard_agent_changes_title)) },
-            text = { Text(stringResource(Res.string.discard_agent_changes_message)) },
-            confirmButton = {
-                TextButton(onClick = onDiscardDraft) {
-                    Text(
-                        stringResource(Res.string.discard),
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissDiscardConfirmation) {
-                    Text(stringResource(Res.string.stay))
-                }
-            },
+        DiscardChangesDialog(
+            onDiscard = viewModel::discardChanges,
+            onDismiss = viewModel::dismissDiscardConfirmation,
         )
     }
 
     // Delete confirmation dialog
     if (uiState.showDeleteConfirm) {
-        AlertDialog(
+        AdaptiveAlertDialog(
             onDismissRequest = viewModel::dismissDeleteConfirmation,
             title = { Text(stringResource(Res.string.delete_agent)) },
             text = { Text(stringResource(Res.string.delete_agent_editor_confirm)) },
@@ -75,7 +62,7 @@ internal fun AgentEditorDialogs(
 
     // Duplicate confirmation dialog
     if (uiState.showDuplicateConfirm) {
-        AlertDialog(
+        AdaptiveAlertDialog(
             onDismissRequest = viewModel::dismissDuplicateConfirmation,
             title = { Text(stringResource(Res.string.duplicate_agent)) },
             text = { Text(stringResource(Res.string.duplicate_agent_confirm)) },
@@ -120,6 +107,16 @@ internal fun AgentEditorDialogs(
             onToggleItem = viewModel::onMarketplaceItemToggled,
             onToggleFavorite = viewModel::onMarketplaceFavoriteToggled,
             onDismiss = onDismissToolDialog,
+        )
+    }
+
+    val webSearchKeys = uiState.webSearchKeys
+    if (uiState.showWebSearchKeysSheet && webSearchKeys != null) {
+        WebSearchKeysSheet(
+            keys = webSearchKeys,
+            onSave = viewModel::saveWebSearchKeys,
+            onRemove = viewModel::removeWebSearchKeys,
+            onDismiss = viewModel::dismissWebSearchKeys,
         )
     }
 

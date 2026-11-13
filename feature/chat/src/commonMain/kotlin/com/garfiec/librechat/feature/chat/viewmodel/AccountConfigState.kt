@@ -5,7 +5,9 @@ import com.garfiec.librechat.core.model.response.FileUploadConfig
 
 /**
  * Per-account server-derived config: the signed-in user's display fields (for message avatars)
- * and the server upload config. Written only by [ChatViewModel] on config/user load.
+ * and the server upload config. Written by `ChatConfigDelegate` on config/user load;
+ * [ChatViewModel] only rebuilds it on the new-chat reset and resolves the avatar URL in the
+ * exposed `uiState` combine.
  */
 @Immutable
 data class AccountConfigState(
@@ -20,7 +22,9 @@ data class AccountConfigState(
      * The user switched memories off for themselves (`user.personalization.memories == false`).
      * Distinct from the MEMORIES role permission: this is the user's own opt-out and it hides the
      * composer memory toggle even for a role that may use memory. False until the profile loads,
-     * and on servers with no `personalization` block (the server default is opted IN).
+     * and on servers with no `personalization` block (the server default is opted IN). Follows
+     * `MemoryRepository.memoriesEnabled` once that is known, so a change on the Memories page
+     * reaches a chat that is already open.
      */
     val memoriesOptedOut: Boolean = false,
 )

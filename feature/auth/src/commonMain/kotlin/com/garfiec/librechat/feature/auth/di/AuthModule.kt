@@ -1,47 +1,43 @@
 package com.garfiec.librechat.feature.auth.di
 
-import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
+import com.garfiec.librechat.feature.auth.diagnostics.DiagnosticLogExportViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.ForgotPasswordViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.LoginViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.RegisterViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.ResetPasswordViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.ServerUrlViewModel
+import com.garfiec.librechat.feature.auth.viewmodel.SsoLoginViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.TermsViewModel
+import com.garfiec.librechat.feature.auth.viewmodel.TwoFactorSetupViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.TwoFactorViewModel
 import com.garfiec.librechat.feature.auth.viewmodel.VerifyEmailViewModel
-import org.koin.core.module.Module
-import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
-expect val authPlatformModule: Module
-
+// No authPlatformModule: this module's platform seams (the `SsoWebView` composable,
+// `platformBlocksCleartextToDomainNames`) are expect/actuals the compiler links. An unimplemented
+// expect is a compile error, so they need no DI binding and no runtime check.
 val authModule = module {
-    includes(authPlatformModule)
-    singleOf(::PendingCredentialSaveHandoff)
     // Lambda form (not viewModelOf) for the addAccount mode flag the add-account nav entry passes
-    // via parametersOf — see the DeprecatedKoinApi note below.
-    @Suppress("DeprecatedKoinApi")
+    // via parametersOf — see the note below.
     viewModel { params ->
         ServerUrlViewModel(
             serverDataStore = get(),
             serverRepository = get(),
             configRepository = get(),
             accountSwitcher = get(),
-            settingsDataStore = get(),
+            accountRoster = get(),
             addAccount = params.getOrNull() ?: false,
         )
     }
     viewModelOf(::LoginViewModel)
     viewModelOf(::RegisterViewModel)
+    viewModelOf(::SsoLoginViewModel)
     // Koin's constructor-DSL (`viewModelOf`) wires every argument via `get()` and cannot read
     // values passed through `parametersOf`. The VMs below receive initial seeds (email, user
     // id, token, temp token) from the navigation layer via `parametersOf`, so the lambda-form
-    // `viewModel { params -> ... }` is the only DSL that works here. Detekt's `DeprecatedKoinApi`
-    // is a blanket stylistic rule, not a real `@Deprecated` API, so we suppress it in the
-    // narrow places it applies.
-    @Suppress("DeprecatedKoinApi")
+    // `viewModel { params -> ... }` is the only DSL that works here.
     viewModel { params ->
         VerifyEmailViewModel(
             userRepository = get(),
@@ -49,22 +45,28 @@ val authModule = module {
         )
     }
     viewModelOf(::ForgotPasswordViewModel)
-    @Suppress("DeprecatedKoinApi")
     viewModel { params ->
         ResetPasswordViewModel(
             authRepository = get(),
+            configRepository = get(),
+            accountSwitcher = get(),
+            serverDataStore = get(),
             initialUserId = params.getOrNull(),
             initialToken = params.getOrNull(),
         )
     }
-    @Suppress("DeprecatedKoinApi")
     viewModel { params ->
         TwoFactorViewModel(
             authRepository = get(),
-            serverDataStore = get(),
-            credentialSaveHandoff = get(),
             initialTempToken = params.getOrNull(),
         )
     }
+    viewModel { params ->
+        TwoFactorSetupViewModel(
+            authRepository = get(),
+            tempToken = params.get(),
+        )
+    }
     viewModelOf(::TermsViewModel)
+    viewModelOf(::DiagnosticLogExportViewModel)
 }

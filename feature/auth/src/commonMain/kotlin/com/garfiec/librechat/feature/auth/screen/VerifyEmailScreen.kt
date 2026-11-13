@@ -7,18 +7,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +23,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.garfiec.librechat.core.ui.components.AdaptiveButton
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedButton
+import com.garfiec.librechat.core.ui.components.AdaptiveScaffold
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBar
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBarSpec
+import com.garfiec.librechat.core.ui.components.topbar.BarIcons
+import com.garfiec.librechat.core.ui.components.topbar.BarNavigation
+import com.garfiec.librechat.core.ui.components.topbar.BarTitle
 import com.garfiec.librechat.feature.auth.resources.*
 import com.garfiec.librechat.feature.auth.resources.Res
 import com.garfiec.librechat.feature.auth.viewmodel.VerifyEmailViewModel
@@ -57,19 +58,15 @@ fun VerifyEmailScreen(
         }
     }
 
-    Scaffold(
+    AdaptiveScaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(Res.string.verify_email_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(Res.string.back),
-                        )
-                    }
-                },
+            AdaptiveTopBar(
+                spec = AdaptiveTopBarSpec(
+                    navigation = BarNavigation(BarIcons.Back, stringResource(Res.string.back), onBack),
+                    title = BarTitle(stringResource(Res.string.verify_email_title)),
+                    actions = emptyList(),
+                ),
             )
         },
     ) { innerPadding ->
@@ -77,6 +74,7 @@ fun VerifyEmailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -84,6 +82,7 @@ fun VerifyEmailScreen(
             Text(
                 text = stringResource(Res.string.check_your_email),
                 style = MaterialTheme.typography.headlineMedium,
+                textAlign = TextAlign.Center,
                 modifier = Modifier.semantics { heading() },
             )
 
@@ -137,16 +136,14 @@ fun VerifyEmailScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            OutlinedButton(
+            AdaptiveOutlinedButton(
                 onClick = viewModel::resendVerification,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !uiState.isLoading && uiState.resendCooldownSeconds == 0,
+                enabled = uiState.resendCooldownSeconds == 0,
+                loading = uiState.isLoading,
             ) {
                 if (uiState.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.height(20.dp),
-                        strokeWidth = 2.dp,
-                    )
+                    Text(stringResource(Res.string.progress_sending))
                 } else if (uiState.resendCooldownSeconds > 0) {
                     Text(stringResource(Res.string.resend_in_seconds, uiState.resendCooldownSeconds))
                 } else {
@@ -156,7 +153,7 @@ fun VerifyEmailScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
+            AdaptiveButton(
                 onClick = onBack,
                 modifier = Modifier.fillMaxWidth(),
             ) {

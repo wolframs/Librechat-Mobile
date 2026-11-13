@@ -1,14 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Drawer -->
-    <string name="settings">الإعدادات</string>
 
     <!-- Content descriptions -->
-    <string name="cd_back_to_conversations">العودة إلى المحادثات</string>
 
     <!-- Version mismatch dialog -->
     <string name="version_mismatch_title">عدم تطابق إصدار الخادم</string>
     <string name="version_mismatch_message">تم إنشاء هذا التطبيق لـ LibreChat v%1$s، لكن خادمك يعمل بالإصدار v%2$s. قد لا تعمل بعض الميزات بشكل صحيح.</string>
     <string name="dismiss">تجاهل</string>
     <string name="dont_warn_again">عدم التحذير مرة أخرى</string>
+    <string name="session_expired_title">تم تسجيل الخروج</string>
+    <string name="session_expired_message">انتهت صلاحية جلستك. سجّل الدخول مجددًا للمتابعة.</string>
+    <string name="session_expired_message_named">انتهت صلاحية جلستك على %1$s. سجّل الدخول مجددًا للمتابعة.</string>
+    <string name="session_expired_switched_named">انتهت صلاحية جلستك على %1$s، لذا تستخدم الآن %2$s. سجّل الدخول إلى %1$s مجددًا من مبدّل الحسابات.</string>
+    <string name="session_expired_switched">انتهت صلاحية جلستك، لذا تستخدم الآن %1$s. سجّل الدخول مجددًا من مبدّل الحسابات.</string>
+    <string name="session_banned_title">الحساب مقيّد</string>
+    <string name="session_banned_message">قيّد الخادم هذا الحساب مؤقتًا، مثلًا بسبب كثرة الطلبات أو مخالفة إحدى السياسات. حتى يُرفع القيد، لا يمكنك إرسال الرسائل أو استخدام الوكلاء أو رفع الملفات، وقد يُسجَّل خروجك. إن لم يُرفع، تواصل مع مسؤول الخادم.</string>
+    <string name="session_banned_message_named">قيّد الخادم الحساب %1$s مؤقتًا، مثلًا بسبب كثرة الطلبات أو مخالفة إحدى السياسات. حتى يُرفع القيد، لا يمكنك إرسال الرسائل أو استخدام الوكلاء أو رفع الملفات، وقد يُسجَّل خروجك. إن لم يُرفع، تواصل مع مسؤول الخادم.</string>
+    <string name="session_renewal_blocked_message">تعذّر تجديد الجلسة: رفض الخادم طلب التحديث.</string>
+    <string name="session_renewal_sign_in_again">تسجيل الدخول مرة أخرى</string>
+    <string name="shared_link_switch_title">تبديل الحساب؟</string>
+    <string name="shared_link_switch_message">هذه المحادثة المشتركة موجودة على %1$s، حيث سجّلت الدخول باسم %2$s. بدّل إلى ذلك الحساب لفتحها هنا.</string>
+    <string name="shared_link_switch_confirm">تبديل</string>
+    <string name="shared_link_open_in_browser">فتح في المتصفح</string>
 </resources>

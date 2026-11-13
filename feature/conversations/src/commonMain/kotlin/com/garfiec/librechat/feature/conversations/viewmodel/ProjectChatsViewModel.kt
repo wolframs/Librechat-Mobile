@@ -3,31 +3,45 @@ package com.garfiec.librechat.feature.conversations.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.datetime.DateGroup
 import com.garfiec.librechat.core.common.extensions.RelativeTimeReference
 import com.garfiec.librechat.core.common.extensions.dayBoundaryReferences
+import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.data.bookmarks.BookmarkPickerController
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.ConversationRepository
+import com.garfiec.librechat.core.data.repository.FileRepository
+import com.garfiec.librechat.core.data.repository.ProjectRepository
 import com.garfiec.librechat.core.data.repository.RoleRepository
-import com.garfiec.librechat.core.data.repository.ShareRepository
 import com.garfiec.librechat.core.data.repository.TagRepository
+import com.garfiec.librechat.core.data.repository.bookmarksEnabled
+import com.garfiec.librechat.core.data.share.ShareLinkController
+import com.garfiec.librechat.core.data.share.ShareLinkControllerFactory
+import com.garfiec.librechat.core.model.ChatProject
 import com.garfiec.librechat.core.model.Conversation
-import com.garfiec.librechat.core.model.ConversationTag
-import com.garfiec.librechat.core.model.SAVED_TAG
-import com.garfiec.librechat.core.model.permissions.Permission
-import com.garfiec.librechat.core.model.permissions.PermissionType
-import com.garfiec.librechat.core.model.permissions.hasAccessOrPermissive
+import com.garfiec.librechat.core.model.config.ChatProjectLimits
+import com.garfiec.librechat.core.model.permissions.canCreateSharedLinks
 import com.garfiec.librechat.feature.conversations.components.ConversationDisplayData
+import com.garfiec.librechat.feature.conversations.components.message
 import com.garfiec.librechat.feature.conversations.export.ConversationExporter
 import com.garfiec.librechat.feature.conversations.export.ExportFormat
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** Sort field for the project chat list (v0.8.7), matching the convos endpoint. */
@@ -38,32 +52,46 @@ enum class ProjectChatsSort(val sortBy: String) {
 
 @Immutable
 data class ProjectChatsUiState(
-    val groupedConversations: List<Pair<String, List<ConversationDisplayData>>> = emptyList(),
+    val groupedConversations: List<Pair<DateGroup, List<ConversationDisplayData>>> = emptyList(),
     val conversationCount: Int = 0,
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
-    val error: String? = null,
+    /** The last first page failed: with no chats held, the error state stands in for the list. */
+    val loadFailed: Boolean = false,
     val nextCursor: String? = null,
     val hasMore: Boolean = true,
     val sort: ProjectChatsSort = ProjectChatsSort.UPDATED,
-    val tags: List<ConversationTag> = emptyList(),
+    /** Bookmarks and the favorite star: BOOKMARKS USE and `interface.bookmarks`. */
     val bookmarksEnabled: Boolean = true,
+    /** Share shows on rows: the server has shared links on and the role may create them. */
+    val sharedLinksEnabled: Boolean = false,
+    /** The project itself, for the header and Edit. Null while loading, and always for Unassigned. */
+    val project: ChatProject? = null,
+    /** The server no longer has this project (deleted elsewhere): the page has nothing to show. */
+    val projectDeleted: Boolean = false,
+    /** The Edit sheet's description cap (`projects.maxDescriptionLength`). */
+    val descriptionLimit: Int = ChatProjectLimits.DEFAULT_MAX_DESCRIPTION_LENGTH,
 )
 
 /**
  * Project-filtered conversation list (v0.8.7 "Show all"). Network-direct: loads pages via
  * [ConversationRepository.getConversationsForProject] and holds them itself, since Room can't
- * filter by project. Mirrors [ConversationListViewModel]'s action surface so the screen can
+ * filter by project. Mirrors the drawer's action surface so the screen can
  * reuse the same row + action-sheet machinery.
  */
+private const val HTTP_NOT_FOUND = 404
+private const val PAGE_SIZE = 25
+
 class ProjectChatsViewModel(
     private val projectId: String,
     private val conversationRepository: ConversationRepository,
     private val tagRepository: TagRepository,
-    private val shareRepository: ShareRepository,
+    shareLinkControllerFactory: ShareLinkControllerFactory,
     private val conversationExporter: ConversationExporter,
     private val roleRepository: RoleRepository,
     private val configRepository: ConfigRepository,
+    private val projectRepository: ProjectRepository,
+    fileRepository: FileRepository,
     // Defaulted rather than Koin-provided: this one is built by an explicit `viewModel { }` block
     // (projectId arrives via parametersOf), so a default costs no DI wiring. Tests override it —
     // the production flow never completes, which would hang `advanceUntilIdle()`.
@@ -76,125 +104,241 @@ class ProjectChatsViewModel(
     private val _events = MutableSharedFlow<ConversationListEvent>()
     val events: SharedFlow<ConversationListEvent> = _events.asSharedFlow()
 
-    private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
+    private val pager = CursorPager(
+        scope = viewModelScope,
+        idOf = { it.conversationId.orEmpty() },
+    ) { cursor, limit ->
+        when (
+            val result = conversationRepository.getConversationsForProject(
+                projectId = projectId,
+                cursor = cursor,
+                limit = limit ?: PAGE_SIZE,
+                sortBy = _uiState.value.sort.sortBy,
+                sortDirection = "desc",
+            )
+        ) {
+            is Result.Success -> Result.Success(CursorPage(result.data.conversations, result.data.nextCursor))
+            is Result.Error -> result
+            is Result.Loading -> result
+        }
+    }
 
     private val actions = ConversationListActionsDelegate(
         scope = viewModelScope,
         events = _events,
         conversationRepository = conversationRepository,
         tagRepository = tagRepository,
-        shareRepository = shareRepository,
+        shareLinkControllerFactory = shareLinkControllerFactory,
         conversationExporter = conversationExporter,
         // Network-direct list: re-fetch after a mutation so the change is reflected.
-        onMutated = { refresh() },
+        onMutated = { pager.reloadQuietly() },
     )
 
+    /**
+     * A row's "Bookmarks…" checklist. A tick or create that fails says so in the sheet; a load that
+     * closes it, or a save that fails after it closed, surfaces as the screen's snackbar.
+     */
+    val bookmarkPicker = BookmarkPickerController(tagRepository, viewModelScope)
+
+    /** The loaded chats, each with its cached tags (the list endpoint sends none), for the star and its sheet. */
+    private val conversations: StateFlow<List<Conversation>> =
+        pager.items.withCachedTags(tagRepository).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val projectActions = ProjectActionsDelegate(
+        scope = viewModelScope,
+        projectRepository = projectRepository,
+        emitError = { _events.emit(ConversationListEvent.ShowErrorRes(it)) },
+    )
+
+    private val isRealProject = projectId != ChatProject.UNASSIGNED
+
+    private var projectJob: Job? = null
+
+    private val contextGate: StateFlow<ProjectContextGate> = combine(
+        configRepository.detectedBackend,
+        configRepository.startupConfig,
+        configRepository.endpointConfigs,
+        roleRepository.userPermissions,
+        ::projectContextGate,
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, ProjectContextGate())
+
+    /** The project's reference files (v0.8.9-rc1); loaded the first time the Files card can show. */
+    val projectFiles = ProjectFilesController(
+        scope = viewModelScope,
+        projectId = projectId,
+        projectRepository = projectRepository,
+        fileRepository = fileRepository,
+        maxFiles = { contextGate.value.limits.maxFiles },
+        // Each add or remove bumps the project's contextRevision: hold the answer, or the next
+        // instructions save would carry a stale revision and read as a conflict.
+        onProjectUpdated = { project -> _uiState.update { it.copy(project = project) } },
+        onProjectGone = { _uiState.update { it.copy(projectDeleted = true) } },
+    )
+
+    /**
+     * The Instructions and Files cards, or null while they can't show: an older server, the
+     * Unassigned filter, or a project not loaded yet.
+     */
+    val projectContext: StateFlow<ProjectContextUi?> = combine(
+        _uiState.map { it.project }.distinctUntilChanged(),
+        contextGate,
+        projectFiles.state,
+    ) { project, gate, files ->
+        if (project == null || !isRealProject || !gate.enabled) {
+            null
+        } else {
+            ProjectContextUi(
+                instructions = project.instructions.orEmpty(),
+                files = files.takeIf { gate.showFiles },
+                canUploadFiles = gate.canUploadFiles,
+                maxFiles = gate.limits.maxFiles,
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     init {
+        observePaging()
         load()
+        loadProject()
         observeGrouped()
-        observeTags()
         observePermissions()
+        observeFilesGate()
+        viewModelScope.launch {
+            bookmarkPicker.failures.collect { _events.emit(ConversationListEvent.ShowErrorRes(it.message)) }
+        }
+        // Bookmarks turned off (role or server config) while the checklist was up: take it down.
+        viewModelScope.launch {
+            uiState.map { it.bookmarksEnabled }.distinctUntilChanged().collect { enabled ->
+                if (!enabled) bookmarkPicker.close()
+            }
+        }
+        viewModelScope.launch {
+            projectRepository.revision.drop(1).collect {
+                loadProject()
+                pager.reloadQuietly()
+            }
+        }
     }
+
+    private fun loadProject() {
+        if (!isRealProject) return
+        projectJob?.cancel()
+        projectJob = viewModelScope.launch {
+            when (val result = projectRepository.getProject(projectId)) {
+                is Result.Success -> _uiState.value = _uiState.value.copy(project = result.data)
+                is Result.Error ->
+                    if ((result.exception as? ApiException)?.statusCode == HTTP_NOT_FOUND) {
+                        _uiState.value = _uiState.value.copy(projectDeleted = true)
+                    } else {
+                        Logger.w(result.exception) { "Failed to load project $projectId" }
+                    }
+                is Result.Loading -> Unit
+            }
+        }
+    }
+
+    /**
+     * Back from a chat started here: Nav3 kept this ViewModel alive and nothing else reloads it, so
+     * the new chat would be missing. Skips while a first page is already loading.
+     *
+     * The project itself is read again too: back from the instructions editor after a save that
+     * found the project gone, this is what closes the page.
+     */
+    fun refreshOnReturn() {
+        if (isRealProject && projectJob?.isActive != true && !_uiState.value.projectDeleted) loadProject()
+        if (!pager.isLoadingFirstPage) pager.reloadQuietly()
+    }
+
+    /** Loads the files the first time the Files card can show (feature on, RAG on, project loaded). */
+    private fun observeFilesGate() {
+        if (!isRealProject) return
+        viewModelScope.launch {
+            combine(contextGate.map { it.showFiles }, _uiState.map { it.project != null }) { show, loaded ->
+                show && loaded
+            }.distinctUntilChanged().collect { canShow ->
+                if (canShow && !projectFiles.hasLoaded) projectFiles.load()
+            }
+        }
+        viewModelScope.launch {
+            contextGate.map { it.limits.maxDescriptionLength }.distinctUntilChanged().collect { limit ->
+                _uiState.update { it.copy(descriptionLimit = limit) }
+            }
+        }
+    }
+
+    /** The project failed to load (offline, say): a pull or a return tries again. */
+    private fun retryProjectIfMissing() {
+        val state = _uiState.value
+        if (state.project == null && !state.projectDeleted && projectJob?.isActive != true) loadProject()
+    }
+
+    fun editProject(name: String, description: String, onResult: (saved: Boolean) -> Unit) =
+        projectActions.edit(projectId, name, description, onResult)
 
     private fun observeGrouped() {
         viewModelScope.launch {
             // dayBoundaryReferences() re-groups at local midnight: date sections are clock-dependent
             // and membership (not just the label) changes when the date rolls over.
             combine(
-                _conversations,
+                conversations,
                 configRepository.endpointConfigs,
+                configRepository.serverUrl,
                 dayBoundaries,
-            ) { convos, configs, reference ->
-                groupConversationsByDate(convos, configs, reference) to convos.size
+            ) { convos, configs, serverUrl, reference ->
+                groupConversationsByDate(convos, configs, serverUrl, reference) to convos.size
             }.collect { (grouped, count) ->
                 _uiState.value = _uiState.value.copy(groupedConversations = grouped, conversationCount = count)
             }
         }
     }
 
-    private fun observeTags() {
-        viewModelScope.launch {
-            tagRepository.observeTags().collect { tags ->
-                _uiState.value = _uiState.value.copy(tags = tags.filter { it.count > 0 && it.tag != SAVED_TAG })
-            }
-        }
-    }
-
     private fun observePermissions() {
         viewModelScope.launch {
-            roleRepository.userPermissions.collect { role ->
-                _uiState.value = _uiState.value.copy(
-                    bookmarksEnabled = role.hasAccessOrPermissive(PermissionType.BOOKMARKS, Permission.USE),
-                )
+            combine(roleRepository.userPermissions, configRepository.startupConfig) { role, config ->
+                role to config
+            }.collect { (role, config) ->
+                _uiState.update {
+                    it.copy(
+                        bookmarksEnabled = bookmarksEnabled(role, config?.interfaceConfig),
+                        sharedLinksEnabled = role.canCreateSharedLinks(config?.sharedLinksEnabled ?: false),
+                    )
+                }
             }
         }
     }
 
     fun getConversation(conversationId: String): Conversation? =
-        _conversations.value.firstOrNull { it.conversationId == conversationId }
+        conversations.value.firstOrNull { it.conversationId == conversationId }
 
-    fun load() {
+    private fun observePaging() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            fetchPage(cursor = null, replace = true)
-            _uiState.value = _uiState.value.copy(isLoading = false)
+            pager.state.collect { paging ->
+                _uiState.value = _uiState.value.copy(
+                    isLoading = paging.isLoading,
+                    isRefreshing = paging.isRefreshing,
+                    loadFailed = paging.firstPageFailed,
+                    nextCursor = paging.nextCursor,
+                    hasMore = paging.nextCursor != null,
+                )
+            }
         }
     }
 
-    fun loadMore() {
-        val cursor = _uiState.value.nextCursor ?: return
-        // Guard against BOTH flags: a refresh (replace=true) running concurrently with this append
-        // would resolve a stale cursor against a just-replaced list and could duplicate ids — which
-        // crashes the LazyColumn's keyed items().
-        if (_uiState.value.isLoading || _uiState.value.isRefreshing) return
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            fetchPage(cursor = cursor, replace = false)
-            _uiState.value = _uiState.value.copy(isLoading = false)
-        }
-    }
+    fun load() = pager.load()
+
+    fun loadMore() = pager.loadMore()
 
     fun refresh() {
         if (_uiState.value.isRefreshing) return
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isRefreshing = true)
-            fetchPage(cursor = null, replace = true)
-            _uiState.value = _uiState.value.copy(isRefreshing = false)
-        }
+        retryProjectIfMissing()
+        if (contextGate.value.showFiles && projectFiles.hasLoaded) projectFiles.load()
+        pager.refresh()
     }
 
     fun setSort(sort: ProjectChatsSort) {
         if (sort == _uiState.value.sort) return
         _uiState.value = _uiState.value.copy(sort = sort)
         load()
-    }
-
-    private suspend fun fetchPage(cursor: String?, replace: Boolean) {
-        when (
-            val result = conversationRepository.getConversationsForProject(
-                projectId = projectId,
-                cursor = cursor,
-                sortBy = _uiState.value.sort.sortBy,
-                sortDirection = "desc",
-            )
-        ) {
-            is Result.Success -> {
-                // distinctBy on append: defense-in-depth against a page boundary that reorders under
-                // the `updatedAt` sort handing back an id already held — duplicate keys crash the list.
-                _conversations.value =
-                    if (replace) {
-                        result.data.conversations
-                    } else {
-                        (_conversations.value + result.data.conversations).distinctBy { it.conversationId }
-                    }
-                _uiState.value = _uiState.value.copy(
-                    nextCursor = result.data.nextCursor,
-                    hasMore = result.data.nextCursor != null,
-                )
-            }
-            is Result.Error -> _uiState.value = _uiState.value.copy(error = result.message)
-            is Result.Loading -> Unit
-        }
     }
 
     fun toggleFavorite(conversation: Conversation) = actions.toggleFavorite(conversation)
@@ -205,18 +349,21 @@ class ProjectChatsViewModel(
 
     fun deleteConversation(id: String) = actions.deleteConversation(id)
 
+    val shareLink: ShareLinkController get() = actions.shareLink
+
     fun shareConversation(conversationId: String) = actions.shareConversation(conversationId)
+
+    fun closeShareSheet() = actions.closeShareSheet()
 
     fun duplicateConversation(conversationId: String, title: String?) =
         actions.duplicateConversation(conversationId, title)
 
-    fun updateConversationTags(conversation: Conversation, userTags: List<String>) =
-        actions.updateConversationTags(conversation, userTags)
+    /** Opens the bookmark checklist on [conversationId]: its bookmarks are read from the server first. */
+    fun openBookmarks(conversationId: String) {
+        if (!_uiState.value.bookmarksEnabled) return
+        bookmarkPicker.open(conversationId)
+    }
 
     fun exportConversation(conversationId: String, title: String?, format: ExportFormat) =
         actions.exportConversation(conversationId, title, format)
-
-    fun dismissError() {
-        _uiState.value = _uiState.value.copy(error = null)
-    }
 }

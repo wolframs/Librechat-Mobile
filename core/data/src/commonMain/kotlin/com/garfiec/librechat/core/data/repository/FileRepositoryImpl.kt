@@ -1,22 +1,38 @@
 package com.garfiec.librechat.core.data.repository
 
+import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.common.BackendVersion
 import com.garfiec.librechat.core.common.FeatureSupport
+import com.garfiec.librechat.core.common.di.ioDispatcher
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
-import com.garfiec.librechat.core.common.result.onApiDispatcher
+import com.garfiec.librechat.core.common.result.apiCallCatching
 import com.garfiec.librechat.core.common.result.safeApiCall
+import com.garfiec.librechat.core.data.pdf.PDF_DECRYPTION_UNAVAILABLE_MESSAGE
+import com.garfiec.librechat.core.data.pdf.PDF_INCORRECT_PASSWORD_MESSAGE
+import com.garfiec.librechat.core.data.pdf.PDF_PASSWORD_PROTECTED_MESSAGE
+import com.garfiec.librechat.core.data.pdf.PdfDecryptionUnavailableException
+import com.garfiec.librechat.core.data.pdf.PdfNormalizeResult
+import com.garfiec.librechat.core.data.pdf.PdfNormalizer
+import com.garfiec.librechat.core.data.pdf.PdfPasswordProtectedException
+import com.garfiec.librechat.core.data.pdf.hasEncryptKey
+import com.garfiec.librechat.core.data.pdf.isPdfUpload
+import com.garfiec.librechat.core.logging.redact.LogRedactor
+import com.garfiec.librechat.core.model.Attachment
 import com.garfiec.librechat.core.model.FileObject
+import com.garfiec.librechat.core.model.files.codeDownloadUrl
+import com.garfiec.librechat.core.model.files.isCodeDownloadFallback
 import com.garfiec.librechat.core.model.request.DeleteFileEntry
 import com.garfiec.librechat.core.model.request.DeleteFilesRequest
+import com.garfiec.librechat.core.model.response.DeleteFilesResponse
 import com.garfiec.librechat.core.model.response.FilePreviewResponse
 import com.garfiec.librechat.core.model.response.FileUploadConfig
 import com.garfiec.librechat.core.network.api.FILES_USAGE_MAX_IDS
 import com.garfiec.librechat.core.network.api.FilesApi
 import com.garfiec.librechat.core.network.api.FilesExtApi
-import com.garfiec.librechat.core.network.upload.StreamingUploadSource
-import kotlinx.coroutines.CancellationException
+import com.garfiec.librechat.core.network.client.ServerUrlProvider
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.concurrent.Volatile
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -26,6 +42,8 @@ class FileRepositoryImpl(
     private val filesApi: FilesApi,
     private val filesExtApi: FilesExtApi,
     private val configRepository: ConfigRepository,
+    private val pdfNormalizer: PdfNormalizer,
+    private val serverUrlProvider: ServerUrlProvider,
 ) : FileRepository {
 
     override suspend fun getFiles(): Result<List<FileObject>> =
@@ -40,45 +58,14 @@ class FileRepositoryImpl(
         type: String,
         onProgress: ((Float) -> Unit)?,
     ): Result<FileObject> =
-        safeApiCall {
+        withUploadBytes(bytes, filename, type, pdfPassword = null) { uploadBytes ->
             filesApi.uploadFile(
-                bytes = bytes,
+                bytes = uploadBytes,
                 filename = filename,
                 type = type,
                 // file_id and endpoint are required by the backend; provide defaults
                 fileId = Uuid.random().toString(),
                 endpoint = "agents",
-                onProgress = onProgress,
-            )
-        }
-
-    override suspend fun uploadFile(
-        source: StreamingUploadSource,
-        filename: String,
-        type: String,
-        fileId: String?,
-        endpoint: String?,
-        model: String?,
-        agentId: String?,
-        toolResource: String?,
-        messageFile: Boolean?,
-        width: Int?,
-        height: Int?,
-        onProgress: ((Float) -> Unit)?,
-    ): Result<FileObject> =
-        safeApiCall {
-            filesApi.uploadFile(
-                source = source,
-                filename = filename,
-                type = type,
-                fileId = fileId ?: Uuid.random().toString(),
-                endpoint = endpoint,
-                model = model,
-                agentId = agentId,
-                toolResource = toolResource,
-                messageFile = messageFile,
-                width = width,
-                height = height,
                 onProgress = onProgress,
             )
         }
@@ -96,10 +83,11 @@ class FileRepositoryImpl(
         width: Int?,
         height: Int?,
         onProgress: ((Float) -> Unit)?,
+        pdfPassword: String?,
     ): Result<FileObject> =
-        safeApiCall {
+        withUploadBytes(bytes, filename, type, pdfPassword) { uploadBytes ->
             filesApi.uploadFile(
-                bytes = bytes,
+                bytes = uploadBytes,
                 filename = filename,
                 type = type,
                 fileId = fileId ?: Uuid.random().toString(),
@@ -114,20 +102,125 @@ class FileRepositoryImpl(
             )
         }
 
+    /**
+     * Uploads what the server will accept: an encrypted PDF goes up without its encryption layer,
+     * because the server refuses any encrypted PDF for Anthropic at send time.
+     *
+     * A copy-protected PDF (empty user password) is decrypted silently, and fails open — a broken
+     * normalizer must never block an upload that would otherwise work. A PDF that needs a password
+     * is refused with [PdfPasswordProtectedException] until the caller supplies [pdfPassword];
+     * with one, a failure is reported rather than uploading a file nobody can read.
+     */
+    private suspend fun withUploadBytes(
+        bytes: ByteArray,
+        filename: String,
+        type: String,
+        pdfPassword: String?,
+        upload: suspend (ByteArray) -> FileObject,
+    ): Result<FileObject> =
+        when (val prepared = withContext(ioDispatcher) { preparePdf(bytes, filename, type, pdfPassword) }) {
+            is PreparedUpload.Send -> safeApiCall { upload(prepared.bytes) }
+            is PreparedUpload.Refuse -> prepared.error
+        }
+
+    private sealed interface PreparedUpload {
+        class Send(val bytes: ByteArray) : PreparedUpload
+        class Refuse(val error: Result.Error) : PreparedUpload
+    }
+
+    // Never log pdfPassword.
+    @Suppress("TooGenericExceptionCaught")
+    private fun preparePdf(bytes: ByteArray, filename: String, type: String, pdfPassword: String?): PreparedUpload {
+        if (!isPdfUpload(type, filename, bytes) || !hasEncryptKey(bytes)) return PreparedUpload.Send(bytes)
+        val result = try {
+            pdfNormalizer.normalize(bytes, pdfPassword)
+        } catch (e: Exception) {
+            PdfNormalizeResult.Failed(e)
+        }
+        val decryptedBytes = (result as? PdfNormalizeResult.Decrypted)?.bytes?.takeUnless(::hasEncryptKey)
+        val logName = LogRedactor.redactFileName(filename)
+        return when {
+            result == PdfNormalizeResult.Unchanged -> PreparedUpload.Send(bytes)
+            decryptedBytes != null -> {
+                Logger.i { "Removed PDF encryption from $logName (${bytes.size} -> ${decryptedBytes.size} bytes)" }
+                PreparedUpload.Send(decryptedBytes)
+            }
+            result == PdfNormalizeResult.PasswordUnsupported -> {
+                Logger.i { "PDF upload refused: $logName needs a password this device cannot decrypt with" }
+                PreparedUpload.Refuse(
+                    Result.Error(
+                        exception = PdfDecryptionUnavailableException(cause = null),
+                        message = PDF_DECRYPTION_UNAVAILABLE_MESSAGE,
+                    ),
+                )
+            }
+            result == PdfNormalizeResult.NeedsPassword -> {
+                Logger.i { "PDF upload held: $logName needs a password (retry=${pdfPassword != null})" }
+                val incorrect = pdfPassword != null
+                PreparedUpload.Refuse(
+                    Result.Error(
+                        exception = PdfPasswordProtectedException(incorrectPassword = incorrect),
+                        message = if (incorrect) PDF_INCORRECT_PASSWORD_MESSAGE else PDF_PASSWORD_PROTECTED_MESSAGE,
+                    ),
+                )
+            }
+            pdfPassword != null -> {
+                val cause = (result as? PdfNormalizeResult.Failed)?.cause
+                Logger.w { "PDF could not be decrypted with its password: $logName ($cause)" }
+                PreparedUpload.Refuse(
+                    Result.Error(
+                        exception = PdfDecryptionUnavailableException(cause),
+                        message = PDF_DECRYPTION_UNAVAILABLE_MESSAGE,
+                    ),
+                )
+            }
+            else -> {
+                Logger.w { "PDF left encrypted for $logName (${(result as? PdfNormalizeResult.Failed)?.cause}); uploading original" }
+                PreparedUpload.Send(bytes)
+            }
+        }
+    }
+
+    /**
+     * Deletes [files], reporting every entry the route would silently discard as a FAILURE.
+     *
+     * `DELETE /api/files` drops each entry with a falsy `filepath` before it looks at anything
+     * else, and answers 204 with no body when that leaves nothing — so an unnameable entry is
+     * never listed in `failedFileIds` and a caller diffing "asked minus failed" reads it as
+     * deleted. Enforced here rather than at each caller because the rule belongs to the route —
+     * every caller that diffs its own request against `failedFileIds` needs it, and none of them
+     * can see that the route dropped the entry.
+     */
     override suspend fun deleteFiles(
         files: List<DeleteFileEntry>,
         agentId: String?,
         toolResource: String?,
-    ): Result<Unit> =
-        safeApiCall {
+    ): Result<DeleteFilesResponse> {
+        val (deletable, unnameable) = files.partition { it.filepath.isNotBlank() }
+        if (deletable.isEmpty()) {
+            return Result.Success(
+                DeleteFilesResponse(failedFileIds = unnameable.map { it.fileId }),
+            )
+        }
+        val result = safeApiCall {
             filesApi.deleteFiles(
                 DeleteFilesRequest(
-                    files = files,
+                    files = deletable,
                     agentId = agentId,
                     toolResource = toolResource,
                 ),
             )
         }
+        if (unnameable.isEmpty()) return result
+        return when (result) {
+            is Result.Success -> Result.Success(
+                result.data.copy(
+                    failedFileIds = result.data.failedFileIds + unnameable.map { it.fileId },
+                ),
+            )
+            else -> result
+        }
+    }
 
     /**
      * Prefers the direct/presigned download URL (v0.8.6 — S3/CloudFront) so the
@@ -140,46 +233,76 @@ class FileRepositoryImpl(
      * URL attempt's failures are swallowed (they're expected on non-CDN servers).
      */
     override suspend fun downloadFile(userId: String, fileId: String): Result<ByteArray> {
-        try {
-            // onApiDispatcher, not safeApiCall: safeApiCall would log every one of these expected
-            // failures at error level. The dispatcher hop is still required (#326).
-            return onApiDispatcher {
-                val urlResponse = filesApi.getDownloadUrl(userId, fileId)
-                Result.Success(filesApi.downloadFromUrl(urlResponse.url))
+        val direct = if (directDownloadUnsupported) null else directDownload(userId, fileId)
+        return direct ?: safeApiCall { filesApi.downloadFile(userId, fileId) }
+    }
+
+    /** The presigned-URL leg of [downloadFile]; null means "use the proxy". */
+    private suspend fun directDownload(userId: String, fileId: String): Result<ByteArray>? {
+        // Not safeApiCall: it would log every one of these expected failures at error level.
+        val url = apiCallCatching<String?>({ filesApi.getDownloadUrl(userId, fileId).url }) { e ->
+            if ((e as? ApiException)?.statusCode in DIRECT_DOWNLOAD_UNSUPPORTED_STATUSES) {
+                directDownloadUnsupported = true
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            // Expected on local-storage / OpenAI-storage / non-CDN servers, or a
-            // transient CDN failure — fall through to the server-proxy download.
+            null
+        } ?: return null
+        // A CDN failure says nothing about the route, so it falls back without latching.
+        return apiCallCatching<Result<ByteArray>?>({ Result.Success(filesApi.downloadFromUrl(url)) }) { null }
+    }
+
+    /**
+     * Set once `download-url` answers 501 (this server's storage has no direct-URL strategy, e.g.
+     * local) or 405, so later downloads on the same server go straight to the proxy instead of
+     * paying a round trip that cannot succeed. A 400 is per file (OpenAI storage without a model)
+     * and a 404 can be a missing file, so neither latches. In memory only; reset by [clear].
+     */
+    @Volatile
+    private var directDownloadUnsupported = false
+
+    override suspend fun downloadAttachment(attachment: Attachment, userId: String?): Result<ByteArray> {
+        val filepath = attachment.filepath
+        if (filepath != null && attachment.isCodeDownloadFallback) {
+            val url = codeDownloadUrl(filepath, serverUrlProvider.awaitBaseUrl())
+                ?: return Result.Error(IllegalStateException("No server to download $filepath from"))
+            return safeApiCall { filesApi.downloadFromUrl(url) }
         }
-        return safeApiCall { filesApi.downloadFile(userId, fileId) }
+        val fileId = attachment.fileId
+            ?: return Result.Error(IllegalStateException("Attachment has no file id or download route"))
+        if (userId.isNullOrBlank()) return Result.Error(IllegalStateException("No user to download $fileId as"))
+        return downloadFile(userId, fileId)
     }
 
     override suspend fun getAgentFiles(agentId: String): Result<List<FileObject>> =
         safeApiCall { filesExtApi.getAgentFiles(agentId) }
 
     /**
-     * Polls the preview endpoint until terminal or the attempt budget is spent.
-     * Budget (~POLL_MAX_ATTEMPTS × POLL_INTERVAL_MS ≈ 60s) brackets the server's
-     * lazy-sweep cutoff, so a stuck-pending record resolves to `failed` within
-     * the loop rather than spinning forever. A non-terminal final poll is still
-     * returned as Success(status="pending") — the caller decides how to surface
-     * a slow/never-resolving preview. Transport errors surface via [safeApiCall].
+     * Polls the preview endpoint until terminal, until [POLL_MAX_CONSECUTIVE_ERRORS] requests in a
+     * row fail, or until [POLL_MAX_ATTEMPTS] requests are spent. The interval and the error cap are
+     * upstream's (`previewRefetchInterval`); the budget (~75 s) is ours and brackets the server's
+     * 60 s extraction timeout, after which its lazy sweep reports a stuck record as `failed`.
+     *
+     * One failed request does not end the loop: the poll runs after the stream has closed, often
+     * while the app is changing networks. A run of failures returns the last [Result.Error]; a
+     * budget spent while still pending returns that `pending` record. The caller decides how to
+     * show both.
      */
     override suspend fun pollFilePreview(fileId: String): Result<FilePreviewResponse> {
-        var attempt = 0
-        while (true) {
-            when (val result = safeApiCall { filesApi.getFilePreview(fileId) }) {
+        var consecutiveErrors = 0
+        var last: Result<FilePreviewResponse> = Result.Error(IllegalStateException("No preview poll ran"))
+        repeat(POLL_MAX_ATTEMPTS) { attempt ->
+            if (attempt > 0) delay(POLL_INTERVAL_MS)
+            val result = safeApiCall { filesApi.getFilePreview(fileId) }
+            last = result
+            when (result) {
                 is Result.Success -> {
-                    if (result.data.isTerminal || attempt >= POLL_MAX_ATTEMPTS) return result
+                    if (result.data.isTerminal) return result
+                    consecutiveErrors = 0
                 }
-                is Result.Error -> return result
+                is Result.Error -> if (++consecutiveErrors >= POLL_MAX_CONSECUTIVE_ERRORS) return result
                 is Result.Loading -> { /* safeApiCall never emits Loading */ }
             }
-            attempt++
-            delay(POLL_INTERVAL_MS)
         }
+        return last
     }
 
     /**
@@ -244,11 +367,14 @@ class FileRepositoryImpl(
 
     override fun clear() {
         usageHoldProbeVerdict = null
+        directDownloadUnsupported = false
     }
 
     private companion object {
-        const val POLL_INTERVAL_MS = 2_000L
+        const val POLL_INTERVAL_MS = 2_500L
         const val POLL_MAX_ATTEMPTS = 30
+        const val POLL_MAX_CONSECUTIVE_ERRORS = 5
         const val HTTP_NOT_FOUND = 404
+        val DIRECT_DOWNLOAD_UNSUPPORTED_STATUSES = setOf(501, 405)
     }
 }

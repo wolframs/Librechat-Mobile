@@ -2,6 +2,9 @@ package com.garfiec.librechat.core.network.client
 
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.identity.currentAccountId
+import com.garfiec.librechat.core.common.identity.deriveServerId
+import com.garfiec.librechat.core.model.auth.OpenIdMarkers
+import com.garfiec.librechat.core.model.auth.RequestAuth
 import io.ktor.util.AttributeKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -28,6 +31,7 @@ data class RequestIdentity(
     val bearer: String?,
     val isPending: Boolean = false,
     val customHeaders: Map<String, String> = emptyMap(),
+    val openId: OpenIdMarkers? = null,
 ) {
     /**
      * Explicit, not the generated one: both [bearer] and [customHeaders] are credentials, and the
@@ -64,18 +68,22 @@ data class RequestIdentity(
 class PendingRequestIdentity(
     private val baseUrl: String,
     private val headers: suspend () -> Map<String, String> = { emptyMap() },
-    private val bearer: suspend () -> String?,
+    private val auth: (suspend () -> RequestAuth)? = null,
+    private val bearer: suspend () -> String? = { null },
 ) : AbstractCoroutineContextElement(PendingRequestIdentity) {
     companion object Key : CoroutineContext.Key<PendingRequestIdentity>
 
-    suspend fun identity(): RequestIdentity =
-        RequestIdentity(
+    suspend fun identity(): RequestIdentity {
+        val credentials = auth?.invoke() ?: RequestAuth(bearer())
+        return RequestIdentity(
             baseUrl = baseUrl,
             accountId = null,
-            bearer = bearer(),
+            bearer = credentials.bearer,
             isPending = true,
             customHeaders = headers(),
+            openId = credentials.openId,
         )
+    }
 }
 
 /** Attribute carrying the per-request [RequestIdentity] snapshot from the barrier to the URL/auth phases. */
@@ -125,9 +133,9 @@ class SwitchGate(
      *
      * [renewIfStale] opts this snapshot into proactive token renewal
      * ([TokenManager.ensureFreshAccessToken]) — only the transports pass it. It is **not** the default
-     * because `captureSnapshot` has non-transport callers for which a renewal is wrong rather than
-     * merely wasteful: logout pins an identity before revoking the session, and refreshing a session
-     * we are about to destroy adds a round trip to it and rotates a token nobody will use.
+     * because `captureSnapshot` has non-transport callers that decide for themselves whether a renewal
+     * is worth it: logout pins an identity here and renews only once it knows the account holds a
+     * refresh token to revoke with.
      */
     suspend fun captureSnapshot(renewIfStale: Boolean = false): RequestIdentity {
         coroutineContext[PendingRequestIdentity]?.let { return it.identity() }
@@ -146,17 +154,23 @@ class SwitchGate(
         val snapshot = lock.withLock {
             val accountId = activeAccountProvider.currentAccountId()?.value
             val baseUrl = serverUrlProvider.getBaseUrl()
+            // Account ids include the issuing deployment's server id. Atomic reads alone cannot
+            // protect against a URL changed outside withSwitch (for example, a stale sign-in route).
+            // Refuse the request BEFORE reading credentials or attempting proactive/reactive refresh.
+            check(accountId == null ||
+                accountId.substringBefore(':') == runCatching { deriveServerId(baseUrl).value }.getOrNull()
+            ) {
+                "Active account does not belong to the configured server"
+            }
+            val auth = tokenManager.getRequestAuthFor(accountId)
             RequestIdentity(
                 baseUrl = baseUrl,
                 accountId = accountId,
                 // Explicit branch (not `?: fallback`): a resolved account with an empty keyed slot
                 // must yield a null bearer, never fall through to the live cache — during sign-in
                 // staging the cache holds the *staged* account's token.
-                bearer = if (accountId != null) {
-                    tokenManager.getAccessTokenFor(accountId)
-                } else {
-                    tokenManager.getAccessToken()
-                },
+                bearer = auth.bearer,
+                openId = auth.openId,
                 // Read against the snapshot's own base URL, under the same lock, so the headers can't
                 // pair with a different server than the URL and bearer did.
                 customHeaders = serverHeadersProvider.headersFor(baseUrl),
@@ -176,12 +190,14 @@ class SwitchGate(
         // A switch landing between the snapshot and the renewal is harmless: this request is already
         // pinned to that account, refreshAccessTokenFor writes only that account's keyed slot, and a
         // switched-away account's tokens are retained.
-        val renewed = tokenManager.ensureFreshAccessToken(
+        tokenManager.ensureFreshAccessToken(
             accountId = snapshot.accountId,
             baseUrl = snapshot.baseUrl,
             currentAccessToken = snapshot.bearer,
         )
-        return if (renewed == snapshot.bearer) snapshot else snapshot.copy(bearer = renewed)
+        val auth = tokenManager.getRequestAuthFor(snapshot.accountId)
+        // Read both fields again even when reuse returned the same bearer with a new marker.
+        return snapshot.copy(bearer = auth.bearer, openId = auth.openId)
     }
 
     /**
@@ -191,6 +207,9 @@ class SwitchGate(
      * snapshotted, whose tokens are retained). [flip] must not perform network I/O.
      */
     suspend fun <T> withSwitch(flip: suspend () -> T): T {
+        // A cold-start seed must not re-publish its old binding after a sign-in transition cleared it.
+        // Await before taking the lock; seeding drives the providers this gate protects.
+        accountReadyGate?.awaitReady()
         open.value = false
         return try {
             lock.withLock { flip() }

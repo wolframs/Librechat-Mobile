@@ -4,7 +4,10 @@ import com.garfiec.librechat.core.model.ContentType
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.ToolCallType
 import com.garfiec.librechat.core.model.content.AgentToolCall
+import com.garfiec.librechat.core.model.content.CitationClipboard
+import com.garfiec.librechat.core.model.content.CitationIndex
 import com.garfiec.librechat.core.model.content.MessageContentPart
+import com.garfiec.librechat.core.model.content.stripOpaqueReasoning
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -21,18 +24,23 @@ import kotlinx.serialization.json.JsonPrimitive
  * are web's own English export strings; mobile ViewModel-layer copy has no localization channel,
  * matching the rest of this layer's user-facing strings.
  *
- * This is the CLIPBOARD serialization only. `ChatViewModel.getMessageText` keeps its text-parts
- * extraction: it also feeds TTS (reading a JSON dump aloud) and the edit prefill (which must
- * round-trip into `updateMessageText`), where serialized tool calls would be corruption.
+ * This is the CLIPBOARD serialization only. Read Aloud speaks `speechTextOf` (the answer's text
+ * parts alone) and the editor seeds from the message's own text, where serialized tool calls would
+ * be read aloud or written back as corruption.
  */
 fun serializeMessageForClipboard(message: Message): String {
+    // Inline citations become numbered references and a sources list, as web's copy writes them.
+    val citations = CitationClipboard(CitationIndex.from(message.attachments))
     val parts = message.content
-    if (parts.isNullOrEmpty()) return message.text
+    if (parts.isNullOrEmpty()) {
+        return listOfNotNull(citations.process(message.text), citations.footer()).joinToString("\n")
+    }
 
     return parts
-        .mapNotNull { part -> formatPartForClipboard(part) }
+        .mapNotNull { part -> formatPartForClipboard(part, citations) }
         .map { (label, value) -> if (label.isEmpty()) value else "$label:\n$value" }
         .filter { it.isNotBlank() }
+        .plus(listOfNotNull(citations.footer()))
         .joinToString("\n")
 }
 
@@ -55,13 +63,15 @@ private object ClipboardLabels {
 private val clipboardJson = Json { encodeDefaults = false }
 
 /** `label to value`, empty label meaning "value alone" (plain text); null meaning "skip". */
-private fun formatPartForClipboard(part: MessageContentPart): Pair<String, String>? = when (part.type) {
+@Suppress("CyclomaticComplexMethod") // debt: complexity 26
+private fun formatPartForClipboard(part: MessageContentPart, citations: CitationClipboard): Pair<String, String>? = when (part.type) {
     ContentType.ERROR -> "" to (part.error ?: part.text.orEmpty())
 
     ContentType.TEXT, ContentType.TEXT_DELTA ->
-        part.text?.takeIf { it.isNotBlank() }?.let { "" to it }
+        part.text?.takeIf { it.isNotBlank() }?.let { "" to citations.process(it) }
 
     ContentType.THINK -> part.think
+        ?.let(::stripOpaqueReasoning)
         ?.trim()
         ?.removePrefix("<think>")
         ?.removeSuffix("</think>")

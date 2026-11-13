@@ -3,12 +3,9 @@ package com.garfiec.librechat.feature.auth.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.model.VerifyTwoFactorOutcome
-import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSave
-import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
-import kotlinx.coroutines.CancellationException
+import com.garfiec.librechat.core.ui.components.OTP_LENGTH
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,22 +13,23 @@ import kotlinx.coroutines.launch
 
 @Immutable
 data class TwoFactorUiState(
-    val digits: List<String> = List(6) { "" },
+    val code: String = "",
     val isBackupMode: Boolean = false,
     val backupCode: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
+    /** [error] came from a failure the diagnostic log can help with; see `offersDiagnosticLog`. */
+    val offerDiagnosticLog: Boolean = false,
+    /** A coded refusal ([AuthRefusal]) the screen words itself, in place of [error], while [error] is set. */
+    val refusal: AuthRefusal? = null,
     val isVerified: Boolean = false,
-    val pendingCredentialSave: PendingCredentialSave? = null,
     // Bumped whenever the entered code is cleared as spent (evaluated-and-rejected, or accepted
-    // with an unusable session); the digit row keys its focus-reset effect on this.
+    // with an unusable session); the code input keys its focus-reset effect on this.
     val codeAttempt: Int = 0,
 )
 
 class TwoFactorViewModel(
     private val authRepository: AuthRepository,
-    private val serverDataStore: ServerDataStore,
-    private val credentialSaveHandoff: PendingCredentialSaveHandoff,
     initialTempToken: String? = null,
 ) : ViewModel() {
 
@@ -47,16 +45,13 @@ class TwoFactorViewModel(
     // suppressing it would strand an authenticated user on this screen.
     private var submitGeneration = 0
 
-    fun onDigitChanged(index: Int, value: String) {
-        if (value.length > 1) return
-        val newDigits = _uiState.value.digits.toMutableList()
-        newDigits[index] = value
-        _uiState.value = _uiState.value.copy(digits = newDigits, error = null)
+    fun onCodeChanged(code: String) {
+        val previous = _uiState.value.code
+        _uiState.value = _uiState.value.copy(code = code, error = null)
 
-        // Auto-submit when all 6 digits are entered
-        if (newDigits.all { it.isNotEmpty() }) {
-            submit()
-        }
+        // Auto-submit on each new full code — completing one, or pasting a fresh one over a kept
+        // entry — but not on a re-delivery of the same value, which the input can send twice.
+        if (code.length == OTP_LENGTH && code != previous) submit()
     }
 
     fun onBackupCodeChanged(code: String) {
@@ -73,7 +68,7 @@ class TwoFactorViewModel(
             isLoading = false,
             isBackupMode = !_uiState.value.isBackupMode,
             error = null,
-            digits = List(6) { "" },
+            code = "",
             backupCode = "",
         )
     }
@@ -83,25 +78,23 @@ class TwoFactorViewModel(
         val code = if (state.isBackupMode) {
             state.backupCode.trim()
         } else {
-            state.digits.joinToString("")
+            state.code
         }
 
-        if (code.isBlank()) return
+        if (code.isBlank() || state.isLoading) return
 
         val generation = submitGeneration
+        // Set before launching so a second submit in the same frame sees it and bails.
+        _uiState.value = state.copy(isLoading = true, error = null, offerDiagnosticLog = false, refusal = null)
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-
             when (val outcome = authRepository.verifyTwoFactor(tempToken, code, isBackupCode = state.isBackupMode)) {
                 // Always honored, even when superseded by a mode toggle: the session is already
                 // committed in the token store, so anything but completing sign-in would strand
                 // an authenticated user here.
                 is VerifyTwoFactorOutcome.Success -> {
-                    val pendingSave = credentialSaveHandoff.consume()
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        pendingCredentialSave = pendingSave,
-                        isVerified = pendingSave == null,
+                        isVerified = true,
                     )
                 }
                 // Failure outcomes are dropped when superseded — the toggle already reset the
@@ -111,11 +104,17 @@ class TwoFactorViewModel(
                 // a fresh one; it never evaluated the code → keep it for a plain retry. Focus resets
                 // (via codeAttempt) precisely when the boxes are cleared.
                 is VerifyTwoFactorOutcome.CodeConsumed -> applyVerifyFailure(generation, outcome.message, clearEntry = true)
-                is VerifyTwoFactorOutcome.NotEvaluated -> applyVerifyFailure(generation, outcome.message, clearEntry = false)
+                is VerifyTwoFactorOutcome.NotEvaluated -> applyVerifyFailure(
+                    generation,
+                    outcome.message,
+                    clearEntry = false,
+                    refusal = authRefusalOfCode(outcome.code),
+                )
                 is VerifyTwoFactorOutcome.ConnectionFailure -> applyVerifyFailure(
                     generation,
                     "Couldn't reach the server. Check your connection and try again.",
                     clearEntry = false,
+                    offerDiagnosticLog = true,
                 )
             }
         }
@@ -128,45 +127,23 @@ class TwoFactorViewModel(
      * supersession guard lives here alone: a failure whose generation was superseded by a mode
      * toggle is dropped so it can't repaint the freshly-switched screen.
      */
-    private fun applyVerifyFailure(generation: Int, message: String, clearEntry: Boolean) {
+    private fun applyVerifyFailure(
+        generation: Int,
+        message: String,
+        clearEntry: Boolean,
+        offerDiagnosticLog: Boolean = false,
+        refusal: AuthRefusal? = null,
+    ) {
         if (generation != submitGeneration) return
         val state = _uiState.value
         _uiState.value = state.copy(
             isLoading = false,
             error = message,
-            digits = if (clearEntry) List(6) { "" } else state.digits,
+            offerDiagnosticLog = offerDiagnosticLog,
+            refusal = refusal,
+            code = if (clearEntry) "" else state.code,
             backupCode = if (clearEntry) "" else state.backupCode,
             codeAttempt = if (clearEntry) state.codeAttempt + 1 else state.codeAttempt,
         )
-    }
-
-    fun onCredentialSaveHandled(saved: Boolean) {
-        val pending = _uiState.value.pendingCredentialSave ?: return
-        viewModelScope.launch {
-            if (saved) {
-                try {
-                    serverDataStore.rememberLoginCredential(pending.ref)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    // The session and password-provider save already succeeded. A non-secret
-                    // pointer failure must not strand an authenticated user on the 2FA screen.
-                }
-            }
-            _uiState.value = _uiState.value.copy(
-                pendingCredentialSave = null,
-                isVerified = true,
-            )
-        }
-    }
-
-    fun abandon() {
-        credentialSaveHandoff.clear()
-        _uiState.value = _uiState.value.copy(pendingCredentialSave = null)
-    }
-
-    override fun onCleared() {
-        credentialSaveHandoff.clear()
-        super.onCleared()
     }
 }

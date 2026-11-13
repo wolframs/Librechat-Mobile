@@ -12,11 +12,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,10 +23,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.resources.Res
+import com.garfiec.librechat.core.ui.resources.param_add_stop_sequence
+import com.garfiec.librechat.core.ui.resources.param_remove_tag
+import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/** Tag input that renders chips and allows adding/removing text tags up to a max count. */
+/** Tag input that renders chips and allows adding/removing text tags up to a max count. [placeholder]
+ *  defaults to the stop-sequence prompt, the control's main use. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DynamicTagsInput(
@@ -38,6 +41,7 @@ fun DynamicTagsInput(
     modifier: Modifier = Modifier,
     description: String? = null,
     maxTags: Int = 4,
+    placeholder: String = stringResource(Res.string.param_add_stop_sequence),
 ) {
     var inputText by remember { mutableStateOf("") }
 
@@ -62,7 +66,7 @@ fun DynamicTagsInput(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 tags.forEach { tag ->
-                    AssistChip(
+                    AdaptiveAssistChip(
                         onClick = {},
                         label = { Text(tag) },
                         trailingIcon = {
@@ -72,7 +76,7 @@ fun DynamicTagsInput(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Remove $tag",
+                                    contentDescription = stringResource(Res.string.param_remove_tag, tag),
                                     modifier = Modifier.size(14.dp),
                                 )
                             }
@@ -84,11 +88,11 @@ fun DynamicTagsInput(
         }
 
         if (tags.size < maxTags) {
-            OutlinedTextField(
+            AdaptiveOutlinedTextField(
                 value = inputText,
                 onValueChange = { inputText = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Add stop sequence\u2026") },
+                placeholder = { Text(placeholder) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(

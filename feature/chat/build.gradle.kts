@@ -2,15 +2,24 @@ plugins {
     id("librechat.kmp.feature")
 }
 
-extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+android {
     namespace = "com.garfiec.librechat.feature.chat"
+    testOptions {
+        // The Robolectric Compose tests need the merged manifest (ui-test-manifest's activity) and
+        // the Compose resources on the host-JVM unit-test classpath.
+        unitTests.isIncludeAndroidResources = true
+    }
 }
+
+// One JVM runs the whole suite and MockK's inline mocks stay reachable across classes: 512 MB OOMs.
+tasks.withType<Test>().configureEach { maxHeapSize = "2g" }
 
 kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":core:network"))
             implementation(project(":core:logging"))
+            implementation(project(":core:notifications"))
             implementation(libs.atomicfu)
             implementation(libs.kermit)
             implementation(libs.kotlinx.serialization.json)
@@ -22,12 +31,23 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.koin.android)
             implementation(libs.androidx.core.ktx)
+            implementation(libs.androidx.webkit)
             implementation(libs.media3.exoplayer)
             implementation(libs.media3.ui)
             implementation(libs.media3.datasource)
         }
         getByName("androidUnitTest").dependencies {
             implementation(libs.koin.test)
+            // A real SseClient over a mocked transport, for tests of what the stream client and the
+            // ViewModel do together — a stubbed event flow cannot show how a connection ends.
+            implementation(libs.ktor.client.mock)
+            // Compose UI tests on the JVM (Robolectric), for semantics and focus that CI must run.
+            implementation(libs.robolectric)
+            implementation(libs.compose.ui.test)
+            implementation(libs.compose.ui.test.manifest)
+        }
+        iosTest.dependencies {
+            implementation(libs.compose.multiplatform.ui.test)
         }
         named("androidInstrumentedTest").dependencies {
             implementation(libs.junit)

@@ -1,25 +1,20 @@
 package com.garfiec.librechat.feature.settings.viewmodel.providerkeys
 
+import androidx.lifecycle.SavedStateHandle
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.KeyRepository
 import com.garfiec.librechat.core.model.EndpointConfig
-import com.garfiec.librechat.core.model.request.UpdateKeyRequest
-import com.garfiec.librechat.feature.settings.resources.Res
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_api_key_label
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_azure_api_key
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_azure_api_version
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_azure_deployment
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_azure_instance
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_base_url_label
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_bedrock_access_key_id
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_bedrock_secret_access_key
-import com.garfiec.librechat.feature.settings.resources.provider_keys_field_google_service_key_or_gemini
 import com.garfiec.librechat.core.model.endpoint.KeyState
+import com.garfiec.librechat.core.model.media.ProviderId
+import com.garfiec.librechat.core.model.request.UpdateKeyRequest
 import com.garfiec.librechat.feature.settings.state.providerkeys.ProviderKeyExpiry
+import com.garfiec.librechat.feature.settings.state.providerkeys.ProviderKeyField
 import com.garfiec.librechat.feature.settings.state.providerkeys.ProviderKeyFormKind
 import com.garfiec.librechat.feature.settings.state.providerkeys.ProviderKeyFormState
+import com.garfiec.librechat.feature.settings.state.providerkeys.ServiceKeyValidation
 import com.garfiec.librechat.feature.settings.state.providerkeys.SetProviderKeyEffect
+import com.garfiec.librechat.feature.settings.state.providerkeys.validateGoogleServiceKey
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -90,13 +85,27 @@ class SetProviderKeyViewModelTest {
         )
 
     @Test
+    fun the_sheet_draws_the_endpoints_served_provider() = runTest(testDispatcher) {
+        val flow = MutableStateFlow(
+            mapOf("my-llm" to EndpointConfig(name = "my-llm", type = "custom", userProvide = true, providerId = "groq", iconURL = "groq")),
+        )
+        coEvery { configRepository.endpointConfigs } returns flow
+
+        val vm = SetProviderKeyViewModel("my-llm", keyRepository, configRepository, SavedStateHandle())
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.iconProvider).isEqualTo(ProviderId.GROQ)
+        assertThat(vm.uiState.value.iconUrl).isNull()
+    }
+
+    @Test
     fun openai_payload_is_apiKey_plus_baseURL_pair() = runTest(testDispatcher) {
         val flow = configFlow("openAI")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-secret")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-secret")
         vm.save()
         advanceUntilIdle()
 
@@ -112,9 +121,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("anthropic-custom", type = "custom", userProvideURL = true)
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("anthropic-custom", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("anthropic-custom", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-secret")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-secret")
         // Skip baseURL — should reject.
         vm.save()
         advanceUntilIdle()
@@ -127,10 +136,10 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("anthropic-custom", type = "custom", userProvideURL = true)
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("anthropic-custom", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("anthropic-custom", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-secret")
-        vm.updateBaseUrl("https://example.com/v1")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-secret")
+        vm.updateField(ProviderKeyField.BASE_URL, "https://example.com/v1")
         vm.save()
         advanceUntilIdle()
 
@@ -144,12 +153,12 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("azureOpenAI", type = "azureOpenAI")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("azureOpenAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("azureOpenAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.API_KEY, "azkey")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.INSTANCE, "myinst")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.DEPLOYMENT, "gpt4")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.VERSION, "2024-02-15-preview")
+        vm.updateField(ProviderKeyField.AZURE_API_KEY, "azkey")
+        vm.updateField(ProviderKeyField.AZURE_INSTANCE, "myinst")
+        vm.updateField(ProviderKeyField.AZURE_DEPLOYMENT, "gpt4")
+        vm.updateField(ProviderKeyField.AZURE_VERSION, "2024-02-15-preview")
         vm.save()
         advanceUntilIdle()
 
@@ -175,9 +184,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("azureOpenAI", type = "azureOpenAI")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("azureOpenAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("azureOpenAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.API_KEY, "azkey")
+        vm.updateField(ProviderKeyField.AZURE_API_KEY, "azkey")
         // Skip the other three.
         vm.save()
         advanceUntilIdle()
@@ -190,12 +199,12 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("my-azure", type = "openAI", azure = true)
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("my-azure", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("my-azure", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.API_KEY, "k")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.INSTANCE, "i")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.DEPLOYMENT, "d")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.VERSION, "v")
+        vm.updateField(ProviderKeyField.AZURE_API_KEY, "k")
+        vm.updateField(ProviderKeyField.AZURE_INSTANCE, "i")
+        vm.updateField(ProviderKeyField.AZURE_DEPLOYMENT, "d")
+        vm.updateField(ProviderKeyField.AZURE_VERSION, "v")
         vm.save()
         advanceUntilIdle()
 
@@ -208,10 +217,10 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("bedrock", type = "bedrock")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.ACCESS_KEY_ID, "AKID")
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.SECRET_ACCESS_KEY, "SECRET")
+        vm.updateField(ProviderKeyField.BEDROCK_ACCESS_KEY_ID, "AKID")
+        vm.updateField(ProviderKeyField.BEDROCK_SECRET_ACCESS_KEY, "SECRET")
         // sessionToken left blank
         vm.save()
         advanceUntilIdle()
@@ -227,11 +236,11 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("bedrock", type = "bedrock")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.ACCESS_KEY_ID, "AKID")
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.SECRET_ACCESS_KEY, "SECRET")
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.SESSION_TOKEN, "TOKEN")
+        vm.updateField(ProviderKeyField.BEDROCK_ACCESS_KEY_ID, "AKID")
+        vm.updateField(ProviderKeyField.BEDROCK_SECRET_ACCESS_KEY, "SECRET")
+        vm.updateField(ProviderKeyField.BEDROCK_SESSION_TOKEN, "TOKEN")
         vm.save()
         advanceUntilIdle()
 
@@ -245,9 +254,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("bedrock", type = "bedrock")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.ACCESS_KEY_ID, "AKID")
+        vm.updateField(ProviderKeyField.BEDROCK_ACCESS_KEY_ID, "AKID")
         // missing secretAccessKey
         vm.save()
         advanceUntilIdle()
@@ -260,13 +269,11 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("google", type = "google")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        // Service-key validation requires a long-enough private_key — we pass an inner string
-        // here without validation by sending it directly; field-level validation only blocks
-        // the import success indicator, not the save() path.
-        vm.updateGoogleServiceKey("""{"client_email":"x@y.com"}""")
-        vm.updateGoogleApiKey("gemini-key")
+        // Save applies web's CredentialsSchema, so the fixture is a well-formed service key.
+        vm.updateField(ProviderKeyField.GOOGLE_SERVICE_KEY, VALID_SERVICE_KEY)
+        vm.updateField(ProviderKeyField.GOOGLE_API_KEY, "gemini-key")
         vm.save()
         advanceUntilIdle()
 
@@ -274,8 +281,7 @@ class SetProviderKeyViewModelTest {
         // Both keys are always present (mobile divergence from web — backend tolerates `""`).
         assertThat(parsed.keys).containsExactly("GOOGLE_SERVICE_KEY", "GOOGLE_API_KEY")
         // GOOGLE_SERVICE_KEY is a JSON string (the stringified inner JSON), NOT a JSON object.
-        assertThat(parsed["GOOGLE_SERVICE_KEY"]?.jsonPrimitive?.content)
-            .isEqualTo("""{"client_email":"x@y.com"}""")
+        assertThat(parsed["GOOGLE_SERVICE_KEY"]?.jsonPrimitive?.content).isEqualTo(VALID_SERVICE_KEY)
         assertThat(parsed["GOOGLE_API_KEY"]?.jsonPrimitive?.content).isEqualTo("gemini-key")
     }
 
@@ -284,9 +290,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("google", type = "google")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateGoogleServiceKey("""{"client_email":"x@y.com"}""")
+        vm.updateField(ProviderKeyField.GOOGLE_SERVICE_KEY, VALID_SERVICE_KEY)
         vm.save()
         advanceUntilIdle()
 
@@ -299,9 +305,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("google", type = "google")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateGoogleApiKey("gemini-key")
+        vm.updateField(ProviderKeyField.GOOGLE_API_KEY, "gemini-key")
         vm.save()
         advanceUntilIdle()
 
@@ -315,7 +321,7 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("google", type = "google")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
         vm.save()
         advanceUntilIdle()
@@ -328,9 +334,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("anthropic", type = "anthropic")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("anthropic", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("anthropic", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-ant-xxx")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-ant-xxx")
         vm.save()
         advanceUntilIdle()
 
@@ -343,9 +349,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("openAI")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-x")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-x")
         vm.selectExpiry(ProviderKeyExpiry.NEVER)
         vm.save()
         advanceUntilIdle()
@@ -359,7 +365,7 @@ class SetProviderKeyViewModelTest {
         // (Build a VM with no config map — the default expiry is part of `SetProviderKeyUiState`.)
         val flow = MutableStateFlow<Map<String, EndpointConfig>>(emptyMap())
         coEvery { configRepository.endpointConfigs } returns flow
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
         assertThat(vm.uiState.value.expiry).isEqualTo(ProviderKeyExpiry.TWELVE_HOURS)
     }
 
@@ -439,9 +445,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("openAI", userProvideURL = true)
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-secret")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-secret")
         // Intentionally skip baseURL.
         vm.save()
         advanceUntilIdle()
@@ -473,37 +479,28 @@ class SetProviderKeyViewModelTest {
 
     @Test
     fun google_validator_rejects_array_for_client_email_without_crash() {
-        val flow = MutableStateFlow<Map<String, EndpointConfig>>(emptyMap())
-        coEvery { configRepository.endpointConfigs } returns flow
-        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository)
         // Arrays/objects in primitive slots must NOT throw IllegalArgumentException via
         // `JsonElement.jsonPrimitive` extension. Safe-cast to JsonPrimitive should kick in.
         val malformed = """{"client_email": ["x@y.com"], "project_id": "p", "private_key": "..."}"""
-        assertThat(vm.validateGoogleServiceKey(malformed))
-            .isEqualTo(SetProviderKeyViewModel.ServiceKeyValidation.Invalid)
+        assertThat(validateGoogleServiceKey(malformed))
+            .isEqualTo(ServiceKeyValidation.Invalid)
     }
 
     @Test
     fun google_validator_rejects_object_for_project_id_without_crash() {
-        val flow = MutableStateFlow<Map<String, EndpointConfig>>(emptyMap())
-        coEvery { configRepository.endpointConfigs } returns flow
-        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository)
         val malformed = """{"client_email": "x@y.com", "project_id": {}, "private_key": "..."}"""
-        assertThat(vm.validateGoogleServiceKey(malformed))
-            .isEqualTo(SetProviderKeyViewModel.ServiceKeyValidation.Invalid)
+        assertThat(validateGoogleServiceKey(malformed))
+            .isEqualTo(ServiceKeyValidation.Invalid)
     }
 
     @Test
     fun google_validator_rejects_array_for_private_key_without_crash() {
-        val flow = MutableStateFlow<Map<String, EndpointConfig>>(emptyMap())
-        coEvery { configRepository.endpointConfigs } returns flow
-        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository)
         val malformed = """{"client_email": "x@y.com", "project_id": "p", "private_key": [1,2]}"""
-        assertThat(vm.validateGoogleServiceKey(malformed))
-            .isEqualTo(SetProviderKeyViewModel.ServiceKeyValidation.Invalid)
+        assertThat(validateGoogleServiceKey(malformed))
+            .isEqualTo(ServiceKeyValidation.Invalid)
     }
 
-    // ---- RequiredFieldsMissing carries StringResource list -----------------------------
+    // ---- A refused Save marks the missing fields and focuses the first ---------------
 
     /**
      * Subscribe to `vm.effects` BEFORE invoking the action under test.
@@ -525,11 +522,11 @@ class SetProviderKeyViewModelTest {
     }
 
     @Test
-    fun openai_missing_apiKey_emits_localized_field_resource() = runTest(testDispatcher) {
+    fun openai_missing_apiKey_is_marked_and_focused() = runTest(testDispatcher) {
         val flow = configFlow("openAI", userProvideURL = true)
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
         val collected = subscribeEffects(vm)
 
@@ -539,137 +536,94 @@ class SetProviderKeyViewModelTest {
         vm.save()
         advanceUntilIdle()
 
-        val event = collected.filterIsInstance<SetProviderKeyEffect.RequiredFieldsMissing>().single()
-        assertThat(event.fields).containsExactly(
-            Res.string.provider_keys_field_api_key_label,
-        )
+        assertThat(vm.uiState.value.missingFields).containsExactly(ProviderKeyField.API_KEY)
+        assertThat(collected).containsExactly(SetProviderKeyEffect.FocusField(ProviderKeyField.API_KEY))
     }
 
     @Test
-    fun azure_missing_emits_azure_field_resources() = runTest(testDispatcher) {
+    fun azure_missing_marks_all_four_and_focuses_the_key() = runTest(testDispatcher) {
         val flow = configFlow("azureOpenAI", type = "azureOpenAI")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("azureOpenAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("azureOpenAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
         val collected = subscribeEffects(vm)
 
         vm.save()
         advanceUntilIdle()
 
-        val event = collected.filterIsInstance<SetProviderKeyEffect.RequiredFieldsMissing>().single()
-        assertThat(event.fields).containsExactly(
-            Res.string.provider_keys_field_azure_api_key,
-            Res.string.provider_keys_field_azure_instance,
-            Res.string.provider_keys_field_azure_deployment,
-            Res.string.provider_keys_field_azure_api_version,
-        ).inOrder()
+        assertThat(vm.uiState.value.missingFields).containsExactly(
+            ProviderKeyField.AZURE_API_KEY,
+            ProviderKeyField.AZURE_INSTANCE,
+            ProviderKeyField.AZURE_DEPLOYMENT,
+            ProviderKeyField.AZURE_VERSION,
+        )
+        assertThat(collected).containsExactly(SetProviderKeyEffect.FocusField(ProviderKeyField.AZURE_API_KEY))
     }
 
     @Test
-    fun bedrock_missing_emits_bedrock_field_resources() = runTest(testDispatcher) {
+    fun bedrock_missing_marks_the_access_keys() = runTest(testDispatcher) {
         val flow = configFlow("bedrock", type = "bedrock")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
         val collected = subscribeEffects(vm)
 
         vm.save()
         advanceUntilIdle()
 
-        val event = collected.filterIsInstance<SetProviderKeyEffect.RequiredFieldsMissing>().single()
-        assertThat(event.fields).containsExactly(
-            Res.string.provider_keys_field_bedrock_access_key_id,
-            Res.string.provider_keys_field_bedrock_secret_access_key,
-        ).inOrder()
+        assertThat(vm.uiState.value.missingFields).containsExactly(
+            ProviderKeyField.BEDROCK_ACCESS_KEY_ID,
+            ProviderKeyField.BEDROCK_SECRET_ACCESS_KEY,
+        )
+        assertThat(collected).containsExactly(SetProviderKeyEffect.FocusField(ProviderKeyField.BEDROCK_ACCESS_KEY_ID))
     }
 
     @Test
-    fun google_both_empty_emits_combined_label_resource() = runTest(testDispatcher) {
+    fun google_both_empty_marks_both_and_focuses_the_service_key() = runTest(testDispatcher) {
         val flow = configFlow("google", type = "google")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("google", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
         val collected = subscribeEffects(vm)
 
         vm.save()
         advanceUntilIdle()
 
-        val event = collected.filterIsInstance<SetProviderKeyEffect.RequiredFieldsMissing>().single()
-        assertThat(event.fields).containsExactly(
-            Res.string.provider_keys_field_google_service_key_or_gemini,
+        assertThat(vm.uiState.value.missingFields).containsExactly(
+            ProviderKeyField.GOOGLE_SERVICE_KEY,
+            ProviderKeyField.GOOGLE_API_KEY,
         )
+        assertThat(collected).containsExactly(SetProviderKeyEffect.FocusField(ProviderKeyField.GOOGLE_SERVICE_KEY))
     }
 
     @Test
-    fun other_missing_apiKey_emits_field_resource() = runTest(testDispatcher) {
+    fun other_missing_apiKey_is_marked_and_focused() = runTest(testDispatcher) {
         val flow = configFlow("anthropic", type = "anthropic")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("anthropic", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("anthropic", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
         val collected = subscribeEffects(vm)
 
         vm.save()
         advanceUntilIdle()
 
-        val event = collected.filterIsInstance<SetProviderKeyEffect.RequiredFieldsMissing>().single()
-        assertThat(event.fields).containsExactly(Res.string.provider_keys_field_api_key_label)
+        assertThat(vm.uiState.value.missingFields).containsExactly(ProviderKeyField.API_KEY)
+        assertThat(collected).containsExactly(SetProviderKeyEffect.FocusField(ProviderKeyField.API_KEY))
     }
 
     // ---- Banner initial state -----------------------------------------------------------
 
     @Test
-    fun initial_currentKeyState_is_Loading() {
-        // The banner defaults to Loading until the host dialog's LaunchedEffect fires
-        // refreshKeyState(), so it never briefly renders a stale Set(...) carried over.
+    fun initial_row_key_state_is_loading() {
+        // Until the sheet hands over the row's answer, so it never briefly renders a stale Set(...).
         val flow = MutableStateFlow<Map<String, EndpointConfig>>(emptyMap())
         coEvery { configRepository.endpointConfigs } returns flow
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
-        // Synchronous read: refreshKeyState hasn't been invoked yet.
-        assertThat(vm.uiState.value.currentKeyState).isEqualTo(KeyState.Loading)
-    }
-
-    @Test
-    fun currentKeyState_resolves_to_Unset_when_get_returns_null() = runTest(testDispatcher) {
-        val flow = configFlow("openAI")
-        coEvery { configRepository.endpointConfigs } returns flow
-        coEvery { keyRepository.fetchKeyState(any()) } returns Result.Success(KeyState.Unset)
-
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
-        // The host dialog's LaunchedEffect drives refreshKeyState — exercise it directly.
-        vm.refreshKeyState()
-        advanceUntilIdle()
-
-        assertThat(vm.uiState.value.currentKeyState).isEqualTo(KeyState.Unset)
-    }
-
-    @Test
-    fun refreshKeyState_picks_up_latest_expiry_on_reused_vm() = runTest(testDispatcher) {
-        // The host dialog's `LaunchedEffect(endpointName)` calls `refreshKeyState()` on each
-        // open. This test exercises that contract directly: two back-to-back opens see
-        // distinct GET results (first Unset, then Set(neverExpires=true)).
-        val flow = configFlow("openAI")
-        coEvery { configRepository.endpointConfigs } returns flow
-        coEvery { keyRepository.fetchKeyState(any()) } returnsMany listOf(
-            Result.Success(KeyState.Unset),
-            Result.Success(KeyState.Set(expiresAt = null, neverExpires = true, wire = "never")),
-        )
-
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
-        // First open: LaunchedEffect fires refreshKeyState().
-        vm.refreshKeyState()
-        advanceUntilIdle()
-        assertThat(vm.uiState.value.currentKeyState).isEqualTo(KeyState.Unset)
-
-        // Reopen: LaunchedEffect fires refreshKeyState() again on the reused VM.
-        vm.refreshKeyState()
-        advanceUntilIdle()
-        val resolved = vm.uiState.value.currentKeyState
-        assertThat(resolved).isInstanceOf(KeyState.Set::class.java)
-        assertThat((resolved as KeyState.Set).neverExpires).isTrue()
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
+        assertThat(vm.uiState.value.rowKeyState).isEqualTo(KeyState.Loading)
     }
 
     @Test
@@ -678,9 +632,9 @@ class SetProviderKeyViewModelTest {
         coEvery { configRepository.endpointConfigs } returns flow
         coEvery { keyRepository.deleteKey(any()) } returns Result.Success(Unit)
 
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-typed-but-not-yet-saved")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-typed-but-not-yet-saved")
         // Sanity: field is populated.
         assertThat((vm.uiState.value.form as ProviderKeyFormState.ApiKeyAndOptionalBaseUrl).apiKey)
             .isEqualTo("sk-typed-but-not-yet-saved")
@@ -692,7 +646,7 @@ class SetProviderKeyViewModelTest {
         assertThat(form).isInstanceOf(ProviderKeyFormState.ApiKeyAndOptionalBaseUrl::class.java)
         assertThat((form as ProviderKeyFormState.ApiKeyAndOptionalBaseUrl).apiKey).isEmpty()
         assertThat(form.baseURL).isEmpty()
-        assertThat(vm.uiState.value.currentKeyState).isEqualTo(KeyState.Unset)
+        assertThat(vm.uiState.value.rowKeyState).isEqualTo(KeyState.Unset)
     }
 
     @Test
@@ -701,12 +655,12 @@ class SetProviderKeyViewModelTest {
         coEvery { configRepository.endpointConfigs } returns flow
         coEvery { keyRepository.deleteKey(any()) } returns Result.Success(Unit)
 
-        val vm = SetProviderKeyViewModel("azureOpenAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("azureOpenAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.API_KEY, "azkey")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.INSTANCE, "inst")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.DEPLOYMENT, "dep")
-        vm.updateAzureField(SetProviderKeyViewModel.AzureField.VERSION, "v1")
+        vm.updateField(ProviderKeyField.AZURE_API_KEY, "azkey")
+        vm.updateField(ProviderKeyField.AZURE_INSTANCE, "inst")
+        vm.updateField(ProviderKeyField.AZURE_DEPLOYMENT, "dep")
+        vm.updateField(ProviderKeyField.AZURE_VERSION, "v1")
 
         vm.revoke()
         advanceUntilIdle()
@@ -724,11 +678,11 @@ class SetProviderKeyViewModelTest {
         coEvery { configRepository.endpointConfigs } returns flow
         coEvery { keyRepository.deleteKey(any()) } returns Result.Success(Unit)
 
-        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("bedrock", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.ACCESS_KEY_ID, "AKID")
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.SECRET_ACCESS_KEY, "SECRET")
-        vm.updateBedrockField(SetProviderKeyViewModel.BedrockField.SESSION_TOKEN, "TOKEN")
+        vm.updateField(ProviderKeyField.BEDROCK_ACCESS_KEY_ID, "AKID")
+        vm.updateField(ProviderKeyField.BEDROCK_SECRET_ACCESS_KEY, "SECRET")
+        vm.updateField(ProviderKeyField.BEDROCK_SESSION_TOKEN, "TOKEN")
 
         vm.revoke()
         advanceUntilIdle()
@@ -745,9 +699,9 @@ class SetProviderKeyViewModelTest {
         coEvery { configRepository.endpointConfigs } returns flow
         coEvery { keyRepository.deleteKey(any()) } returns Result.Error(message = "network")
 
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-x")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-x")
         vm.revoke()
         advanceUntilIdle()
 
@@ -762,9 +716,9 @@ class SetProviderKeyViewModelTest {
         val flow = configFlow("openAI")
         coEvery { configRepository.endpointConfigs } returns flow
 
-        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository)
+        val vm = SetProviderKeyViewModel("openAI", keyRepository, configRepository, SavedStateHandle())
         advanceUntilIdle()
-        vm.updateApiKey("sk-x")
+        vm.updateField(ProviderKeyField.API_KEY, "sk-x")
         vm.save()
         advanceUntilIdle()
 

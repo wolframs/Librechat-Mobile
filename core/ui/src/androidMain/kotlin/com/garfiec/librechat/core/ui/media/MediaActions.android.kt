@@ -21,15 +21,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import co.touchlab.kermit.Logger
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.garfiec.librechat.core.common.media.detectImageMimeType
 import com.garfiec.librechat.core.common.media.imageExtensionForMimeType
+import com.garfiec.librechat.core.ui.resources.Res
+import com.garfiec.librechat.core.ui.resources.media_image_load_failed
+import com.garfiec.librechat.core.ui.resources.media_image_save_failed
+import com.garfiec.librechat.core.ui.resources.media_image_saved
+import com.garfiec.librechat.core.ui.resources.media_share_file_failed
+import com.garfiec.librechat.core.ui.resources.media_storage_permission_required
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.getString
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -50,11 +59,7 @@ actual fun rememberSaveImageToGallery(): ((url: String) -> Unit)? {
         if (granted && url != null) {
             scope.launch { saveUrlToGallery(context, url) }
         } else if (!granted) {
-            Toast.makeText(
-                context,
-                "Storage permission is required to save images",
-                Toast.LENGTH_SHORT,
-            ).show()
+            scope.launch { toast(context, getString(Res.string.media_storage_permission_required)) }
         }
     }
 
@@ -87,7 +92,7 @@ actual fun rememberShareImage(): (url: String) -> Unit {
                 try {
                     val image = loadEncodedImage(context, url)
                     if (image == null) {
-                        shareUrlText(context, url)
+                        shareText(context, url)
                         return@launch
                     }
                     val file = withContext(Dispatchers.IO) {
@@ -113,14 +118,17 @@ actual fun rememberShareImage(): (url: String) -> Unit {
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                     context.startActivity(Intent.createChooser(shareIntent, null))
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
-                    shareUrlText(context, url)
+                    shareText(context, url)
                 }
             }
         }
     }
 }
 
+@Suppress("TooGenericExceptionCaught") // user action: any failure becomes a toast
 @Composable
 actual fun rememberShareFile(): (bytes: ByteArray, filename: String, mime: String?) -> Unit {
     val context = LocalContext.current
@@ -129,15 +137,7 @@ actual fun rememberShareFile(): (bytes: ByteArray, filename: String, mime: Strin
         { bytes, filename, mime ->
             scope.launch {
                 try {
-                    val file = withContext(Dispatchers.IO) {
-                        val dir = File(context.cacheDir, "shared_files")
-                        dir.mkdirs()
-                        // Sweep prior shares safely past any in-flight read (mirrors the image path).
-                        sweepStaleFiles(dir, STALE_THRESHOLD_MS)
-                        val f = File(dir, sanitizeFilename(filename))
-                        f.writeBytes(bytes)
-                        f
-                    }
+                    val file = withContext(Dispatchers.IO) { writeSharedFile(context, bytes, filename) }
                     val contentUri = FileProvider.getUriForFile(
                         context,
                         "${context.packageName}.fileprovider",
@@ -149,8 +149,11 @@ actual fun rememberShareFile(): (bytes: ByteArray, filename: String, mime: Strin
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                     context.startActivity(Intent.createChooser(shareIntent, null))
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    toast(context, "Failed to share file: ${e.localizedMessage ?: ""}")
+                    Logger.w(e) { "Sharing a file failed" }
+                    toast(context, getString(Res.string.media_share_file_failed))
                 }
             }
         }
@@ -158,23 +161,28 @@ actual fun rememberShareFile(): (bytes: ByteArray, filename: String, mime: Strin
 }
 
 /** Strips path separators so a server-supplied filename can't escape the cache dir. */
-private fun sanitizeFilename(filename: String): String =
+internal fun sanitizeFilename(filename: String): String =
     filename.substringAfterLast('/').substringAfterLast('\\').ifBlank { "file" }
 
+@Suppress("TooGenericExceptionCaught") // user action: any failure becomes a toast
 private suspend fun saveUrlToGallery(context: Context, url: String) {
     try {
         val image = loadEncodedImage(context, url)
         if (image == null) {
-            toast(context, "Failed to load image")
+            toast(context, getString(Res.string.media_image_load_failed))
             return
         }
         withContext(Dispatchers.IO) { writeImageToGallery(context, image) }
-        toast(context, "Image saved to gallery")
+        toast(context, getString(Res.string.media_image_saved))
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
-        toast(context, "Failed to save image: ${e.localizedMessage ?: ""}")
+        Logger.w(e) { "Saving an image failed" }
+        toast(context, getString(Res.string.media_image_save_failed))
     }
 }
 
+@Suppress("TooGenericExceptionCaught") // removes the pending row, then rethrows
 private fun writeImageToGallery(context: Context, image: EncodedImage) {
     val fileName = "switchboard_${System.currentTimeMillis()}.${image.extension}"
     val contentValues = ContentValues().apply {
@@ -282,12 +290,4 @@ private suspend fun toast(context: Context, message: String) {
     withContext(Dispatchers.Main) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
-}
-
-private fun shareUrlText(context: Context, url: String) {
-    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-        putExtra(Intent.EXTRA_TEXT, url)
-        type = "text/plain"
-    }
-    context.startActivity(Intent.createChooser(sendIntent, null))
 }

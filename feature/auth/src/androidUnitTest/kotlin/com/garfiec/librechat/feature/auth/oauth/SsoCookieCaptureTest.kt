@@ -1,0 +1,128 @@
+package com.garfiec.librechat.feature.auth.oauth
+
+import com.garfiec.librechat.core.model.auth.AuthCookies
+import com.garfiec.librechat.core.model.auth.OpenIdMarkers
+import com.google.common.truth.Truth.assertThat
+import org.junit.Test
+
+class SsoCookieCaptureTest {
+
+    @Test
+    fun `captures reuse session as one bundle`() {
+        assertThat(extractAuthCookies("refreshToken=idp; token_provider=openid; openid_user_id=marker"))
+            .isEqualTo(AuthCookies("idp", OpenIdMarkers("marker")))
+        assertThat(extractAuthCookies("refreshToken=idp; token_provider=openid")).isNull()
+    }
+
+    @Test
+    fun `cookie paths respect deployment segment boundaries`() {
+        assertThat(cookiePathAppliesTo("/librechat", "/librechat/api/auth/refresh")).isTrue()
+        assertThat(cookiePathAppliesTo("/librechat/", "/librechat/api/auth/refresh")).isTrue()
+        assertThat(cookiePathAppliesTo("/librechat", "/librechat-other/api/auth/refresh")).isFalse()
+        assertThat(cookiePathAppliesTo("/other", "/librechat/api/auth/refresh")).isFalse()
+    }
+
+    @Test
+    fun `extracts refresh token from header`() {
+        assertThat(
+            extractRefreshTokenFromCookies("refreshToken=abc123"),
+        ).isEqualTo("abc123")
+    }
+
+    @Test
+    fun `returns null when header has no refresh token`() {
+        assertThat(extractRefreshTokenFromCookies("foo=bar; baz=qux")).isNull()
+    }
+
+    @Test
+    fun `returns null for null header`() {
+        assertThat(extractRefreshTokenFromCookies(null)).isNull()
+    }
+
+    @Test
+    fun `extracts token among multiple cookies`() {
+        assertThat(
+            extractRefreshTokenFromCookies("theme=dark; refreshToken=jwt.token.here; lang=en"),
+        ).isEqualTo("jwt.token.here")
+    }
+
+    @Test
+    fun `trims surrounding whitespace`() {
+        assertThat(
+            extractRefreshTokenFromCookies("  refreshToken=tokenValue  "),
+        ).isEqualTo("tokenValue")
+    }
+
+    @Test
+    fun `does not match cookie whose name merely contains refreshToken`() {
+        assertThat(extractRefreshTokenFromCookies("oldRefreshToken=stale")).isNull()
+    }
+
+    @Test
+    fun `returns null when refresh token value is empty`() {
+        assertThat(extractRefreshTokenFromCookies("refreshToken=")).isNull()
+    }
+
+    @Test
+    fun `query param present`() {
+        assertThat(
+            extractQueryParameter("https://x.com/login?redirect=false&error=AUTH_FAILED", "error"),
+        ).isEqualTo("AUTH_FAILED")
+    }
+
+    @Test
+    fun `query param absent returns null`() {
+        assertThat(extractQueryParameter("https://x.com/login?redirect=false", "error")).isNull()
+    }
+
+    @Test
+    fun `query param not first`() {
+        assertThat(
+            extractQueryParameter("https://x.com/login?redirect=false&error=SOME_CODE", "error"),
+        ).isEqualTo("SOME_CODE")
+    }
+
+    @Test
+    fun `query param fragment excluded`() {
+        assertThat(
+            extractQueryParameter("https://x.com/login?error=E1#section", "error"),
+        ).isEqualTo("E1")
+    }
+
+    @Test
+    fun `query param name without value returns null`() {
+        assertThat(extractQueryParameter("https://x.com/login?error", "error")).isNull()
+    }
+
+    @Test
+    fun `query param exact name match not substring`() {
+        assertThat(
+            extractQueryParameter("https://x.com/login?oauth_error=NO", "error"),
+        ).isNull()
+    }
+
+    @Test
+    fun `host-only cookie matches its exact host`() {
+        assertThat(cookieAppliesTo("chat.example.com", "chat.example.com")).isTrue()
+    }
+
+    @Test
+    fun `parent-domain cookie matches a subdomain`() {
+        assertThat(cookieAppliesTo(".example.com", "chat.example.com")).isTrue()
+    }
+
+    @Test
+    fun `sibling domain does not match`() {
+        assertThat(cookieAppliesTo("evil-chat.example.com", "chat.example.com")).isFalse()
+    }
+
+    @Test
+    fun `suffix without a dot boundary does not match`() {
+        assertThat(cookieAppliesTo("ample.com", "example.com")).isFalse()
+    }
+
+    @Test
+    fun `matching is case-insensitive`() {
+        assertThat(cookieAppliesTo(".EXAMPLE.com", "Chat.Example.Com")).isTrue()
+    }
+}

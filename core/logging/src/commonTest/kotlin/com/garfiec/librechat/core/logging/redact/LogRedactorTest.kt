@@ -32,6 +32,20 @@ class LogRedactorTest {
         assertTrue(out.contains("path=/"), "surrounding content should remain: $out")
     }
 
+    /**
+     * The image cookie (see ImageCookiePlugin) puts the refresh token on an ordinary request header,
+     * which Ktor's HEADERS-level logging prints verbatim. `sanitizeHeader` cannot cover it — that
+     * predicate only matches the gateway header names the user configured — so this redactor is the
+     * only thing between a debug build and a session credential in Logcat.
+     */
+    @Test
+    fun image_cookie_header_line_is_redacted() {
+        val jwt = "eyJhbGc.eyJzdWIiOiJ1LTEifQ.SflKxwRJSMeKKF2QT4"
+        val out = redactor.redact("-> Cookie: cf_authorization=gw-value; refreshToken=$jwt")
+        assertFalse(out.contains(jwt), "refresh token leaked: $out")
+        assertTrue(out.contains("cf_authorization=gw-value"), "surrounding content should remain: $out")
+    }
+
     @Test
     fun email_is_redacted_in_free_text() {
         val out = redactor.redact("login failed for alice@example.com after retry")
@@ -44,6 +58,11 @@ class LogRedactorTest {
         val out = redactor.redact("GET https://chat.example.com/api/messages/123 failed")
         assertFalse(out.contains("chat.example.com"), "host leaked: $out")
         assertTrue(out.contains("/api/messages/123"), "path should be kept: $out")
+    }
+
+    @Test
+    fun channel_attr_passes_through() {
+        assertEquals("play", redactor.redactAttrs(mapOf("channel" to "play"))["channel"])
     }
 
     @Test
@@ -142,5 +161,81 @@ class LogRedactorTest {
         val out = redactor.redact("Authorization: Bearer eyJsecrettoken and email bob@corp.io")
         assertFalse(out.contains("eyJsecrettoken"), out)
         assertFalse(out.contains("bob@corp.io"), out)
+    }
+
+    @Test
+    fun hosts_in_transport_error_text_are_hashed() {
+        val cases = mapOf(
+            "java.net.ConnectException: Failed to connect to /10.0.2.2:3080" to listOf("10.0.2.2", "3080"),
+            "Failed to connect to chat.example.com/203.0.113.5:443" to listOf("chat.example.com", "203.0.113.5"),
+            "failed to connect to chat.example.com/203.0.113.5 (port 443) from /10.0.2.16 (port 51234) after 10000ms"
+                to listOf("chat.example.com", "203.0.113.5", "10.0.2.16"),
+            "Unable to resolve host \"chat.example.com\": No address associated with hostname"
+                to listOf("chat.example.com"),
+            "Hostname chat.example.com not verified:" to listOf("chat.example.com"),
+            "CLEARTEXT communication to chat.example.com not permitted by network security policy"
+                to listOf("chat.example.com"),
+            "connect to [::1]:3080 refused" to listOf("::1"),
+        )
+        for ((input, secrets) in cases) {
+            val out = redactor.redact(input)
+            for (secret in secrets) assertFalse(out.contains(secret), "\"$secret\" leaked: $out")
+        }
+    }
+
+    @Test
+    fun the_same_host_hashes_the_same_way_so_lines_still_correlate() {
+        val a = redactor.redact("Failed to connect to chat.example.com/203.0.113.5:443")
+        assertEquals(a, redactor.redact("Failed to connect to chat.example.com/203.0.113.5:443"))
+        assertTrue(a.startsWith("Failed to connect to host:"), a)
+    }
+
+    @Test
+    fun host_redaction_is_idempotent() {
+        val inputs = listOf(
+            "Failed to connect to /10.0.2.2:3080",
+            "Unable to resolve host \"chat.example.com\": No address",
+            "Hostname chat.example.com not verified",
+            "CLEARTEXT communication to chat.example.com not permitted",
+            "peer 192.168.1.20:8443 reset",
+            "connect to [fe80::1]:3080",
+        )
+        for (input in inputs) {
+            val once = redactor.redact(input)
+            assertEquals(once, redactor.redact(once), "not idempotent for: $input")
+        }
+    }
+
+    @Test
+    fun text_that_only_looks_like_a_host_is_left_alone() {
+        val untouched = listOf(
+            "backend 0.8.8-rc4 detected",
+            "versionName 2026.10.3-debug",
+            "at okhttp3.internal.connection.ConnectPlan.connectSocket(ConnectPlan.kt:278)",
+            "ts 2026-10-14T01:20:25.227153Z",
+            "Could not connect to server",
+            "A server with the specified hostname could not be found.",
+            "TextFileSaver::class",
+        )
+        for (input in untouched) assertEquals(input, redactor.redact(input))
+    }
+
+    @Test
+    fun file_name_is_hashed_stably_and_keeps_a_short_extension() {
+        val redacted = LogRedactor.redactFileName("Tax return 2025.pdf")
+        assertEquals(redacted, LogRedactor.redactFileName("Tax return 2025.pdf"))
+        assertTrue(Regex("file:[0-9a-f]{8}\\.pdf").matches(redacted), redacted)
+        assertFalse(redacted.contains("Tax"))
+        assertTrue(LogRedactor.redactFileName("Tax return 2024.pdf") != redacted)
+        // The sink leaves an already-redacted name alone.
+        assertEquals("read $redacted", LogRedactor().redact("read $redacted"))
+    }
+
+    @Test
+    fun file_name_without_a_short_extension_is_hash_only() {
+        assertTrue(Regex("file:[0-9a-f]{8}").matches(LogRedactor.redactFileName("README")))
+        assertTrue(Regex("file:[0-9a-f]{8}").matches(LogRedactor.redactFileName(".bashrc")))
+        assertTrue(Regex("file:[0-9a-f]{8}").matches(LogRedactor.redactFileName("notes.my secret plan")))
+        assertTrue(Regex("file:[0-9a-f]{8}").matches(LogRedactor.redactFileName("trailing.")))
     }
 }

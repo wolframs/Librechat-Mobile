@@ -12,8 +12,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * ONE transform for both concerns on purpose. Activity grouping and steer segmentation both carve
  * up the same list, and two passes would eventually disagree about a boundary — a group spanning a
  * steer would render the user's words inside a collapsed tool block. Pure and memoizable so the
- * boundaries can be asserted directly; this module has no Compose test harness, so a function is
- * the only testable form.
+ * boundaries can be asserted directly.
  *
  * Mirrors upstream `client/src/utils/groupToolCalls.ts` (grouping) and the `postSteerAuthors` pass
  * in `ContentParts.tsx` (segmentation).
@@ -133,8 +132,13 @@ sealed interface ContentGroup {
         override val entries: List<IndexedContentPart>,
         /** The model-written summary, or empty for an unlabeled block. */
         val labelText: String,
-        /** The batch reported `failed` or `partial`. */
-        val failed: Boolean,
+        /** The batch label reported `failed`: every call in it failed, so the header reads failed. */
+        val labelFailed: Boolean,
+        /**
+         * The batch label reported `partial`: outcomes were mixed. NOT a failed header (upstream
+         * #16949); the failed rows and the "n/N failed" count say what went wrong.
+         */
+        val labelPartial: Boolean,
         /** Tool calls in the block. Absorbed reasoning parts are not counted. */
         val toolCount: Int,
         /** Every tool returned, or the label settled (which only happens after they all do). */
@@ -180,6 +184,8 @@ fun outputToolCallIds(parts: List<MessageContentPart>): List<String> {
             val call = part.toolCall ?: return@forEach
             call.id?.takeIf(String::isNotEmpty)?.let(ids::add)
             call.subagentContent?.let(::walk)
+            // A previewed subagent call left its transcript out; its file-bearing child calls ride along.
+            omittedTranscriptCalls(call).forEach { ids.add(it.id) }
         }
     }
     walk(parts)
@@ -335,7 +341,8 @@ private fun activityGroup(entries: List<IndexedContentPart>, label: MessageConte
         key = activityGroupKey(entries),
         entries = entries,
         labelText = labelText,
-        failed = label?.status == "failed" || label?.status == "partial",
+        labelFailed = label?.status == "failed",
+        labelPartial = label?.status == "partial",
         toolCount = tools.size,
         completed = labelSettled || tools.all { it.part.toolCall?.output?.isNotEmpty() == true },
     )

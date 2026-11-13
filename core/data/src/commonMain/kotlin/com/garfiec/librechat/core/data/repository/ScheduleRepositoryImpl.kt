@@ -1,0 +1,77 @@
+package com.garfiec.librechat.core.data.repository
+
+import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
+import com.garfiec.librechat.core.common.identity.currentAccountId
+import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.common.result.safeApiCall
+import com.garfiec.librechat.core.data.datastore.ScheduleWatchList
+import com.garfiec.librechat.core.model.schedule.CreateScheduleRequest
+import com.garfiec.librechat.core.model.schedule.RevokeScheduleMcpConsentRequest
+import com.garfiec.librechat.core.model.schedule.Schedule
+import com.garfiec.librechat.core.model.schedule.ScheduleListResponse
+import com.garfiec.librechat.core.model.schedule.ScheduleMcpConsentView
+import com.garfiec.librechat.core.model.schedule.ScheduleRunNowResponse
+import com.garfiec.librechat.core.model.schedule.UpdateScheduleRequest
+import com.garfiec.librechat.core.model.schedule.confirmScheduleMcpConsentBody
+import com.garfiec.librechat.core.network.api.SchedulesApi
+
+class ScheduleRepositoryImpl(
+    private val schedulesApi: SchedulesApi,
+    private val watchList: ScheduleWatchList,
+    private val accounts: ActiveAccountProvider,
+) : ScheduleRepository {
+
+    override suspend fun listSchedules(): Result<ScheduleListResponse> {
+        // Captured before the request, so a list that lands after an account switch is not stored
+        // under the new account.
+        val account = accounts.currentAccountId()
+        val result = safeApiCall { schedulesApi.listSchedules() }
+        if (result is Result.Success && account != null) watchList.replace(account, result.data.schedules)
+        return result
+    }
+
+    override suspend fun getSchedule(id: String): Result<Schedule> =
+        safeApiCall { schedulesApi.getSchedule(id) }
+
+    override suspend fun createSchedule(request: CreateScheduleRequest): Result<Schedule> =
+        safeApiCall { schedulesApi.createSchedule(request) }
+
+    override suspend fun updateSchedule(
+        id: String,
+        request: UpdateScheduleRequest,
+    ): Result<Schedule> {
+        // A no-op edit is a 400 server-side. Answering it here keeps a Save on an untouched form
+        // from reporting a failure the user cannot act on.
+        if (request.isEmpty) return safeApiCall { schedulesApi.getSchedule(id) }
+        return safeApiCall { schedulesApi.updateSchedule(id, request) }
+    }
+
+    override suspend fun deleteSchedule(id: String): Result<Unit> =
+        safeApiCall { schedulesApi.deleteSchedule(id) }.let { result ->
+            // `202` means a live run is still draining, which is still a successful delete from
+            // the caller's point of view — the row will not fire again either way.
+            when (result) {
+                is Result.Success -> Result.Success(Unit)
+                is Result.Error -> result
+                is Result.Loading -> Result.Loading
+            }
+        }
+
+    override suspend fun runScheduleNow(id: String): Result<ScheduleRunNowResponse> =
+        safeApiCall { schedulesApi.runScheduleNow(id) }
+
+    override suspend fun getMcpConsent(id: String): Result<ScheduleMcpConsentView> =
+        safeApiCall { schedulesApi.getMcpConsent(id) }
+
+    override suspend fun confirmMcpConsent(
+        id: String,
+        offerDigest: String,
+        expectedRevision: String?,
+        lifetimeHours: Int,
+    ): Result<ScheduleMcpConsentView> = safeApiCall {
+        schedulesApi.confirmMcpConsent(id, confirmScheduleMcpConsentBody(offerDigest, expectedRevision, lifetimeHours))
+    }
+
+    override suspend fun revokeMcpConsent(id: String, expectedRevision: String): Result<Unit> =
+        safeApiCall { schedulesApi.revokeMcpConsent(id, RevokeScheduleMcpConsentRequest(expectedRevision)) }
+}

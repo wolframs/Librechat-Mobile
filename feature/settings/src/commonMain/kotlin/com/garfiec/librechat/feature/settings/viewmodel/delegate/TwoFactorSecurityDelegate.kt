@@ -2,15 +2,31 @@ package com.garfiec.librechat.feature.settings.viewmodel.delegate
 
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.repository.AuthRepository
+import com.garfiec.librechat.feature.settings.viewmodel.AccountSettingsUiState
 import com.garfiec.librechat.feature.settings.viewmodel.SettingsStateHandle
 import com.garfiec.librechat.feature.settings.viewmodel.isHttpStatus
 import kotlinx.coroutines.launch
 
 /**
+ * The account providers enforced 2FA applies to: upstream `TWO_FACTOR_POLICY_PROVIDERS`
+ * (`packages/data-provider/src/config.ts`), registered in `scripts/mirrors.json`. Federated accounts
+ * are left to their identity provider.
+ */
+internal val TWO_FACTOR_POLICY_PROVIDERS = setOf("local", "ldap")
+
+/** Whether 2FA applies to an account of [provider] at all: upstream `isTwoFactorPolicyProvider` (unknown counts). */
+internal fun isTwoFactorPolicyProvider(provider: String?): Boolean =
+    provider == null || provider in TWO_FACTOR_POLICY_PROVIDERS
+
+/** Whether the server refuses to disable 2FA for an account of [provider]. */
+internal fun isTwoFactorRequiredFor(enforced: Boolean?, provider: String?): Boolean =
+    enforced == true && isTwoFactorPolicyProvider(provider)
+
+/**
  * Handles 2FA setup, backup codes, and disable flow.
  */
 class TwoFactorSecurityDelegate(
-    private val stateHandle: SettingsStateHandle,
+    private val stateHandle: SettingsStateHandle<AccountSettingsUiState>,
     private val authRepository: AuthRepository,
 ) {
 
@@ -90,10 +106,11 @@ class TwoFactorSecurityDelegate(
         }
     }
 
-    fun confirmDisableTwoFactor(code: String) {
+    /** Either code works: losing the authenticator is the usual reason to turn 2FA off. */
+    fun confirmDisableTwoFactor(token: String?, backupCode: String?) {
         stateHandle.scope.launch {
             stateHandle.update { copy(isTwoFactorLoading = true) }
-            when (val result = authRepository.disableTwoFactor(code)) {
+            when (val result = authRepository.disableTwoFactor(token = token, backupCode = backupCode)) {
                 is Result.Success -> {
                     stateHandle.update {
                         copy(
@@ -129,9 +146,33 @@ class TwoFactorSecurityDelegate(
     }
 
     /**
-     * View/regenerate backup codes. Requires OTP when 2FA is enabled.
+     * Regenerating is the only backup-code operation the server has: it stores hashes, so there
+     * is nothing to "view". Every existing code stops working, which is why it is confirmed first.
      */
-    fun viewBackupCodes(token: String? = null, backupCode: String? = null) {
+    fun requestRegenerateBackupCodes() {
+        stateHandle.update { copy(showRegenerateBackupCodesConfirm = true) }
+    }
+
+    fun dismissRegenerateBackupCodesConfirm() {
+        stateHandle.update { copy(showRegenerateBackupCodesConfirm = false) }
+    }
+
+    /**
+     * The code is collected before the request: with 2FA on the server refuses a bare request, and
+     * the action only exists while 2FA is on. The 400 fallback in [regenerateBackupCodes] remains
+     * for a profile that is out of date.
+     */
+    fun confirmRegenerateBackupCodes() {
+        stateHandle.update {
+            copy(
+                showRegenerateBackupCodesConfirm = false,
+                showBackupCodesOtpDialog = isTwoFactorEnabled,
+            )
+        }
+        if (!stateHandle.state.isTwoFactorEnabled) regenerateBackupCodes()
+    }
+
+    fun regenerateBackupCodes(token: String? = null, backupCode: String? = null) {
         stateHandle.scope.launch {
             stateHandle.update { copy(isTwoFactorLoading = true) }
             when (val result = authRepository.regenerateBackupCodes(token = token, backupCode = backupCode)) {
@@ -152,7 +193,7 @@ class TwoFactorSecurityDelegate(
                         copy(
                             isTwoFactorLoading = false,
                             showBackupCodesOtpDialog = if (needsOtp) true else showBackupCodesOtpDialog,
-                            error = if (needsOtp) null else (result.message ?: "Failed to retrieve backup codes"),
+                            error = if (needsOtp) null else (result.message ?: "Failed to regenerate backup codes"),
                         )
                     }
                 }

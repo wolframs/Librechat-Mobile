@@ -3,6 +3,10 @@ package com.garfiec.librechat.core.ui.media
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
+import coil3.request.ImageRequest
+import coil3.toBitmap
 import com.garfiec.librechat.core.ui.platform.currentTopmostViewController
 import com.garfiec.librechat.core.ui.platform.presentSheet
 import kotlinx.cinterop.BetaInteropApi
@@ -12,7 +16,10 @@ import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
 import platform.Foundation.NSData
+import platform.Foundation.NSFileManager
 import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSURL
 import platform.Foundation.create
@@ -26,7 +33,36 @@ import platform.UIKit.UIActivityViewController
 actual fun rememberSaveImageToGallery(): ((url: String) -> Unit)? = null
 
 @Composable
-actual fun rememberShareImage(): (url: String) -> Unit = { url -> shareUrl(url) }
+actual fun rememberShareImage(): (url: String) -> Unit {
+    val scope = rememberCoroutineScope()
+    return remember(scope) { { url -> scope.launch { shareImage(url) } } }
+}
+
+/**
+ * Shares the image itself, not its URL. From v0.8.8-rc2 the server's `/images/` mount answers only
+ * a request carrying the owner's session cookie, so a shared link opens to a 401 for anyone else —
+ * the user's own Safari included. The image loader carries that cookie, so the bytes come back
+ * through it. iOS configures no Coil disk cache, so unlike Android there are no original bytes to
+ * read and the decoded image is re-encoded as PNG. The URL is shared only when nothing loads.
+ */
+private suspend fun shareImage(url: String) {
+    val png = loadAsPng(url)
+    if (png == null) {
+        shareText(url)
+        return
+    }
+    shareFile(png, filename = "image", mime = "image/png")
+}
+
+private suspend fun loadAsPng(url: String): ByteArray? {
+    val context = PlatformContext.INSTANCE
+    val bitmap = SingletonImageLoader.get(context)
+        .execute(ImageRequest.Builder(context).data(url).build())
+        .image?.toBitmap() ?: return null
+    return withContext(Dispatchers.Default) {
+        Image.makeFromBitmap(bitmap).encodeToData(EncodedImageFormat.PNG)?.bytes
+    }
+}
 
 @Composable
 actual fun rememberShareFile(): (bytes: ByteArray, filename: String, mime: String?) -> Unit {
@@ -36,27 +72,13 @@ actual fun rememberShareFile(): (bytes: ByteArray, filename: String, mime: Strin
     }
 }
 
-private fun shareUrl(url: String) {
-    val viewController = currentTopmostViewController() ?: return
-    val activityVC = UIActivityViewController(
-        activityItems = listOf(url),
-        applicationActivities = null,
-    )
-    presentSheet(activityVC, from = viewController)
-}
-
 // Writes the downloaded bytes to a temp file and shares the file URL, so the user can open it in
 // another app / save to Files / AirDrop. Mirrors the diagnostic-log saver's NSData + temp-file
-// pattern (see feature/settings LogFileSaver.ios.kt and the project iOS cinterop gotchas).
+// pattern (see platform/TextFileSaver.ios.kt and the project iOS cinterop gotchas).
 // The NSData copy and disk write are sized by the file, so they run off the main thread; only the
 // UIKit presentation hops back to main.
-@OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
 private suspend fun shareFile(bytes: ByteArray, filename: String, mime: String?) {
-    val tempPath = NSTemporaryDirectory() + ensureExtension(sanitizeFilename(filename), mime)
-    val wrote = withContext(Dispatchers.Default) {
-        bytes.toNSData().writeToFile(tempPath, atomically = true)
-    }
-    if (!wrote) return
+    val tempPath = writeTempFile(bytes, filename, mime) ?: return
     withContext(Dispatchers.Main) {
         val viewController = currentTopmostViewController() ?: return@withContext
         val activityVC = UIActivityViewController(
@@ -67,8 +89,27 @@ private suspend fun shareFile(bytes: ByteArray, filename: String, mime: String?)
     }
 }
 
+/**
+ * Writes [bytes] to a temp file named for the file, off the main thread; its path, or null. With a
+ * [folder], the file goes alone into that temp subfolder, emptied first.
+ */
+@OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
+internal suspend fun writeTempFile(bytes: ByteArray, filename: String, mime: String?, folder: String? = null): String? =
+    withContext(Dispatchers.Default) {
+        val dir = if (folder == null) {
+            NSTemporaryDirectory()
+        } else {
+            val path = NSTemporaryDirectory() + folder
+            NSFileManager.defaultManager.removeItemAtPath(path, null)
+            NSFileManager.defaultManager.createDirectoryAtPath(path, withIntermediateDirectories = true, attributes = null, error = null)
+            "$path/"
+        }
+        val tempPath = dir + ensureExtension(sanitizeFilename(filename), mime)
+        tempPath.takeIf { bytes.toNSData().writeToFile(tempPath, atomically = true) }
+    }
+
 /** Strips path separators so a server-supplied filename can't escape the temp dir. */
-private fun sanitizeFilename(filename: String): String =
+internal fun sanitizeFilename(filename: String): String =
     filename.substringAfterLast('/').substringAfterLast('\\').ifBlank { "file" }
 
 /**

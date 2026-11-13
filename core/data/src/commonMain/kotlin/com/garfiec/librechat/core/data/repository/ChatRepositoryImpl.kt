@@ -6,16 +6,21 @@ import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.common.result.safeApiCall
 import com.garfiec.librechat.core.model.FileReference
 import com.garfiec.librechat.core.model.PendingSteer
+import com.garfiec.librechat.core.model.ReasoningOverride
 import com.garfiec.librechat.core.model.StreamEvent
+import com.garfiec.librechat.core.model.code.CodeWorkspaceSubmission
 import com.garfiec.librechat.core.model.error.ServerErrorCode
 import com.garfiec.librechat.core.model.request.AddedConversation
 import com.garfiec.librechat.core.model.request.ChatResumeRequest
+import com.garfiec.librechat.core.model.request.EditedContent
 import com.garfiec.librechat.core.model.request.EphemeralAgent
+import com.garfiec.librechat.core.model.request.SteerArmRequest
 import com.garfiec.librechat.core.model.request.SteerCancelRequest
 import com.garfiec.librechat.core.model.request.SteerRequest
 import com.garfiec.librechat.core.model.response.ChatAbortResponse
 import com.garfiec.librechat.core.model.response.ChatResumeResponse
 import com.garfiec.librechat.core.model.response.ChatStatusResponse
+import com.garfiec.librechat.core.model.response.SteerArmResponse
 import com.garfiec.librechat.core.model.response.SteerCancelResponse
 import com.garfiec.librechat.core.model.response.SteerResponse
 import com.garfiec.librechat.core.network.api.ChatApi
@@ -23,9 +28,12 @@ import com.garfiec.librechat.core.network.sse.SseClient
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -36,7 +44,20 @@ class ChatRepositoryImpl(
     private val connectivityObserver: ConnectivityObserver,
     private val dispatcher: CoroutineDispatcher,
     private val json: Json,
+    private val projectChanges: ProjectChangeSignal,
 ) : ChatRepository {
+
+    // New chats sent with a chatProjectId whose first reply hasn't finished. The server saves the
+    // conversation, filed, only then; the reply often finishes on a resumed stream, after the screen
+    // that started it is gone, so both stream paths check here.
+    private val filedChatsPending = MutableStateFlow<Set<String>>(emptySet())
+
+    private fun Flow<StreamEvent>.announcingFiledChat(conversationId: String): Flow<StreamEvent> = onEach { event ->
+        if (event is StreamEvent.Final && conversationId in filedChatsPending.value) {
+            filedChatsPending.update { it - conversationId }
+            projectChanges.bump()
+        }
+    }
 
     override fun startChat(
         text: String,
@@ -53,15 +74,21 @@ class ChatRepositoryImpl(
         responseMessageId: String?,
         isEdited: Boolean,
         isRegenerate: Boolean,
+        compact: Boolean?,
         isContinued: Boolean,
         webSearch: Boolean,
         files: List<FileReference>?,
         addedConvo: AddedConversation?,
         ephemeralAgent: EphemeralAgent?,
         isTemporary: Boolean,
-        cacheTtl: String?,
         modelParams: JsonObject?,
         quotes: List<String>?,
+        spec: String?,
+        chatProjectId: String?,
+        manualSkills: List<String>?,
+        editedContent: EditedContent?,
+        reasoningOverride: ReasoningOverride?,
+        codeWorkspace: CodeWorkspaceSubmission?,
     ): Flow<StreamEvent> = flow {
         // Phase 1: POST to start the chat - get back a streamId (= conversationId)
         val request = ChatPayloadBuilder.build(
@@ -72,6 +99,7 @@ class ChatRepositoryImpl(
             key = key,
             modelDisplayLabel = modelDisplayLabel,
             model = model,
+            spec = spec,
             userMessageId = userMessageId,
             parentMessageId = parentMessageId,
             agentId = agentId,
@@ -79,14 +107,19 @@ class ChatRepositoryImpl(
             responseMessageId = responseMessageId,
             isEdited = isEdited,
             isRegenerate = isRegenerate,
+            compact = compact,
             isContinued = isContinued,
             webSearch = webSearch,
             files = files,
             addedConvo = addedConvo,
             ephemeralAgent = ephemeralAgent,
             isTemporary = isTemporary,
-            cacheTtl = cacheTtl,
             quotes = quotes,
+            chatProjectId = chatProjectId,
+            manualSkills = manualSkills,
+            editedContent = editedContent,
+            reasoningOverride = reasoningOverride,
+            codeWorkspace = codeWorkspace,
         )
         // A send whose parent response is still being written now 409s ("Cannot submit a
         // follow-up while the selected parent response is still being saved"), which an
@@ -108,6 +141,7 @@ class ChatRepositoryImpl(
             chatApi.startChat(endpoint, ChatPayloadBuilder.toBody(json, request, modelParams))
         }
         val streamId = startResponse.conversationId
+        if (chatProjectId != null) filedChatsPending.update { it + streamId }
 
         // Emit a Created event from the POST response so the ViewModel
         // knows the conversationId before any SSE events arrive.
@@ -120,7 +154,10 @@ class ChatRepositoryImpl(
 
         // Phase 2: GET the SSE stream using the streamId
         val streamUrl = "api/agents/chat/stream/$streamId"
-        emitAll(sseClient.connect(streamUrl, connectivityFlow = connectivityObserver.isConnected))
+        emitAll(
+            sseClient.connect(streamUrl, connectivityFlow = connectivityObserver.isConnected)
+                .announcingFiledChat(streamId),
+        )
     }.flowOn(dispatcher)
 
     override suspend fun abortChat(
@@ -131,11 +168,12 @@ class ChatRepositoryImpl(
         when (
             val result = retryWhile(
                 // The run acknowledged the stop but has not reached a point where it can be
-                // stopped. The server explicitly asks to be asked again (`Retry-After: 1`), so
+                // stopped, or it stopped and saving the partial failed (the run is kept for a
+                // retry). The server asks to be asked again (`Retry-After: 1`) for both, so
                 // reporting a stop failure here would be a lie the user has to act on.
                 retryable = {
                     it.statusCode == HTTP_CONFLICT &&
-                        it.generationErrorCode == ServerErrorCode.RUN_STILL_ACTIVE
+                        it.generationErrorCode in RETRYABLE_ABORT_CODES
                 },
             ) { safeApiCall { chatApi.abortChat(streamId, isTemporary) } }
         ) {
@@ -158,6 +196,10 @@ class ChatRepositoryImpl(
 
     override suspend fun cancelSteer(request: SteerCancelRequest): Result<SteerCancelResponse> = safeApiCall {
         chatApi.cancelSteer(request)
+    }
+
+    override suspend fun armSteer(request: SteerArmRequest): Result<SteerArmResponse> = safeApiCall {
+        chatApi.armSteer(request)
     }
 
     override suspend fun checkStreamStatus(
@@ -187,9 +229,16 @@ class ChatRepositoryImpl(
         return status.copy(unrecoveredSteers = emptyList())
     }
 
+    override suspend fun getActiveJobIds(): Result<Set<String>> = safeApiCall {
+        chatApi.getActiveJobs().activeJobIds.toSet()
+    }
+
     override fun resumeStream(conversationId: String): Flow<StreamEvent> = flow {
         val streamUrl = "api/agents/chat/stream/$conversationId"
-        emitAll(sseClient.connect(streamUrl, resume = true, connectivityFlow = connectivityObserver.isConnected))
+        emitAll(
+            sseClient.connect(streamUrl, resume = true, connectivityFlow = connectivityObserver.isConnected)
+                .announcingFiledChat(conversationId),
+        )
     }.flowOn(dispatcher)
 
     /**
@@ -250,6 +299,10 @@ class ChatRepositoryImpl(
     private val ApiException.generationErrorCode: String? get() = ServerErrorCode.generationCodeOf(body)
 
     private companion object {
+        val RETRYABLE_ABORT_CODES = setOf(
+            ServerErrorCode.RUN_STILL_ACTIVE,
+            ServerErrorCode.ABORT_PERSISTENCE_FAILED,
+        )
         const val HTTP_CONFLICT = 409
         const val HTTP_SERVICE_UNAVAILABLE = 503
 

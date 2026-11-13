@@ -5,13 +5,21 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import com.garfiec.librechat.core.common.ChannelPolicy
 import com.garfiec.librechat.core.common.di.KoinQualifiers
 import com.garfiec.librechat.core.data.datastore.CommonTokenDataStore
 import com.garfiec.librechat.core.data.datastore.IosTokenDataStore
+import com.garfiec.librechat.core.data.datastore.PreferenceMigrationRunner
 import com.garfiec.librechat.core.data.datastore.ServerUrlKeychainFallback
+import com.garfiec.librechat.core.data.datastore.iosAppSupportDirectory
+import com.garfiec.librechat.core.data.datastore.iosDataStoreDirectory
+import com.garfiec.librechat.core.data.datastore.iosDataStorePath
+import com.garfiec.librechat.core.data.datastore.iosDatabasePath
 import com.garfiec.librechat.core.data.db.LibreChatDatabase
 import com.garfiec.librechat.core.data.db.migration.MIGRATION_3_4
 import com.garfiec.librechat.core.data.db.migration.MIGRATION_4_5
+import com.garfiec.librechat.core.data.pdf.PdfKitPdfNormalizer
+import com.garfiec.librechat.core.data.pdf.PdfNormalizer
 import com.garfiec.librechat.core.data.prefetch.AttachmentWarmer
 import com.garfiec.librechat.core.data.prefetch.IosPrefetchScheduler
 import com.garfiec.librechat.core.data.prefetch.NoopAttachmentWarmer
@@ -20,7 +28,11 @@ import com.garfiec.librechat.core.data.repository.CommonSessionCacheCleaner
 import com.garfiec.librechat.core.data.repository.IosSwitchCacheCleaner
 import com.garfiec.librechat.core.data.repository.SessionCacheCleaner
 import com.garfiec.librechat.core.data.repository.SwitchCacheCleaner
-import com.garfiec.librechat.core.network.client.SecureTokenStorage
+import com.garfiec.librechat.core.data.update.AppInstallSource
+import com.garfiec.librechat.core.data.update.AppUpdateRepository
+import com.garfiec.librechat.core.data.update.AppUpdateRepositoryImpl
+import com.garfiec.librechat.core.data.update.NoopAppInstallSource
+import com.garfiec.librechat.core.network.client.RefreshCookieCredentials
 import com.garfiec.librechat.core.network.client.TokenManager
 import io.ktor.client.HttpClient
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -32,7 +44,6 @@ import org.koin.dsl.binds
 import org.koin.dsl.module
 import platform.Foundation.NSCachesDirectory
 import platform.Foundation.NSFileManager
-import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSUserDomainMask
 
@@ -45,12 +56,24 @@ actual val dataPlatformModule: Module = module {
 
     single<AttachmentWarmer> { NoopAttachmentWarmer() }
     single<PrefetchScheduler> { IosPrefetchScheduler() }
+    single<PdfNormalizer> { PdfKitPdfNormalizer() }
+    single<AppInstallSource> { NoopAppInstallSource() }
+    single<AppUpdateRepository> {
+        // iOS has no self-update path on any channel; the open-source IPA still offers release notes.
+        AppUpdateRepositoryImpl(
+            isSupported = false,
+            releaseNotesSupported = get<ChannelPolicy>().releaseNotes,
+            api = get(),
+            store = get(),
+            appInfo = get(),
+        )
+    }
 
     // --- Database ---
     single {
-        val dbDir = NSHomeDirectory() + "/Library/Application Support"
+        val dbDir = iosAppSupportDirectory()
         ensureDirectoryExists(dbDir)
-        Room.databaseBuilder<LibreChatDatabase>(name = "$dbDir/librechat.db")
+        Room.databaseBuilder<LibreChatDatabase>(name = iosDatabasePath())
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(Dispatchers.IO)
             .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
@@ -59,11 +82,12 @@ actual val dataPlatformModule: Module = module {
 
     // --- DataStore ---
     single<DataStore<Preferences>> {
-        val datastoreDir = NSHomeDirectory() + "/Library/Application Support/datastore"
+        val datastoreDir = iosDataStoreDirectory()
         ensureDirectoryExists(datastoreDir)
-        val path = "$datastoreDir/$DATASTORE_FILE_NAME.preferences_pb"
+        val path = iosDataStorePath()
         PreferenceDataStoreFactory.createWithPath(
             corruptionHandler = settingsCorruptionHandler(),
+            migrations = listOf(PreferenceMigrationRunner(get())),
             produceFile = { path.toPath() },
         )
     }
@@ -78,7 +102,9 @@ actual val dataPlatformModule: Module = module {
         // deliberately not part of the TokenManager contract.
     } binds arrayOf(
         TokenManager::class,
-        SecureTokenStorage::class,
+        // The refresh-cookie seam (ImageCookiePlugin, logout): per-account refresh-token reads, kept off
+        // TokenManager so the six fakes that implement it don't gain a second credential.
+        RefreshCookieCredentials::class,
         ServerUrlKeychainFallback::class,
         CommonTokenDataStore::class,
     )

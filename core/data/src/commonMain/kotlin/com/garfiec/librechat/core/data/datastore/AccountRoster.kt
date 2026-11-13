@@ -80,6 +80,11 @@ class AccountRoster(
         }
     }
 
+    /** Clear the active pointer while retaining the roster entries for later sign-in. */
+    suspend fun deactivate() {
+        dataStore.edit { prefs -> prefs.remove(KEY_ACTIVE_ACCOUNT_ID) }
+    }
+
     /**
      * Refresh [accountId]'s display label + avatar — one atomic edit, touching nothing else (no
      * activation, no recency bump). The session-start backfill path: a migrated pre-roster entry is
@@ -88,12 +93,19 @@ class AccountRoster(
      * [accountId] isn't in the roster.
      */
     suspend fun updateDisplay(accountId: String, displayLabel: String, avatarUrl: String?) {
+        updateEntry(accountId) { it.copy(displayLabel = displayLabel, avatarUrl = avatarUrl) }
+    }
+
+    /** Replace only [accountId]'s avatar — the profile-picture upload path. No-op if [accountId] isn't in the roster. */
+    suspend fun updateAvatar(accountId: String, avatarUrl: String?) {
+        updateEntry(accountId) { it.copy(avatarUrl = avatarUrl?.takeIf { url -> url.isNotBlank() }) }
+    }
+
+    private suspend fun updateEntry(accountId: String, transform: (AccountEntry) -> AccountEntry) {
         dataStore.edit { prefs ->
             val entries = prefs.readEntries()
             if (entries.none { it.accountId == accountId }) return@edit
-            val updated = entries.map {
-                if (it.accountId == accountId) it.copy(displayLabel = displayLabel, avatarUrl = avatarUrl) else it
-            }
+            val updated = entries.map { if (it.accountId == accountId) transform(it) else it }
             prefs[KEY_ROSTER] = json.encodeToString(listSerializer, updated)
         }
     }

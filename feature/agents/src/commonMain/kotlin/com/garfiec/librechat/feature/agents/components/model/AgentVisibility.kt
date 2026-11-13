@@ -1,10 +1,13 @@
 package com.garfiec.librechat.feature.agents.components.model
 
-import kotlinx.serialization.Serializable
+import com.garfiec.librechat.feature.agents.resources.Res
+import com.garfiec.librechat.feature.agents.resources.visibility_private
+import com.garfiec.librechat.feature.agents.resources.visibility_public
+import com.garfiec.librechat.feature.agents.resources.visibility_team
+import org.jetbrains.compose.resources.StringResource
 
-@Serializable
-enum class AgentVisibility(val label: String) {
-    PRIVATE("Private"),
-    TEAM("Team"),
-    PUBLIC("Public"),
+enum class AgentVisibility(val label: StringResource) {
+    PRIVATE(Res.string.visibility_private),
+    TEAM(Res.string.visibility_team),
+    PUBLIC(Res.string.visibility_public),
 }

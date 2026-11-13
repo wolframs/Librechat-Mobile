@@ -5,15 +5,24 @@ import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.repository.ChatRepository
 import com.garfiec.librechat.core.model.PendingSteer
+import com.garfiec.librechat.core.model.config.DEFAULT_STEER_ARM_CONFIRMATION_TIMEOUT_MS
+import com.garfiec.librechat.core.model.error.StreamErrorType
+import com.garfiec.librechat.core.model.request.SteerArmRequest
 import com.garfiec.librechat.core.model.request.SteerCancelRequest
 import com.garfiec.librechat.core.model.request.SteerRequest
+import com.garfiec.librechat.core.model.response.SteerResponse
+import com.garfiec.librechat.core.model.steer.mergeRestagedQuotes
 import com.garfiec.librechat.core.model.steer.parseSteerRejectionCode
+import com.garfiec.librechat.core.network.api.chatRefusalText
 import com.garfiec.librechat.feature.chat.viewmodel.PendingSteerChip
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import com.garfiec.librechat.feature.chat.viewmodel.SteerChipStatus
+import com.garfiec.librechat.feature.chat.viewmodel.SteerNotice
 import com.garfiec.librechat.feature.chat.viewmodel.SteerState
 import com.garfiec.librechat.feature.chat.viewmodel.SteeringHandle
+import com.garfiec.librechat.feature.chat.viewmodel.refusalErrorMarker
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -29,7 +38,8 @@ import kotlin.uuid.Uuid
  * **Nothing here may lose the user's text, duplicate it, or send text they withdrew.** Steering
  * is best-effort by construction: the run can end, pause, or fill its queue between the user
  * hitting send and the request landing. So every failure path re-homes the words into the
- * follow-up queue, whose drain fires them when the run ends. That is also why there is no failed
+ * follow-up queue, whose drain fires them when the run ends — except a steer the server REFUSED,
+ * which would only be refused again and is held for the user instead. That is also why there is no failed
  * chip state: a queued message the user can already edit, reorder and cancel is a better home for
  * text than a dead chip they would have to nurse back to life.
  *
@@ -49,9 +59,14 @@ class SteeringDelegate(
     /** Holds a message as a follow-up for after the run; the queue's own drain fires it. */
     private val enqueueFollowUp: (QueuedMessage) -> Unit,
     /**
-     * Queues a message WITHOUT kicking the drain, so it stays put until [pauseQueue] can hold it.
-     * Only [reclaimParked] uses this, and only because the ordinary [enqueueFollowUp] self-drains
-     * the instant the run is over — which is precisely the state a parked claim arrives in.
+     * Queues a message as a local row, WITHOUT kicking the drain, so it stays put until
+     * [pauseQueue] can hold it.
+     *
+     * For steers reclaimed from a run that did not finish cleanly: [reclaimParked],
+     * [reclaimAborted] and [reclaimLocalChips]. [enqueueFollowUp] would self-drain the instant the
+     * run is over, and while the run is still winding down it hands the text to the SERVER queue
+     * — which dead-claims a turn behind an aborted or failed run, and which, after a dropped
+     * socket, may also receive the same words from the detached run injecting the steer.
      */
     private val enqueueParked: (QueuedMessage) -> Unit,
     /**
@@ -59,8 +74,32 @@ class SteeringDelegate(
      * PARKED for a run that ended while nobody was attached — see [reclaimParked].
      */
     private val pauseQueue: () -> Unit,
+    /**
+     * Holds the follow-up queue on a steer the server's middleware REFUSED, marked so the user is
+     * told the queue now waits for them. See the refusal branch in [steer].
+     */
+    private val holdQueueForRefusal: (localId: String) -> Unit,
+    /**
+     * Tells the user that [count] steers went to the follow-up queue through [enqueueFollowUp]
+     * instead of into the reply. A one-shot signal rather than the error channel: a clean Final drains the queue inline, and the send it starts clears `error`
+     * before anything can render it.
+     */
+    private val onQueuedAsFollowUp: (count: Int) -> Unit,
     /** True while the client still believes a run is in flight. */
     private val isStreaming: () -> Boolean,
+    /**
+     * Puts excerpts back on the composer's quote chips, deduped against what is already staged
+     * ([mergeRestagedQuotes]). Called from the two places a steer's quotes are actually LOST —
+     * see [restageDroppedQuotes].
+     */
+    private val restageQuotes: (List<String>) -> Unit,
+    /**
+     * One-shot notices about an interrupt that did not happen as asked (see [SteerNotice]). Never
+     * the error channel: the words are safe in every case, only the timing changed.
+     */
+    private val onSteerNotice: (SteerNotice) -> Unit = {},
+    /** How long [arm] waits for the server before saying it couldn't confirm (`interface.steerArmConfirmationTimeoutMs`). */
+    private val armTimeoutMs: () -> Long = { DEFAULT_STEER_ARM_CONFIRMATION_TIMEOUT_MS },
 ) {
 
     /**
@@ -104,8 +143,26 @@ class SteeringDelegate(
         val status: Status,
         /** The send spec this steer falls back to. Null for steers only the server reported. */
         val spec: QueuedMessage?,
+        /**
+         * Excerpts a SERVER report handed over for a steer with no local spec (a reconnect,
+         * another device, a terminal report). Claim-on-read: the server drops its copy, so these
+         * are the only remaining one and must reach the follow-up the re-home builds.
+         */
+        val reportedQuotes: List<String> = emptyList(),
         /** The turn this steer was sent into; see [turnEpoch]. */
         val turnEpoch: Int,
+        /**
+         * The server holds it as an interrupt: the 202 echoed `preempt: true`, an arm answered
+         * `armed: true`, or a report carried the flag. Never set from the request alone — a run
+         * that can't be interrupted keeps the steer plain.
+         */
+        val preempt: Boolean = false,
+        /** Server revision of [preempt]; the higher one wins when reports disagree. */
+        val preemptRevision: Int = 0,
+        /** This steer was SENT as an interrupt, so a `preempt != true` echo must be announced. */
+        val requestedPreempt: Boolean = false,
+        /** A `/chat/steer/arm` for it is in flight. */
+        val arming: Boolean = false,
     ) {
         enum class Status {
             /** The POST is in flight; the key is a client-minted placeholder. */
@@ -133,9 +190,13 @@ class SteeringDelegate(
      * Optimistic: the chip appears immediately under a client-minted id and swaps to the
      * server's id when the 202 lands. The caller has already decided steering is available; this
      * does not re-check, it only degrades when the server disagrees.
+     *
+     * [interrupt] sends it with `preempt: true` ("Interrupt and steer"). It is still a steer in
+     * every other respect — the same chip, the same no-loss re-homing. Whether the run took the
+     * interrupt is the 202's echo; when it didn't, the steer stays plain and [onSteerNotice] says so.
      */
     @OptIn(ExperimentalUuidApi::class)
-    fun steer(conversationId: String, fallback: QueuedMessage) {
+    fun steer(conversationId: String, fallback: QueuedMessage, interrupt: Boolean = false) {
         val trimmed = fallback.text.trim()
         if (trimmed.isEmpty()) return
         val localId = "local-${Uuid.random()}"
@@ -143,11 +204,29 @@ class SteeringDelegate(
         // sent them, not by how long each round-trip took, or a steer sent first can end up
         // displayed behind one sent after it.
         val createdAt = Clock.System.now().toEpochMilliseconds()
-        records[localId] = SteerRecord(trimmed, createdAt, SteerRecord.Status.SENDING, fallback, turnEpoch)
+        records[localId] = SteerRecord(
+            trimmed,
+            createdAt,
+            SteerRecord.Status.SENDING,
+            fallback,
+            turnEpoch = turnEpoch,
+            requestedPreempt = interrupt,
+        )
         publishChips()
 
         handle.scope.launch {
-            val result = chatRepository.steerChat(SteerRequest(conversationId, trimmed))
+            val result = chatRepository.steerChat(
+                SteerRequest(
+                    conversationId = conversationId,
+                    text = trimmed,
+                    // From the SPEC, not the composer: the composer was cleared at send time, and
+                    // the spec is what every degrade path re-homes — so the excerpts travel with
+                    // the words on every route out of here.
+                    quotes = fallback.quotes.takeIf { it.isNotEmpty() },
+                    clientSteerId = localId,
+                    preempt = true.takeIf { interrupt },
+                ),
+            )
             val record = records[localId] ?: return@launch
             // Settled while the POST was in flight — a turn boundary marked it unreachable, or a
             // report already re-homed it. Its text has a home; neither branch below may give it a
@@ -162,7 +241,7 @@ class SteeringDelegate(
             }
             when (result) {
                 is Result.Success ->
-                    acknowledge(conversationId, localId, record, result.data.steerId)
+                    acknowledge(conversationId, localId, record, result.data)
 
                 is Result.Error -> {
                     Logger.d(result.exception) { "Steer rejected: ${result.message}" }
@@ -173,14 +252,41 @@ class SteeringDelegate(
                         return@launch
                     }
                     settle(localId, SteerRecord.Status.RECLAIMED)
-                    val code = parseSteerRejectionCode((result.exception as? ApiException)?.body)
-                    Logger.d { "Steer degraded to the follow-up queue (code=$code)" }
-                    record.spec?.let(enqueueFollowUp)
+                    val api = result.exception as? ApiException
+                    val refusal = api?.chatRefusalText
+                    if (refusal != null) {
+                        holdRefused(record, api, refusal)
+                        return@launch
+                    }
+                    Logger.d { "Steer degraded to the follow-up queue (code=${parseSteerRejectionCode(api?.body)})" }
+                    record.spec?.let(::queueAsFollowUp)
                 }
 
                 is Result.Loading -> settle(localId, SteerRecord.Status.RECLAIMED)
             }
         }
+    }
+
+    /**
+     * Re-homes a steer the server's middleware refused (rate limit, moderation, ban, foreign
+     * conversation — see `ChatRefusal`) into a HELD queue, and says why.
+     *
+     * Not the ordinary degrade: its queue drains on its own the moment the run ends, which for a
+     * refusal means sending the same words back into the same refusal. A rate limit counts every
+     * attempt as a violation that escalates toward a ban, moderation refuses identical text again
+     * — and on an existing conversation `denyRequest` then saves the flagged text into the thread.
+     * So the text is kept (never lose steer text) but waits for the user's own "Send queued".
+     *
+     * [enqueueParked], not [enqueueFollowUp], for the reason [reclaimParked] gives: the refusal can
+     * land after the run already ended, and the self-draining enqueue would send before the hold
+     * applied. The reason goes on the error channel at once, while the run may still be streaming.
+     */
+    private fun holdRefused(record: SteerRecord, api: ApiException, refusal: String) {
+        Logger.d { "Steer refused (code=${StreamErrorType.parse(refusal)?.wire ?: "untyped"}); held in the queue" }
+        val spec = record.spec ?: return
+        enqueueParked(spec)
+        holdQueueForRefusal(spec.localId)
+        handle.update { error = refusalErrorMarker(api) ?: api.message }
     }
 
     /**
@@ -195,15 +301,41 @@ class SteeringDelegate(
     private fun acknowledge(
         conversationId: String,
         localId: String,
-        record: SteerRecord,
-        serverId: String?,
+        staged: SteerRecord,
+        ack: SteerResponse,
     ) {
-        val wasCancelled = record.status == SteerRecord.Status.CANCELLED
+        val serverId = ack.steerId
+        val wasCancelled = staged.status == SteerRecord.Status.CANCELLED
+        // A 202 without `quotesAccepted` means a pre-quotes server took the words and dropped the
+        // excerpts — but NOT that they are lost yet, and this is deliberately not where they are
+        // re-staged. The steer is still queued and will still inject; re-staging now would deliver
+        // them twice, once in the injected part and once on the next send. The one exception is a
+        // receipt replayed for a steer that has ALREADY left the queue: no future event will name
+        // it, so this is its only chance. `leftover` is excluded because that branch re-homes the
+        // whole spec, and a normal send carries quotes on any server.
+        // A receipt replayed after the item left the durable queue, by any route other than the
+        // terminal drain `leftover` names — i.e. it was INJECTED and the words are in the reply.
+        val wasInjected = ack.settled == true && ack.leftover != true
+        val quotesDropped = ack.quotesAccepted != true && staged.spec?.quotes?.isNotEmpty() == true
+        if (quotesDropped && wasInjected) {
+            restageDroppedQuotes(staged)
+        }
+        // Re-read after the restage: it strips the excerpts by REPLACING the map entry, so the
+        // record this call was handed still carries them, and every re-home below would deliver
+        // them a second time — the exact thing the strip exists to prevent.
+        val record = records[localId] ?: staged
         // A 202 with no id is unusable: it can be neither cancelled nor matched to an applied
         // event, so treat it as un-steered rather than showing a chip that can never resolve.
         if (serverId.isNullOrBlank()) {
-            settle(localId, if (wasCancelled) SteerRecord.Status.CANCELLED else SteerRecord.Status.RECLAIMED)
-            if (!wasCancelled) record.spec?.let(enqueueFollowUp)
+            val status = when {
+                wasCancelled -> SteerRecord.Status.CANCELLED
+                // An id-less ack cannot address the steer, but the receipt still says it was
+                // injected — the words are in the reply, and re-homing would deliver them twice.
+                wasInjected -> SteerRecord.Status.APPLIED
+                else -> SteerRecord.Status.RECLAIMED
+            }
+            settle(localId, status)
+            if (status == SteerRecord.Status.RECLAIMED) record.spec?.let(::queueAsFollowUp)
             return
         }
 
@@ -224,17 +356,98 @@ class SteeringDelegate(
             publishChips()
             return
         }
+        // The receipt itself says the steer already went into the reply. This is the only thing
+        // that can retire the chip when the `on_steer_applied` that would have done it was lost
+        // with the SSE stream the POST was retried over — and re-homing the spec below would
+        // queue text the user can already read in the answer. Recorded as a tombstone rather
+        // than settled live, so the run's end cannot convert it either.
+        if (wasInjected) {
+            records[serverId] = record.copy(status = SteerRecord.Status.APPLIED)
+            evictSettled()
+            publishChips()
+            return
+        }
         // Either the run is over, or a NEWER turn is running and this ack belongs to a finished
         // one. Both mean no injection is coming and no event will ever retire the chip, so the
         // text is re-homed rather than attached to a run that never accepted it.
         if (!isStreaming() || record.turnEpoch != turnEpoch) {
             records[serverId] = record.copy(status = SteerRecord.Status.RECLAIMED)
             publishChips()
-            record.spec?.let(enqueueFollowUp)
+            record.spec?.let(::queueAsFollowUp)
             return
         }
-        records[serverId] = record.copy(status = SteerRecord.Status.PENDING)
+        // The chip's interrupting look comes from the echo, never the request: a run with
+        // provider-hosted tools (or OpenRouter's `web` plugin) keeps the steer plain, and the user
+        // is told it will wait for the next step instead.
+        val interrupting = ack.preempt == true
+        records[serverId] = record.copy(
+            status = SteerRecord.Status.PENDING,
+            preempt = interrupting || existing?.preempt == true,
+            preemptRevision = maxOf(ack.preemptRevision ?: 0, existing?.preemptRevision ?: 0),
+        )
         publishChips()
+        if (record.requestedPreempt && !interrupting) onSteerNotice(SteerNotice.INTERRUPT_UNAVAILABLE)
+    }
+
+    /**
+     * Upgrades a waiting steer to an interrupt in place (`POST /chat/steer/arm`), keeping its place
+     * in line.
+     *
+     * One interrupt at a time, as on web: refused while any chip is interrupting or another arm is
+     * in flight. One attempt, no retry (web retries only on generation protocol v2; mobile is v1).
+     * The chip only changes on `armed: true`; every other outcome leaves it to the events and says
+     * what happened, because the steer itself is never at stake.
+     */
+    fun arm(steerId: String) {
+        val record = records[steerId]
+            ?.takeIf { it.status == SteerRecord.Status.PENDING && it.turnEpoch == turnEpoch && !it.preempt && !it.arming }
+            ?: return
+        if (isInterruptPending()) return
+        val conversationId = handle.state.conversationId ?: return
+        records[steerId] = record.copy(arming = true)
+        publishChips()
+        handle.scope.launch {
+            val result = withTimeoutOrNull(armTimeoutMs()) {
+                chatRepository.armSteer(SteerArmRequest(conversationId = conversationId, steerId = steerId))
+            }
+            val current = records[steerId]
+            val armed = (result as? Result.Success)?.data
+            if (current != null) {
+                records[steerId] = if (armed?.armed == true && current.isLive) {
+                    current.copy(
+                        arming = false,
+                        preempt = true,
+                        preemptRevision = maxOf(current.preemptRevision, armed.preemptRevision ?: 0),
+                    )
+                } else {
+                    current.copy(arming = false)
+                }
+            }
+            publishChips()
+            val notice = when (result) {
+                null -> SteerNotice.ARM_UNCONFIRMED
+                is Result.Success -> when {
+                    result.data.armed -> null
+                    result.data.isPreemptUnsupported -> SteerNotice.INTERRUPT_UNAVAILABLE
+                    else -> SteerNotice.ARM_FAILED
+                }
+                // A status the server answered (400/403/409/5xx, or a limiter refusal) is a "no";
+                // a request that never got an answer can't say either way.
+                is Result.Error -> if (result.exception is ApiException) {
+                    SteerNotice.ARM_FAILED
+                } else {
+                    SteerNotice.ARM_UNCONFIRMED
+                }
+                is Result.Loading -> null
+            }
+            if (result is Result.Error) Logger.d(result.exception) { "Steer arm failed: ${result.message}" }
+            notice?.let(onSteerNotice)
+        }
+    }
+
+    /** Whether an interrupt is already open in this turn: one chip interrupting, or an arm in flight. */
+    private fun isInterruptPending(): Boolean = records.values.any {
+        it.isLive && it.turnEpoch == turnEpoch && (it.preempt || it.arming)
     }
 
     /**
@@ -244,13 +457,39 @@ class SteeringDelegate(
      * own 202, and the tombstone is what stops that ack from re-minting a chip for a steer
      * already in the content.
      */
-    fun onSteerApplied(steerId: String) {
+    fun onSteerApplied(steerId: String, appliedQuotes: List<String> = emptyList(), clientSteerId: String? = null) {
         if (steerId.isBlank()) return
-        val existing = records[steerId]
-        records[steerId] = existing?.copy(status = SteerRecord.Status.APPLIED)
-            ?: SteerRecord("", 0L, SteerRecord.Status.APPLIED, spec = null, turnEpoch = turnEpoch)
+        // Both ids settle: the event can name either, depending on whether the server had learned
+        // this client's placeholder by the time it injected.
+        val ids = listOfNotNull(steerId, clientSteerId?.takeIf { it.isNotBlank() && it != steerId })
+        // THE moment the excerpts are actually lost: the part went in without them, so the record
+        // holds the only copy. Re-stage before the tombstone replaces the record that carries it.
+        if (appliedQuotes.isEmpty()) {
+            ids.firstNotNullOfOrNull { records[it]?.takeIf { r -> r.spec?.quotes?.isNotEmpty() == true } }
+                ?.let(::restageDroppedQuotes)
+        }
+        for (id in ids) {
+            val existing = records[id]
+            records[id] = existing?.copy(status = SteerRecord.Status.APPLIED)
+                ?: SteerRecord("", 0L, SteerRecord.Status.APPLIED, spec = null, turnEpoch = turnEpoch)
+        }
         evictSettled()
         publishChips()
+    }
+
+    /**
+     * Puts a steer's dropped excerpts back on the composer and STRIPS them from its spec.
+     *
+     * The strip is what keeps the two recovery triggers from double-delivering: once the chips
+     * hold them, a later re-home of the same spec must not send them again.
+     * [mergeRestagedQuotes] covers the other direction — the same excerpts arriving twice.
+     */
+    private fun restageDroppedQuotes(record: SteerRecord) {
+        val quotes = record.spec?.quotes.orEmpty()
+        if (quotes.isEmpty()) return
+        restageQuotes(quotes)
+        val stripped = record.spec?.copy(quotes = emptyList()) ?: return
+        records.entries.filter { it.value === record }.forEach { it.setValue(record.copy(spec = stripped)) }
     }
 
     /**
@@ -266,6 +505,7 @@ class SteeringDelegate(
      * end re-home text the user withdrew.
      */
     fun onPendingSteersSynced(steers: List<PendingSteer>) {
+        steers.forEach { adoptLocalRecord(it) }
         val reported = steers.mapNotNull { it.toRecordEntry() }
         val reportedIds = reported.map { it.first }.toSet()
         // Drop PENDING records the server no longer lists — they were injected or dropped while
@@ -275,7 +515,17 @@ class SteeringDelegate(
         }
         // A steer this client already knows keeps its own record — including the spec it was
         // composed with, which a server report cannot carry. Only genuinely new ones are added.
-        reported.forEach { (id, incoming) -> records.getOrPut(id) { incoming } }
+        // Its interrupt flag is the server's, though (last writer by revision), so a chip re-seeded
+        // after a reconnect keeps — or loses — its interrupting look as the server holds it.
+        reported.forEach { (id, incoming) ->
+            val existing = records[id]
+            records[id] = when {
+                existing == null -> incoming
+                existing.isLive && incoming.preemptRevision >= existing.preemptRevision ->
+                    existing.copy(preempt = incoming.preempt, preemptRevision = incoming.preemptRevision)
+                else -> existing
+            }
+        }
         publishChips()
     }
 
@@ -294,10 +544,23 @@ class SteeringDelegate(
      * again on the aborted final — so ids already settled are skipped rather than queued a second
      * time. A steer the user cancelled is skipped for the same reason it is not re-seeded.
      */
-    fun reclaim(steers: List<PendingSteer>): Int = reclaimInto(steers, enqueueFollowUp)
+    fun reclaim(steers: List<PendingSteer>): Int =
+        reclaimInto(steers, enqueueFollowUp).also { if (it > 0) onQueuedAsFollowUp(it) }
+
+    /** [enqueueFollowUp] for one steer this client sent, telling the user it went to the queue. */
+    private fun queueAsFollowUp(spec: QueuedMessage) {
+        enqueueFollowUp(spec)
+        onQueuedAsFollowUp(1)
+    }
+
+    /** [reclaim] for a stopped run's reports — the abort ack and the aborted final. */
+    fun reclaimAborted(steers: List<PendingSteer>) {
+        reclaimInto(steers, enqueueParked)
+    }
 
     private fun reclaimInto(steers: List<PendingSteer>, enqueue: (QueuedMessage) -> Unit): Int {
         if (steers.isEmpty()) return 0
+        steers.forEach { adoptLocalRecord(it) }
         val reported = steers.mapNotNull { it.toRecordEntry() }
         if (reported.isEmpty()) return 0
         val queued = reported.sortedBy { it.second.createdAt }
@@ -320,9 +583,36 @@ class SteeringDelegate(
         records.filterValues { it.status == SteerRecord.Status.PENDING && it.turnEpoch == turnEpoch }
             .entries
             .sortedBy { it.value.createdAt }
-            .forEach { (id, record) -> rehome(id, record, enqueueFollowUp) }
+            .forEach { (id, record) -> rehome(id, record, enqueueParked) }
         evictSettled()
         publishChips()
+    }
+
+    /**
+     * Files a server report under the record this client already holds for the same steer.
+     *
+     * A report is keyed by the server's id, but a steer whose 202 never arrived is recorded here
+     * under its local placeholder, and the report names that placeholder only as `clientSteerId`.
+     * Missed, the two read as different steers: the POST's error path has already re-homed the
+     * words, and the report would re-home them a second time. A settled record leaves a tombstone
+     * under the server id; a live one moves to it, taking its spec, so the POST's own continuation
+     * finds nothing left to re-home.
+     */
+    private fun adoptLocalRecord(steer: PendingSteer) {
+        val id = steer.steerId?.takeIf { it.isNotBlank() } ?: return
+        val localId = steer.clientSteerId?.takeIf { it.isNotBlank() && it != id } ?: return
+        if (records.containsKey(id)) return
+        val local = records[localId] ?: return
+        if (local.isLive) {
+            records.remove(localId)
+            records[id] = local.copy(
+                status = SteerRecord.Status.PENDING,
+                preempt = steer.preempt ?: local.preempt,
+                preemptRevision = steer.preemptRevision ?: local.preemptRevision,
+            )
+        } else {
+            records[id] = local
+        }
     }
 
     /** Re-homes one steer's text into the follow-up queue, exactly once. Returns true if queued. */
@@ -330,7 +620,12 @@ class SteeringDelegate(
         // Already settled: injected, withdrawn, or re-homed by an earlier report.
         if (records[id]?.isLive == false) return false
         records[id] = record.copy(status = SteerRecord.Status.RECLAIMED)
-        val spec = record.spec ?: buildFollowUp(record.text) ?: return false
+        // A locally-composed steer carries its own spec (and its own quotes). One only the
+        // server reported has neither, so the follow-up is built here and the reported excerpts
+        // are attached — dropping them is the claim-on-read loss this field exists to prevent.
+        val spec = record.spec
+            ?: buildFollowUp(record.text)?.copy(quotes = record.reportedQuotes)
+            ?: return false
         enqueue(spec)
         return true
     }
@@ -459,6 +754,8 @@ class SteeringDelegate(
                         SteerChipStatus.PENDING
                     },
                     createdAt = record.createdAt,
+                    isInterrupting = record.preempt,
+                    isArming = record.arming,
                 )
             }
             .sortedBy { it.createdAt }
@@ -474,8 +771,14 @@ class SteeringDelegate(
             text = body,
             createdAt = createdAt ?: Clock.System.now().toEpochMilliseconds(),
             status = SteerRecord.Status.PENDING,
+            // No spec — this steer was composed elsewhere, or before a reconnect — but its
+            // reported excerpts are claim-on-read, so they are carried until the re-home can
+            // put them on the follow-up it builds.
             spec = null,
+            reportedQuotes = quotes,
             turnEpoch = turnEpoch,
+            preempt = preempt == true,
+            preemptRevision = preemptRevision ?: 0,
         )
     }
 

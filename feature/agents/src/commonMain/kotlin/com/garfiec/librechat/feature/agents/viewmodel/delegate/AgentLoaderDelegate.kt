@@ -56,21 +56,18 @@ class AgentLoaderDelegate(
         stateHandle.scope.launch {
             stateHandle.update { copy(isLoading = true, error = null) }
             Logger.d { "AgentEditor: Loading agent for editing: $agentId" }
-            // Use getAgentForEditing which calls the /expanded endpoint.
-            // The standard getAgent endpoint (GET /api/agents/:id) only returns
-            // basic view-only fields (id, name, description, avatar, model, provider).
-            // It does NOT return instructions, tools, category, conversation_starters,
-            // model_parameters, or other configuration needed for the editor.
+            // The editor needs /expanded: the VIEW route has no instructions, tools or category,
+            // and only a safe subset of model_parameters.
             when (val result = agentRepository.getAgentForEditing(agentId)) {
                 is Result.Success -> {
                     val agent = result.data
                     loadedAgentTools = agent.tools
                     Logger.d {
                         "AgentEditor: Loaded agent fields BEFORE mapping - " +
-                            "name=${agent.name}, description=${agent.description}, " +
-                            "instructions=${agent.instructions}, model=${agent.model}, " +
+                            "name=${agent.name.orEmpty().length} chars, description=${agent.description.orEmpty().length} chars, " +
+                            "instructions=${agent.instructions.orEmpty().length} chars, model=${agent.model}, " +
                             "provider=${agent.provider}, category=${agent.category}, tools=${agent.tools}, " +
-                            "conversationStarters=${agent.conversationStarters}, avatarUrl=${agent.avatarUrl}, " +
+                            "conversationStarters=${agent.conversationStarters.size}, avatarUrl=${agent.avatarUrl}, " +
                             "artifacts=${agent.artifacts}, recursionLimit=${agent.recursionLimit}, " +
                             "hideSequentialOutputs=${agent.hideSequentialOutputs}, endAfterTools=${agent.endAfterTools}, " +
                             "isPublic=${agent.isPublic}, isCollaborative=${agent.isCollaborative}, " +
@@ -80,7 +77,7 @@ class AgentLoaderDelegate(
                     val newState = stateHandle.state
                         .applyAgentData(agent)
                         .copy(isLoading = false)
-                    stateHandle.initializeDraftTracking(newState)
+                    stateHandle.update { newState }
                     // If loadAgentFiles already returned, re-merge now that
                     // the per-capability slot lists are populated. Without
                     // this, an earlier-finishing files request would have
@@ -88,10 +85,10 @@ class AgentLoaderDelegate(
                     filesDelegate.remergeLoadedFiles()
                     Logger.d {
                         "AgentEditor: UI state AFTER mapping - " +
-                            "name=${newState.name}, description=${newState.description}, " +
-                            "instructions=${newState.instructions}, model=${newState.model}, " +
+                            "name=${newState.name.length} chars, description=${newState.description.length} chars, " +
+                            "instructions=${newState.instructions.length} chars, model=${newState.model}, " +
                             "provider=${newState.provider}, category=${newState.category}, selectedTools=${newState.selectedTools}, " +
-                            "conversationStarters=${newState.conversationStarters}, avatarUrl=${newState.avatarUrl}, " +
+                            "conversationStarters=${newState.conversationStarters.size}, avatarUrl=${newState.avatarUrl}, " +
                             "codeInterpreterEnabled=${newState.codeInterpreterEnabled}, fileSearchEnabled=${newState.fileSearchEnabled}, " +
                             "capabilities=${newState.capabilities}, advancedSettings=${newState.advancedSettings}, " +
                             "sharingState=${newState.sharingState}, chainAgentIds=${newState.chainAgentIds}, " +
@@ -140,12 +137,12 @@ class AgentLoaderDelegate(
         stateHandle.update { copy(availableModels = modelOptions) }
     }
 
-    private fun loadMcpTools() = launchBestEffort(mcpRepository::getTools) { tools ->
+    private fun loadMcpTools() = launchBestEffort(mcpRepository::getTools) { catalog ->
         // Merged in the same update as the list itself: remergeMcpServerNames resolves against
         // `mcpTools`, so a state that has not yet taken them would resolve nothing. If the agent
         // has not loaded yet, `loadedAgentTools` is null and this is a no-op — applyAgentData
         // will then see a populated list and resolve on its own.
-        stateHandle.update { copy(mcpTools = tools).remergeMcpServerNames(loadedAgentTools) }
+        stateHandle.update { copy(mcpTools = catalog.tools).remergeMcpServerNames(loadedAgentTools) }
     }
 
     private fun loadAllAgents() = launchBestEffort(agentRepository::getAgents) { agents ->

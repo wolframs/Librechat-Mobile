@@ -7,10 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,11 +26,9 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,9 +40,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
+import com.garfiec.librechat.core.ui.components.AdaptiveDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveFilterChip
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.agents.components.model.MarketplaceBuiltinLabel
 import com.garfiec.librechat.feature.agents.components.model.MarketplaceItem
 import com.garfiec.librechat.feature.agents.components.model.MarketplaceKind
@@ -65,6 +64,7 @@ import com.garfiec.librechat.feature.agents.resources.cd_pin_tool
 import com.garfiec.librechat.feature.agents.resources.cd_tool_icon
 import com.garfiec.librechat.feature.agents.resources.cd_unpin_tool
 import com.garfiec.librechat.feature.agents.resources.close
+import com.garfiec.librechat.feature.agents.resources.marketplace_set_up
 import com.garfiec.librechat.feature.agents.resources.tools_filter_all
 import com.garfiec.librechat.feature.agents.resources.tools_filter_builtin
 import com.garfiec.librechat.feature.agents.resources.tools_filter_favorites
@@ -118,104 +118,112 @@ fun ToolsMarketplaceDialog(
         filterMarketplace(catalog, query, filter, favoriteKeys, builtinLabels)
     }
 
-    Dialog(
+    AdaptiveDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            modifier = modifier.fillMaxSize().imePadding().padding(16.dp),
+            modifier = modifier.fillMaxSize().imePadding().padding(16.dp).clearFocusOnTap(),
             shape = RoundedCornerShape(16.dp),
             tonalElevation = 6.dp,
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column {
-                        Text(
-                            text = stringResource(Res.string.tools_marketplace_title),
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                        Text(
-                            text = stringResource(Res.string.tools_marketplace_description),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, stringResource(Res.string.close))
-                    }
-                }
-
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    placeholder = { Text(stringResource(Res.string.tools_marketplace_search_hint)) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    MarketplaceFilter.entries.forEach { entry ->
-                        // The Favorites tab would be a dead end on a server that cannot store
-                        // any, so it is not offered there at all.
-                        if (entry == MarketplaceFilter.FAVORITES && !favoritesSupported) return@forEach
-                        FilterChip(
-                            selected = filter == entry,
-                            onClick = { onFilterChange(entry) },
-                            label = { Text(stringResource(entry.labelRes())) },
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                if (visible.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(32.dp),
-                        contentAlignment = Alignment.Center,
+            // One list, header and search included: at a large font with the keyboard up, a fixed
+            // header, field and chip row would leave the results less than a row. The field stays
+            // composed while scrolled away, since a focused item is pinned.
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 12.dp),
+            ) {
+                item(key = "header", contentType = "header") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = when {
-                                query.isNotBlank() ->
-                                    stringResource(Res.string.tools_marketplace_no_matches, query)
-
-                                filter == MarketplaceFilter.FAVORITES ->
-                                    stringResource(Res.string.tools_marketplace_no_favorites)
-
-                                else -> stringResource(Res.string.tools_marketplace_empty)
-                            },
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(visible, key = { it.itemKey }, contentType = { "marketplace_item" }) { item ->
-                            MarketplaceRow(
-                                item = item,
-                                isSelected = item.itemKey in selectedKeys,
-                                isFavorite = item.favoriteKey in favoriteKeys,
-                                favoritesSupported = favoritesSupported,
-                                onToggle = { onToggleItem(item) },
-                                onToggleFavorite = { onToggleFavorite(item) },
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(Res.string.tools_marketplace_title),
+                                style = MaterialTheme.typography.titleLarge,
+                            )
+                            Text(
+                                text = stringResource(Res.string.tools_marketplace_description),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, stringResource(Res.string.close))
+                        }
+                    }
+                }
+
+                item(key = "search", contentType = "search") {
+                    AdaptiveOutlinedTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        placeholder = {
+                            Text(stringResource(Res.string.tools_marketplace_search_hint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    )
+                }
+
+                item(key = "filters", contentType = "filters") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 20.dp)
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        MarketplaceFilter.entries.forEach { entry ->
+                            // The Favorites tab would be a dead end on a server that cannot store
+                            // any, so it is not offered there at all.
+                            if (entry == MarketplaceFilter.FAVORITES && !favoritesSupported) return@forEach
+                            AdaptiveFilterChip(
+                                selected = filter == entry,
+                                onClick = { onFilterChange(entry) },
+                                label = { Text(stringResource(entry.labelRes())) },
+                            )
+                        }
+                    }
+                }
+
+                if (visible.isEmpty()) {
+                    item(key = "empty", contentType = "empty") {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(32.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = when {
+                                    query.isNotBlank() ->
+                                        stringResource(Res.string.tools_marketplace_no_matches, query)
+
+                                    filter == MarketplaceFilter.FAVORITES ->
+                                        stringResource(Res.string.tools_marketplace_no_favorites)
+
+                                    else -> stringResource(Res.string.tools_marketplace_empty)
+                                },
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else {
+                    items(visible, key = { it.itemKey }, contentType = { "marketplace_item" }) { item ->
+                        MarketplaceRow(
+                            item = item,
+                            isSelected = item.itemKey in selectedKeys,
+                            isFavorite = item.favoriteKey in favoriteKeys,
+                            favoritesSupported = favoritesSupported,
+                            onToggle = { onToggleItem(item) },
+                            onToggleFavorite = { onToggleFavorite(item) },
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
                     }
                 }
             }
@@ -280,7 +288,7 @@ private fun MarketplaceRow(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 // The MCP server is shown instead of a description because which server a tool
@@ -318,6 +326,12 @@ private fun MarketplaceRow(
                     imageVector = Icons.Default.Check,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
+                )
+            } else if (item.needsSetup) {
+                Text(
+                    text = stringResource(Res.string.marketplace_set_up),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }

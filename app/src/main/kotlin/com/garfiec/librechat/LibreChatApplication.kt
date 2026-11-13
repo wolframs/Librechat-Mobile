@@ -29,6 +29,7 @@ class LibreChatApplication : Application(), SingletonImageLoader.Factory {
 
     private val httpClient: HttpClient by inject()
 
+    @Suppress("TooGenericExceptionCaught") // logs, then rethrows: DI failure is unrecoverable
     override fun onCreate() {
         super.onCreate()
         try {
@@ -83,7 +84,6 @@ class LibreChatApplication : Application(), SingletonImageLoader.Factory {
         startMainThreadWatchdog(exceptionHandler)
     }
 
-    @OptIn(coil3.annotation.ExperimentalCoilApi::class)
     override fun newImageLoader(context: coil3.PlatformContext): ImageLoader {
         return ImageLoader.Builder(context)
             .components {

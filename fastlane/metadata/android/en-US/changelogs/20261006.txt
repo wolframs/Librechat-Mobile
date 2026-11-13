@@ -1,0 +1,8 @@
+- Open new chats on the server's default model spec
+- Bring code-interpreter files to parity with the web
+- Trust user-installed CAs on Android and say when a server relies on one
+- Mark login fields for iOS Password AutoFill
+- Open the model selector from the landing screen's model label
+- Safe, offline file previews and code-interpreter polish from device testing
+- Show a rejected ask_user_question as failed while streaming
+- And 10 more; see the release notes on GitHub.

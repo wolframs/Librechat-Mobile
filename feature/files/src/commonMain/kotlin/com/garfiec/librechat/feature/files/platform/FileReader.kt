@@ -1,7 +1,5 @@
 package com.garfiec.librechat.feature.files.platform
 
-import com.garfiec.librechat.core.network.upload.StreamingUploadSource
-
 /**
  * Platform-abstracted file reader.
  * Android: ContentResolver + Uri
@@ -9,11 +7,11 @@ import com.garfiec.librechat.core.network.upload.StreamingUploadSource
  */
 interface FileReader {
     /**
-     * Creates a reopenable streaming source from a platform-specific file reference.
+     * Reads file bytes from a platform-specific file reference.
      * @param fileRef Opaque platform reference (Android Uri, iOS URL)
-     * @return streaming source, or null if the reference is invalid
+     * @return file bytes, or null if unreadable
      */
-    fun openUploadSource(fileRef: Any): StreamingUploadSource?
+    fun readBytes(fileRef: Any): ByteArray?
 
     /**
      * Resolves the display filename from a platform file reference.

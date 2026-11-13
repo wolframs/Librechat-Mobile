@@ -7,16 +7,20 @@ import com.garfiec.librechat.core.data.repository.MessageRepository
 import com.garfiec.librechat.core.model.Conversation
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.StreamEvent
+import com.garfiec.librechat.core.ui.components.ModelParameters
 import com.garfiec.librechat.feature.chat.util.AbortFrameFixtures
 import com.garfiec.librechat.feature.chat.util.applyAbortContract
+import com.garfiec.librechat.feature.chat.viewmodel.ChatNotice
 import com.garfiec.librechat.feature.chat.viewmodel.ChatStateHandle
 import com.garfiec.librechat.feature.chat.viewmodel.ChatUiState
 import com.garfiec.librechat.feature.chat.viewmodel.ComparisonState
+import com.garfiec.librechat.feature.chat.viewmodel.ComposerState
 import com.garfiec.librechat.feature.chat.viewmodel.ConversationMetaState
 import com.garfiec.librechat.feature.chat.viewmodel.MessageTreeHandle
 import com.garfiec.librechat.feature.chat.viewmodel.MessagesState
 import com.garfiec.librechat.feature.chat.viewmodel.NewChatSelectionHandoff
 import com.garfiec.librechat.feature.chat.viewmodel.SendCompletionHandle
+import com.garfiec.librechat.feature.chat.viewmodel.VoiceState
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -46,6 +50,7 @@ class SendCompletionDelegateTest {
     private val modelDelegate = mockk<ModelSelectionDelegate>(relaxed = true)
     private val tts = mockk<PlatformTts>(relaxed = true)
     private val reloadConversation = mockk<(String) -> Unit>(relaxed = true)
+    private val selectionHandoff = NewChatSelectionHandoff()
 
     private fun optimisticUserMessage() = Message(
         messageId = AbortFrameFixtures.USER_MESSAGE_ID,
@@ -77,7 +82,7 @@ class SendCompletionDelegateTest {
             modelDelegate = modelDelegate,
             treeDelegate = MessageTreeDelegate(MessageTreeHandle(root)), // real: the finalize matters here
             tts = tts,
-            selectionHandoff = NewChatSelectionHandoff(),
+            selectionHandoff = selectionHandoff,
             reloadConversation = reloadConversation,
         )
         return delegate to flow
@@ -95,6 +100,127 @@ class SendCompletionDelegateTest {
             originAccount = null,
             aborted = event.aborted,
         )
+    }
+
+    @Test
+    fun `auto-read skips a legacy thinking block in the streamed text`() = runTest(StandardTestDispatcher()) {
+        val (delegate, _) = delegateWith(this)
+
+        delegate.onFinal(
+            event = StreamEvent.Final(),
+            conversationId = null,
+            completedResponseText = ":::thinking\nworking it out\n:::\nThe answer.",
+            shouldAutoRead = true,
+            isNewConversation = false,
+            isHandedOffNewChat = false,
+            isComparison = false,
+            originAccount = null,
+        )
+
+        verify(exactly = 1) { tts.maybeAutoReadResponse(any(), "The answer.") }
+    }
+
+    @Test
+    fun `auto-read stays silent when the streamed text is only reasoning`() = runTest(StandardTestDispatcher()) {
+        val (delegate, _) = delegateWith(this)
+
+        delegate.onFinal(
+            event = StreamEvent.Final(),
+            conversationId = null,
+            completedResponseText = ":::thinking\nworking it out\n:::",
+            shouldAutoRead = true,
+            isNewConversation = false,
+            isHandedOffNewChat = false,
+            isComparison = false,
+            originAccount = null,
+        )
+
+        verify(exactly = 0) { tts.maybeAutoReadResponse(any(), any()) }
+    }
+
+    @Test
+    fun `auto-read reads under the reply's own id, so the reply shows Stop`() = runTest(StandardTestDispatcher()) {
+        val (delegate, _) = delegateWith(this)
+
+        delegate.onFinal(
+            event = StreamEvent.Final(
+                responseMessage = Message(
+                    messageId = "reply-1",
+                    conversationId = AbortFrameFixtures.CONVERSATION_ID,
+                    text = "The answer.",
+                ),
+            ),
+            conversationId = null,
+            completedResponseText = "The answer.",
+            shouldAutoRead = true,
+            isNewConversation = false,
+            isHandedOffNewChat = false,
+            isComparison = false,
+            originAccount = null,
+        )
+
+        verify(exactly = 1) { tts.maybeAutoReadResponse("reply-1", "The answer.") }
+    }
+
+    @Test
+    fun `auto-read stays silent while the user is dictating or typing`() = runTest(StandardTestDispatcher()) {
+        val composing = listOf(
+            baseState().copy(voice = VoiceState(isRecording = true)),
+            baseState().copy(voice = VoiceState(isTranscribing = true)),
+            baseState().copy(composer = ComposerState(inputText = "my next question")),
+        )
+        for (state in composing) {
+            val (delegate, _) = delegateWith(this, state)
+            delegate.onFinal(
+                event = StreamEvent.Final(),
+                conversationId = null,
+                completedResponseText = "The answer.",
+                shouldAutoRead = true,
+                isNewConversation = false,
+                isHandedOffNewChat = false,
+                isComparison = false,
+                originAccount = null,
+            )
+        }
+
+        verify(exactly = 0) { tts.maybeAutoReadResponse(any(), any()) }
+    }
+
+    @Test
+    fun `a new chat hands its parameters to the chat it opens`() = runTest(StandardTestDispatcher()) {
+        val sent = ModelParameters.DEFAULT.copy(temperature = 0.3f)
+        val (delegate, _) = delegateWith(
+            this,
+            baseState().let { it.copy(selection = it.selection.copy(modelParameters = sent)) },
+        )
+
+        delegate.onConversationCreated("c-new", isNewConversation = true, originAccount = null)
+
+        assertThat(selectionHandoff.take("c-new")?.modelParameters).isEqualTo(sent)
+    }
+
+    @Test
+    fun `a new chat sent without a workspace hands the notice to the chat it opens`() = runTest(StandardTestDispatcher()) {
+        val (delegate, _) = delegateWith(
+            this,
+            baseState().copy(error = ChatNotice.CODE_WORKSPACE_SENT_WITHOUT.marker()),
+        )
+
+        delegate.onConversationCreated("c-new", isNewConversation = true, originAccount = null)
+
+        assertThat(selectionHandoff.take("c-new")?.sentWithoutWorkspaceNotice).isTrue()
+    }
+
+    @Test
+    fun `a new chat that kept its landing keeps the workspace notice there`() = runTest(StandardTestDispatcher()) {
+        val (delegate, _) = delegateWith(
+            this,
+            baseState(isComparison = true).copy(error = ChatNotice.CODE_WORKSPACE_SENT_WITHOUT.marker()),
+        )
+
+        delegate.onConversationCreated("c-new", isNewConversation = true, originAccount = null)
+
+        assertThat(selectionHandoff.take("c-new")?.sentWithoutWorkspaceNotice).isFalse()
     }
 
     @Test
@@ -197,6 +323,37 @@ class SendCompletionDelegateTest {
             assertThat(flow.value.conversation.conversationTitle).isEqualTo("History of Computing Essay")
             coVerify(exactly = 3) { conversationRepository.refreshConversation(any(), any()) }
         }
+
+    /** The post-final cache-first read can return the row cached at `created`, before the title existed. */
+    @Test
+    fun `a placeholder row read after a completed final keeps the shown title`() = runTest(StandardTestDispatcher()) {
+        coEvery { conversationRepository.getConversation(any(), any()) } returns
+            Result.Success(Conversation(conversationId = AbortFrameFixtures.CONVERSATION_ID, title = "New Chat"))
+        val state = baseState().let { it.copy(conversation = it.conversation.copy(conversationTitle = "Generated Title")) }
+        val (delegate, flow) = delegateWith(this, state)
+
+        delegate.finalArrives(StreamEvent.Final())
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { conversationRepository.getConversation(any(), any()) }
+        assertThat(flow.value.conversation.conversationTitle).isEqualTo("Generated Title")
+    }
+
+    /** The placeholder guard only refuses a downgrade: a final carrying a new real title still wins. */
+    @Test
+    fun `a completed final with a new real title replaces the shown one`() = runTest(StandardTestDispatcher()) {
+        val finalConversation =
+            Conversation(conversationId = AbortFrameFixtures.CONVERSATION_ID, title = "Renamed Elsewhere")
+        coEvery { conversationRepository.getConversation(any(), any()) } returns Result.Success(finalConversation)
+        val state = baseState().let { it.copy(conversation = it.conversation.copy(conversationTitle = "Generated Title")) }
+        val (delegate, flow) = delegateWith(this, state)
+
+        delegate.finalArrives(StreamEvent.Final(conversation = finalConversation))
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { conversationRepository.saveConversation(finalConversation, any()) }
+        assertThat(flow.value.conversation.conversationTitle).isEqualTo("Renamed Elsewhere")
+    }
 
     @Test
     fun `a stopped comparison turn finalizes in memory instead of reloading`() =

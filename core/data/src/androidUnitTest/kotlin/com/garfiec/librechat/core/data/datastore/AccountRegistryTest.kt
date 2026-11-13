@@ -5,7 +5,6 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import com.garfiec.librechat.core.common.identity.AccountId
 import com.garfiec.librechat.core.common.identity.AccountState.Resolved
 import com.garfiec.librechat.core.common.identity.InMemoryActiveAccountProvider
 import com.garfiec.librechat.core.common.identity.deriveAccountId
@@ -76,9 +75,34 @@ class AccountRegistryTest {
         assertThat(provider.state.value).isEqualTo(Resolved(null))
         // An empty roster must NOT clear the token store: a pre-tenancy upgrade has an empty roster
         // while the live session sits under the bare keys, waiting for restoreAccountIfNeeded.
-        assertThat(token.warmed).isTrue()
         assertThat(token.cleared).isFalse()
         assertThat(token.selected).isNull()
+    }
+
+    /** Keychain items that outlived an iOS reinstall: the store binds an account no roster entry names. */
+    @Test
+    fun coldStart_emptyRoster_dropsAStoreBoundToAnAccountItHasNoEntryFor() = runTest(testDispatcher) {
+        val ds = createDataStore("orphan")
+        val provider = InMemoryActiveAccountProvider()
+        val token = FakeTokenManager(bound = accountId.value)
+        registry(ds, provider, serverDataStore(ds), token).awaitReady()
+
+        assertThat(provider.state.value).isEqualTo(Resolved(null))
+        assertThat(token.cleared).isTrue()
+    }
+
+    @Test
+    fun coldStart_noActiveEntry_keepsABindingTheRosterStillLists() = runTest(testDispatcher) {
+        val ds = createDataStore("listed")
+        val server = serverDataStore(ds)
+        server.setServerUrl(serverUrl)
+        val roster = AccountRoster(ds, json)
+        roster.upsertAndActivate(entry())
+        roster.deactivate()
+        val token = FakeTokenManager(bound = accountId.value)
+        registry(ds, InMemoryActiveAccountProvider(), server, token).awaitReady()
+
+        assertThat(token.cleared).isFalse()
     }
 
     @Test
@@ -138,30 +162,30 @@ class AccountRegistryTest {
     }
 
     /** Records the reconcile calls the seed makes; every other method is an inert stub. */
-    private class FakeTokenManager : TokenManager {
+    private class FakeTokenManager(private val bound: String? = null) : TokenManager {
         var selected: String? = null
         var cleared = false
-        var warmed = false
 
-        override suspend fun warmUp() { warmed = true }
+        override suspend fun boundAccountId(): String? = bound
+
         override val isAuthenticated: Boolean = false
         override suspend fun getAccessToken(): String? = null
-        override suspend fun setTokens(accessToken: String, refreshToken: String) {}
+        override suspend fun setTokens(accessToken: String, refreshToken: String) = Unit
         override suspend fun refreshAccessToken(usedAccessToken: String?): RefreshResult = RefreshResult.HardExpired
-        override suspend fun clearTokens() {}
+        override suspend fun clearTokens() = Unit
         override suspend fun getAccessTokenFor(accountId: String): String? = null
         override suspend fun getStagedAccessToken(): String? = null
-        override suspend fun clearStagedTokens() {}
+        override suspend fun clearStagedTokens() = Unit
         override suspend fun selectAccount(accountId: String) { selected = accountId }
-        override suspend fun removeAccount(accountId: String) {}
+        override suspend fun removeAccount(accountId: String) = Unit
         override suspend fun refreshAccessTokenFor(
             accountId: String,
             baseUrl: String,
             usedAccessToken: String?,
         ): RefreshResult = RefreshResult.HardExpired
-        override suspend fun onAccountResolved(accountId: String) {}
+        override suspend fun onAccountResolved(accountId: String) = Unit
         override suspend fun onAccountCleared() { cleared = true }
-        override fun emitSessionExpired(expiredAccountId: String?, reason: SessionEndReason) {}
+        override fun emitSessionExpired(expiredAccountId: String?, reason: SessionEndReason) = Unit
         override val sessionExpiredFlow: SharedFlow<SessionEndReason> = MutableSharedFlow()
     }
 }

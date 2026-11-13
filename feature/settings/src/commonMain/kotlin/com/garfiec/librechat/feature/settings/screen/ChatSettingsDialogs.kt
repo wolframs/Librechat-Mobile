@@ -1,6 +1,7 @@
 package com.garfiec.librechat.feature.settings.screen
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,14 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,29 +31,31 @@ import com.garfiec.librechat.core.data.datastore.ArtifactDisplayMode
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
 import com.garfiec.librechat.core.data.datastore.ChatHeaderContent
-import com.garfiec.librechat.core.data.datastore.ChatParagraphSpacing
 import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.data.datastore.InlineArtifactPrefs
 import com.garfiec.librechat.core.data.datastore.LatexRenderer
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
 import com.garfiec.librechat.core.data.datastore.UploadRoutingMode
+import com.garfiec.librechat.core.data.datastore.WebSearchPreference
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveRadioButton
+import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
+import com.garfiec.librechat.core.ui.components.ArtifactPresentation
+import com.garfiec.librechat.core.ui.components.windowAutomaticArtifactPresentation
 import com.garfiec.librechat.feature.settings.resources.*
 import com.garfiec.librechat.feature.settings.resources.Res
 import org.jetbrains.compose.resources.stringResource
 
 internal enum class ChatSettingDialog {
-    CHAT_LAYOUT,
-    FONT_SIZE,
-    PARAGRAPH_SPACING,
     LATEX_RENDERER,
-    CONTEXT_BAR,
     DURING_RUN_ACTION,
     UPLOAD_ROUTING,
-    STARRED_MODELS,
-    CHAT_HEADER,
-    ARTIFACT_VIEWER,
+    WEB_SEARCH_FIRST,
+    ARTIFACTS_MODE,
     RENDER_INLINE,
+    ARTIFACT_LIBRARIES,
+    STT_ENGINE,
 }
 
 // Option label resolvers, shared by the settings rows (current-value subtitle)
@@ -72,13 +72,6 @@ internal fun fontSizeLabel(size: ChatFontSize): String = when (size) {
     ChatFontSize.SMALL -> stringResource(Res.string.font_size_small)
     ChatFontSize.MEDIUM -> stringResource(Res.string.font_size_medium)
     ChatFontSize.LARGE -> stringResource(Res.string.font_size_large)
-}
-
-@Composable
-internal fun paragraphSpacingLabel(spacing: ChatParagraphSpacing): String = when (spacing) {
-    ChatParagraphSpacing.COMPACT -> stringResource(Res.string.paragraph_spacing_compact)
-    ChatParagraphSpacing.COMFORTABLE -> stringResource(Res.string.paragraph_spacing_comfortable)
-    ChatParagraphSpacing.SPACIOUS -> stringResource(Res.string.paragraph_spacing_spacious)
 }
 
 @Composable
@@ -99,6 +92,7 @@ internal fun contextBarPlacementLabel(placement: ContextBarPlacement): String = 
 internal fun duringRunActionLabel(action: DuringRunAction): String = when (action) {
     DuringRunAction.QUEUE -> stringResource(Res.string.during_run_action_queue)
     DuringRunAction.STEER -> stringResource(Res.string.during_run_action_steer)
+    DuringRunAction.INTERRUPT -> stringResource(Res.string.during_run_action_interrupt)
 }
 
 @Composable
@@ -106,6 +100,22 @@ internal fun uploadRoutingModeLabel(mode: UploadRoutingMode): String = when (mod
     UploadRoutingMode.AUTO -> stringResource(Res.string.upload_routing_auto)
     UploadRoutingMode.MANUAL -> stringResource(Res.string.upload_routing_manual)
 }
+
+@Composable
+internal fun webSearchFirstLabel(first: WebSearchPreference): String = when (first) {
+    WebSearchPreference.LIBRECHAT_FIRST -> stringResource(Res.string.web_search_first_librechat)
+    WebSearchPreference.BUILT_IN_FIRST -> stringResource(Res.string.web_search_first_built_in)
+}
+
+@Composable
+internal fun webSearchFirstDescription(first: WebSearchPreference): String = when (first) {
+    WebSearchPreference.LIBRECHAT_FIRST -> stringResource(Res.string.web_search_first_librechat_desc)
+    WebSearchPreference.BUILT_IN_FIRST -> stringResource(Res.string.web_search_first_built_in_desc)
+}
+
+@Composable
+internal fun newChatStartLabel(preferLastUsed: Boolean): String =
+    stringResource(if (preferLastUsed) Res.string.new_chat_start_last_used else Res.string.new_chat_start_server)
 
 @Composable
 internal fun starredModelsDisplayLabel(display: StarredModelsDisplay): String = when (display) {
@@ -130,12 +140,28 @@ internal fun chatHeaderAlignmentLabel(alignment: ChatHeaderAlignment): String = 
 
 @Composable
 internal fun artifactDisplayModeLabel(mode: ArtifactDisplayMode): String = when (mode) {
+    ArtifactDisplayMode.AUTOMATIC -> stringResource(Res.string.artifact_mode_automatic)
     ArtifactDisplayMode.BOTTOM_SHEET -> stringResource(Res.string.artifact_mode_bottom_sheet)
     ArtifactDisplayMode.FULLSCREEN -> stringResource(Res.string.artifact_mode_fullscreen)
 }
 
+/** The mode as a summary; Automatic also names what it does in this window. */
+@Composable
+internal fun artifactDisplayModeSummary(mode: ArtifactDisplayMode): String = when (mode) {
+    ArtifactDisplayMode.AUTOMATIC ->
+        stringResource(Res.string.artifact_mode_automatic_here, artifactPresentationLabel(windowAutomaticArtifactPresentation()))
+    else -> artifactDisplayModeLabel(mode)
+}
+
+@Composable
+internal fun artifactPresentationLabel(presentation: ArtifactPresentation): String = when (presentation) {
+    ArtifactPresentation.SPLIT -> stringResource(Res.string.artifact_mode_split)
+    ArtifactPresentation.SHEET -> stringResource(Res.string.artifact_mode_bottom_sheet)
+    ArtifactPresentation.FULL_SCREEN -> stringResource(Res.string.artifact_mode_fullscreen)
+}
+
 /**
- * Generic single-select radio dialog with Save/Cancel, matching [ForkSettingsDialog].
+ * Generic single-select radio dialog with Save/Cancel.
  * [optionDescription] may return null for options without a secondary line.
  */
 @Composable
@@ -152,8 +178,9 @@ internal fun <T> RadioSelectionDialog(
 ) {
     var current by remember { mutableStateOf(selected) }
 
-    AlertDialog(
+    AdaptiveAlertDialog(
         onDismissRequest = onDismiss,
+        scrollableText = false,
         modifier = modifier,
         title = { Text(title) },
         text = {
@@ -180,66 +207,12 @@ internal fun <T> RadioSelectionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(current) }) {
+            AdaptiveTextButton(onClick = { onSave(current) }) {
                 Text(stringResource(Res.string.action_save))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(Res.string.action_cancel))
-            }
-        },
-    )
-}
-
-/** Combined chat-header dialog: content (title/model/none) + bubble alignment in one place. */
-@Composable
-internal fun ChatHeaderSettingsDialog(
-    content: ChatHeaderContent,
-    alignment: ChatHeaderAlignment,
-    onSave: (ChatHeaderContent, ChatHeaderAlignment) -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var currentContent by remember { mutableStateOf(content) }
-    var currentAlignment by remember { mutableStateOf(alignment) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = modifier,
-        title = { Text(stringResource(Res.string.chat_header_title)) },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                GroupLabel(stringResource(Res.string.chat_header_content_label))
-                RadioGroup(
-                    options = ChatHeaderContent.entries,
-                    selected = currentContent,
-                    onSelect = { currentContent = it },
-                    optionLabel = { chatHeaderContentLabel(it) },
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                GroupLabel(stringResource(Res.string.chat_header_alignment_label))
-                RadioGroup(
-                    options = ChatHeaderAlignment.entries,
-                    selected = currentAlignment,
-                    onSelect = { currentAlignment = it },
-                    optionLabel = { chatHeaderAlignmentLabel(it) },
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(currentContent, currentAlignment) }) {
-                Text(stringResource(Res.string.action_save))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
+            AdaptiveTextButton(onClick = onDismiss) {
                 Text(stringResource(Res.string.action_cancel))
             }
         },
@@ -258,8 +231,9 @@ internal fun RenderInlineDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    AlertDialog(
+    AdaptiveAlertDialog(
         onDismissRequest = onDismiss,
+        scrollableText = false,
         modifier = modifier,
         title = { Text(stringResource(Res.string.artifact_inline_title)) },
         text = {
@@ -275,40 +249,50 @@ internal fun RenderInlineDialog(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
-                InlineToggleRow(
+                SettingsSwitchRow(
                     title = stringResource(Res.string.inline_artifact_mermaid),
                     description = stringResource(Res.string.inline_artifact_mermaid_desc),
                     checked = prefs.mermaid,
-                    onChange = onMermaidChange,
+                    onCheckedChange = onMermaidChange,
+                    showDivider = false,
+                    contentPadding = DialogSwitchPadding,
                 )
-                InlineToggleRow(
+                SettingsSwitchRow(
                     title = stringResource(Res.string.inline_artifact_svg),
                     description = stringResource(Res.string.inline_artifact_svg_desc),
                     checked = prefs.svg,
-                    onChange = onSvgChange,
+                    onCheckedChange = onSvgChange,
+                    showDivider = false,
+                    contentPadding = DialogSwitchPadding,
                 )
-                InlineToggleRow(
+                SettingsSwitchRow(
                     title = stringResource(Res.string.inline_artifact_markdown),
                     description = stringResource(Res.string.inline_artifact_markdown_desc),
                     checked = prefs.markdown,
-                    onChange = onMarkdownChange,
+                    onCheckedChange = onMarkdownChange,
+                    showDivider = false,
+                    contentPadding = DialogSwitchPadding,
                 )
-                InlineToggleRow(
+                SettingsSwitchRow(
                     title = stringResource(Res.string.inline_artifact_html),
                     description = stringResource(Res.string.inline_artifact_html_desc),
                     checked = prefs.html,
-                    onChange = onHtmlChange,
+                    onCheckedChange = onHtmlChange,
+                    showDivider = false,
+                    contentPadding = DialogSwitchPadding,
                 )
-                InlineToggleRow(
+                SettingsSwitchRow(
                     title = stringResource(Res.string.inline_artifact_react),
                     description = stringResource(Res.string.inline_artifact_react_desc),
                     checked = prefs.react,
-                    onChange = onReactChange,
+                    onCheckedChange = onReactChange,
+                    showDivider = false,
+                    contentPadding = DialogSwitchPadding,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            AdaptiveTextButton(onClick = onDismiss) {
                 Text(stringResource(Res.string.action_done))
             }
         },
@@ -316,20 +300,22 @@ internal fun RenderInlineDialog(
 }
 
 @Composable
-private fun <T> RadioGroup(
+internal fun <T> RadioGroup(
     options: List<T>,
     selected: T,
     onSelect: (T) -> Unit,
     optionLabel: @Composable (T) -> String,
     optionDescription: @Composable (T) -> String? = { null },
 ) {
-    options.forEach { option ->
-        RadioOptionRow(
-            label = optionLabel(option),
-            description = optionDescription(option),
-            selected = selected == option,
-            onClick = { onSelect(option) },
-        )
+    Column(modifier = Modifier.selectableGroup()) {
+        options.forEach { option ->
+            RadioOptionRow(
+                label = optionLabel(option),
+                description = optionDescription(option),
+                selected = selected == option,
+                onClick = { onSelect(option) },
+            )
+        }
     }
 }
 
@@ -353,7 +339,7 @@ private fun RadioOptionRow(
             .padding(vertical = 8.dp, horizontal = 4.dp),
         verticalAlignment = if (description == null) Alignment.CenterVertically else Alignment.Top,
     ) {
-        RadioButton(selected = selected, onClick = null)
+        AdaptiveRadioButton(selected = selected, onClick = null)
         Spacer(modifier = Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(text = label, style = MaterialTheme.typography.bodyLarge)
@@ -368,28 +354,4 @@ private fun RadioOptionRow(
     }
 }
 
-@Composable
-private fun InlineToggleRow(
-    title: String,
-    description: String,
-    checked: Boolean,
-    onChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(modifier = Modifier.width(16.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
+private val DialogSwitchPadding = PaddingValues(vertical = 8.dp)

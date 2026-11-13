@@ -14,16 +14,14 @@
 |--------|--------|-------|
 | Load | `loadFiles()` | `FileRepository.getFiles()` |
 | Refresh | `refresh()` | Same endpoint, sets `isRefreshing` |
-| Upload | `uploadFile(uri)` | Opens a reopenable streaming source, checks the known server limit, then calls `FileRepository.uploadFile(source, filename, mimeType)` |
+| Upload | `uploadFile(uri)` | Reads bytes via ContentResolver, gets filename from `OpenableColumns.DISPLAY_NAME`, calls `FileRepository.uploadFile(bytes, filename, mimeType)` |
 | Delete | `deleteFile(fileId)` | `FileRepository.deleteFiles(listOf(fileId))`, removes from local list |
 
 ## Upload Flow
 1. User picks file via SAF (`ActivityResultContracts.GetContent`)
-2. `ContentResolver` resolves filename, MIME type, and optional size without reading the body
-3. The known endpoint size limit is enforced before transfer
-4. Multipart upload via `FilesApi` streams a fresh channel from the platform source (and can
-   reopen it if Ktor replays the request)
-5. New file prepended to list on success
+2. `ContentResolver` reads bytes and resolves filename + MIME type
+3. Multipart upload via `FilesApi` in `:core:network`
+4. New file prepended to list on success
 
 ## Image Viewing
 - `FullscreenImageViewer` (in `feature:chat/components/`) provides pinch-to-zoom and pan
@@ -39,11 +37,16 @@
 - File preview on tap (non-image files)
 
 ### File Type Filtering
-- `FilesScreen` renders an inline `ScrollableTabRow` (All, Images, Documents, Audio, Video)
-- Filters by MIME type prefix in `FilesViewModel` (`FileTypeFilter`)
+- `FilesScreen` renders an `AdaptiveTabRow` (All, Images, Documents, Audio, Video) in the top bar's
+  `belowBar` slot, transparent, so the list scrolls under it and the bar (see "Scrolling under the
+  bars" in `core/ui/CLAUDE.md`)
+- Filters by MIME type prefix (`FileTypeFilter.matches`). One `HorizontalPager` page per filter, so
+  the user can swipe between them as in Settings; the pager owns the filter and `setFilter` follows
+  its settled page. `FilesUiState.filesByFilter` carries every page's list, since a page is drawn
+  while it is swiped in, before it's selected; `displayFiles` is the selected page's list.
 
 ### Upload Progress
 - `UploadProgressCard` — animated card with filename, LinearProgressIndicator, cancel button
 - Replaces the old fullscreen CircularProgressIndicator overlay
 - `FilesViewModel` tracks `uploadProgress` and `uploadFilename` in state
-- Cancel via stored upload Job reference; cancellation closes the active multipart channel
+- Cancel via stored upload Job reference

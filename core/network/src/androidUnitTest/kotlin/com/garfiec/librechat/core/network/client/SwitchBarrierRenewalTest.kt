@@ -1,8 +1,9 @@
 package com.garfiec.librechat.core.network.client
 
-import com.garfiec.librechat.core.common.identity.AccountId
 import com.garfiec.librechat.core.common.identity.AccountState
 import com.garfiec.librechat.core.common.identity.InMemoryActiveAccountProvider
+import com.garfiec.librechat.core.common.identity.deriveAccountId
+import com.garfiec.librechat.core.common.identity.deriveServerId
 import com.google.common.truth.Truth.assertThat
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -27,6 +28,8 @@ import org.junit.Test
  * there. Only here can the stored token and the request path be set independently.
  */
 class SwitchBarrierRenewalTest {
+
+    private val accountA = deriveAccountId(deriveServerId("https://a.example.com"), "user-a")
 
     private class RecordingTokenManager(private val token: String?) : TokenManager {
         val renewedPaths = mutableListOf<String>()
@@ -69,7 +72,7 @@ class SwitchBarrierRenewalTest {
 
     private fun clientWith(tokenManager: TokenManager): HttpClient {
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(accountA)),
             serverUrlProvider = FixedUrlProvider("https://a.example.com"),
             tokenManager = tokenManager,
             accountReadyGate = null,

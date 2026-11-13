@@ -1,5 +1,6 @@
 package com.garfiec.librechat.core.model.request
 
+import com.garfiec.librechat.core.model.AgentGitIdentity
 import com.garfiec.librechat.core.model.AgentSubagentsConfig
 import com.garfiec.librechat.core.model.SupportContact
 import kotlinx.serialization.SerialName
@@ -39,4 +40,13 @@ data class CreateAgentRequest(
     val skills: List<String>? = null,
     @SerialName("skills_enabled") val skillsEnabled: Boolean? = null,
     val subagents: AgentSubagentsConfig? = null,
+    /** The Code section's fields, sent when set (see [UpdateAgentRequest]). */
+    @SerialName("git_identity") val gitIdentity: AgentGitIdentity? = null,
+    @SerialName("code_workspace_id") val codeWorkspaceId: String? = null,
+    @SerialName("stateful_code_sessions") val statefulCodeSessions: Boolean? = null,
+    @SerialName("stateful_code_environment") val statefulCodeEnvironment: String? = null,
+    @SerialName("code_environment_id") val codeEnvironmentId: String? = null,
+    @SerialName("code_environment_ids") val codeEnvironmentIds: List<String>? = null,
+    val repositoryInstructions: String? = null,
+    @SerialName("skills_scope") val skillsScope: String? = null,
 )

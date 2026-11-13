@@ -1,6 +1,8 @@
 package com.garfiec.librechat.shared
 
 import com.garfiec.librechat.core.common.lifecycle.DeferredWorkWindow
+import com.garfiec.librechat.core.data.datastore.AppPreferences
+import com.garfiec.librechat.core.data.datastore.PreferenceStore
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.prefetch.PrefetchBackgroundRunner
@@ -11,7 +13,11 @@ import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.FileRepository
 import com.garfiec.librechat.core.model.ModelRef
-import com.garfiec.librechat.feature.chat.navigation.ModelShortcutBus
+import com.garfiec.librechat.core.model.SHORTCUT_CANDIDATE_FACTOR
+import com.garfiec.librechat.core.model.offeredSpecs
+import com.garfiec.librechat.core.model.reconciledWith
+import com.garfiec.librechat.shared.navigation.DeepLinkInbox
+import com.garfiec.librechat.shared.navigation.DeepLinkUri
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -52,16 +58,35 @@ object IosKoinAccessor {
     /**
      * Snapshot of the account's most-used models, for the Swift layer to publish as home-screen
      * quick actions (typically read when the app backgrounds). Suspends until the account resolves
-     * (the flow emits nothing while warming), which is already the case by background time.
+     * (the flow emits nothing while warming), which is already the case by background time. Spec
+     * entries are checked against the server's current specs, as Android's shortcuts are.
      */
     @Throws(Exception::class)
-    suspend fun currentTopModels(limit: Int): List<ModelRef> =
-        koin.get<SettingsDataStore>().topUsedModels(limit).first()
+    suspend fun currentTopModels(limit: Int): List<ModelRef> {
+        val specs = koin.get<ConfigRepository>().startupConfig.value.offeredSpecs
+        return koin.get<SettingsDataStore>().topUsedModels(limit * SHORTCUT_CANDIDATE_FACTOR).first().reconciledWith(specs).take(limit)
+    }
 
-    /** Routes a tapped quick action into the shared navigation host — opens a new chat on the model. */
+    /**
+     * Routes a tapped quick action into the shared navigation host — opens a new chat on the model,
+     * or on [spec] when the quick action was recorded from one. Posted as the `librechat://model`
+     * link Android's shortcuts carry, without building a URL string.
+     */
     @Throws(Exception::class)
-    fun requestModelShortcut(endpoint: String, model: String) {
-        koin.get<ModelShortcutBus>().request(endpoint, model)
+    fun requestModelShortcut(endpoint: String, model: String, spec: String?) {
+        val query = buildMap {
+            put("endpoint", endpoint)
+            put("model", model)
+            spec?.let { put("spec", it) }
+        }
+        koin.get<DeepLinkInbox>().post(DeepLinkUri(host = "model", pathSegments = emptyList(), query = query))
+    }
+
+    /** Routes a `librechat://` URL the scene received into the shared navigation host; anything else is ignored. */
+    @Throws(Exception::class)
+    fun openDeepLink(url: String) {
+        val link = DeepLinkUri.parse(url) ?: return
+        koin.get<DeepLinkInbox>().post(link)
     }
 
     /**
@@ -103,13 +128,13 @@ object IosKoinAccessor {
     /**
      * Queues the next occurrence, unless this run found the conditions the coordinator schedules on
      * to be unmet. Re-queueing on either verdict resurrects work the coordinator has just cancelled —
-     * and `prefetchEnabled` is global rather than account-scoped, so nothing would ever cancel it
+     * and `AppPreferences.PrefetchEnabled` is global rather than account-scoped, so nothing would ever cancel it
      * again and a signed-out device would keep waking every few hours indefinitely.
      */
     private suspend fun rescheduleAfter(outcome: PrefetchRunOutcome) {
         if (outcome == PrefetchRunOutcome.DISABLED || outcome == PrefetchRunOutcome.NO_SESSION) return
         koin.get<PrefetchScheduler>()
-            .ensureScheduled(koin.get<SettingsDataStore>().prefetchOnMeteredEnabled.first())
+            .ensureScheduled(koin.get<PreferenceStore>().observe(AppPreferences.PrefetchOnMetered).first())
     }
 
     /**

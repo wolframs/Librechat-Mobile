@@ -3,19 +3,19 @@ package com.garfiec.librechat.feature.chat.prompts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -25,7 +25,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.model.Prompt
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
+import com.garfiec.librechat.core.ui.datetime.rememberAbsoluteTimestamp
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import org.jetbrains.compose.resources.stringResource
@@ -45,7 +48,7 @@ fun PromptVersionsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(
+    AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
         dragHandle = { LowProfileDragHandle() },
         sheetState = sheetState,
@@ -71,7 +74,7 @@ fun PromptVersionsSheet(
                 )
             } else {
                 LazyColumn {
-                    itemsIndexed(prompts, key = { _, prompt -> prompt.id ?: "" }) { index, prompt ->
+                    itemsIndexed(prompts, key = { index, prompt -> prompt.id?.let { "id:$it" } ?: "idx:$index" }) { index, prompt ->
                         PromptVersionItem(
                             prompt = prompt,
                             versionNumber = prompts.size - index,
@@ -79,7 +82,7 @@ fun PromptVersionsSheet(
                             onSetProduction = { prompt.id?.let(onSetProduction) },
                         )
                         if (index < prompts.lastIndex) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            AdaptiveDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
@@ -91,22 +94,23 @@ fun PromptVersionsSheet(
 }
 
 @Composable
-private fun PromptVersionItem(
+internal fun PromptVersionItem(
     prompt: Prompt,
     versionNumber: Int,
     isProduction: Boolean,
     onSetProduction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    // Set Production drops under the version rather than squeeze it narrower than MinVersionWidth.
+    FlowRow(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onSetProduction)
             .padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End,
+        itemVerticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.weight(1f).widthIn(min = MinVersionWidth)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(Res.string.version_number, versionNumber),
@@ -136,7 +140,7 @@ private fun PromptVersionItem(
             )
             prompt.createdAt?.let { createdAt ->
                 Text(
-                    text = createdAt,
+                    text = rememberAbsoluteTimestamp(createdAt),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
@@ -151,3 +155,5 @@ private fun PromptVersionItem(
         }
     }
 }
+
+private val MinVersionWidth = 160.dp

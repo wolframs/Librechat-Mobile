@@ -1,0 +1,336 @@
+package com.garfiec.librechat.shared.navigation
+
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.garfiec.librechat.core.model.Banner
+import com.garfiec.librechat.core.ui.components.BannerDisplay
+import com.garfiec.librechat.core.ui.components.PlatformBackHandler
+import com.garfiec.librechat.core.ui.components.SidebarWidth
+import com.garfiec.librechat.core.ui.glass.rememberGlassStyle
+import com.garfiec.librechat.core.ui.navigation.FullWidthRoute
+import com.garfiec.librechat.core.ui.navigation.LocalSidebarAsideRequests
+import com.garfiec.librechat.core.ui.navigation.SidebarAsideRequests
+import com.garfiec.librechat.feature.auth.navigation.AddAccountServerUrl
+import com.garfiec.librechat.feature.chat.navigation.NewChat
+import com.garfiec.librechat.feature.chat.navigation.isPlainLanding
+import com.garfiec.librechat.feature.conversations.navigation.Projects
+import com.garfiec.librechat.feature.settings.navigation.SettingsTabbed
+import kotlinx.coroutines.launch
+import org.koin.compose.viewmodel.koinViewModel
+
+/** Velocity (px/s) above which a fling commits the gesture regardless of position. */
+private const val FLING_VELOCITY_THRESHOLD = 800f
+
+@Composable
+fun TabletLayout(
+    navigator: Navigator,
+    navDisplay: NavDisplaySlot,
+    modifier: Modifier = Modifier,
+    navHostViewModel: NavHostViewModel = koinViewModel(),
+) {
+    // Banner state only -- drawer state is collected inside DrawerContent itself
+    val banner by navHostViewModel.banner.collectAsStateWithLifecycle()
+    val sessionRenewalBlocked by navHostViewModel.sessionRenewalBlocked.collectAsStateWithLifecycle()
+    val isLoggedIn by navHostViewModel.isLoggedIn.collectAsStateWithLifecycle()
+    // The sidebar is an authenticated surface, same rule as PhoneLayout's drawer gestures: a
+    // logged-out deep link (artifact viewer atop the auth base) is not in the auth flow either.
+    val showSidebar = isLoggedIn && !navigator.isInAuthFlow
+    // An unfolded Fold leaves a two-pane screen under its threshold beside the sidebar. Nothing is
+    // persisted: leaving brings the sidebar back as it was.
+    // A screen can also ask for the room while it shows something wide (an artifact beside the chat).
+    val asideRequests = remember { SidebarAsideRequests() }
+    val sidebarAside = navigator.currentRoute is FullWidthRoute || asideRequests.requested
+    val sidebarReveal by animateFloatAsState(
+        targetValue = if (sidebarAside) 0f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "sidebarReveal",
+    )
+    val glass = rememberGlassStyle()
+
+    // Persisted sidebar state from DataStore -- single source of truth in the ViewModel.
+    // Null until the persisted value resolves; treat unknown as closed for boolean callers.
+    val resolvedSidebarOpen by navHostViewModel.tabletSidebarOpen.collectAsStateWithLifecycle()
+    val isSidebarOpen = resolvedSidebarOpen == true
+    // Read by the gesture callbacks, which outlive recomposition (pointerInput is not restarted).
+    val currentIsSidebarOpen by rememberUpdatedState(isSidebarOpen)
+
+    // Whether swipe gesture is enabled (from settings)
+    val gestureEnabled by navHostViewModel.tabletSidebarGestureEnabled.collectAsStateWithLifecycle()
+
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    // The glass panel keeps out of a start-edge cutout (GlassSidebarPanel pads it). The sidebar widens
+    // by that inset, so the panel inside it stays SidebarWidth rather than giving the inset up.
+    val sidebarWidth = if (glass != null) {
+        SidebarWidth + WindowInsets.safeDrawing.asPaddingValues().calculateStartPadding(layoutDirection)
+    } else {
+        SidebarWidth
+    }
+    val sidebarWidthPx = with(density) { sidebarWidth.toPx() }
+    // Drag deltas are physical (+x = rightward) but the sidebar sits on the start edge, which RTL mirrors.
+    val dragSign = if (layoutDirection == LayoutDirection.Rtl) -1f else 1f
+
+    // Animatable tracks sidebar reveal in pixels: 0 = closed, sidebarWidthPx = open.
+    val sidebarOffset = remember { Animatable(0f) }
+    var initialStateApplied by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // Back press closes sidebar before navigating away. Gated on the sidebar being shown: armed while
+    // hidden, it swallows back on the root auth screen and silently persists the sidebar closed.
+    PlatformBackHandler(enabled = showSidebar && isSidebarOpen && !sidebarAside) {
+        navHostViewModel.setTabletSidebarOpen(false)
+    }
+
+    // Sync: when ViewModel state changes (e.g. hamburger button, back press), animate the
+    // sidebar to match. The first resolved value is snapped (not animated) so a tablet that
+    // restores "open" doesn't visibly slide the sidebar in on every cold start.
+    LaunchedEffect(resolvedSidebarOpen, sidebarWidthPx) {
+        val resolved = resolvedSidebarOpen ?: return@LaunchedEffect
+        val target = if (resolved) sidebarWidthPx else 0f
+        if (!initialStateApplied) {
+            sidebarOffset.snapTo(target)
+            initialStateApplied = true
+        } else if (sidebarOffset.value != target) {
+            sidebarOffset.animateTo(
+                targetValue = target,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+            )
+        }
+    }
+
+    if (showSidebar) {
+        val swipeModifier = if (gestureEnabled && !sidebarAside) {
+            Modifier.pointerInput(sidebarWidthPx, dragSign) {
+                val velocityTracker = VelocityTracker()
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        velocityTracker.resetTracking()
+                    },
+                    onDragEnd = {
+                        val velocity = velocityTracker.calculateVelocity().x * dragSign
+                        val currentOffset = sidebarOffset.value
+                        val shouldOpen = when {
+                            velocity > FLING_VELOCITY_THRESHOLD -> true
+                            velocity < -FLING_VELOCITY_THRESHOLD -> false
+                            else -> currentOffset > sidebarWidthPx * 0.5f
+                        }
+                        scope.launch {
+                            sidebarOffset.animateTo(
+                                targetValue = if (shouldOpen) sidebarWidthPx else 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow,
+                                ),
+                            )
+                            navHostViewModel.setTabletSidebarOpen(shouldOpen)
+                        }
+                    },
+                    onDragCancel = {
+                        val target = if (currentIsSidebarOpen) sidebarWidthPx else 0f
+                        scope.launch {
+                            sidebarOffset.animateTo(
+                                targetValue = target,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow,
+                                ),
+                            )
+                        }
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        velocityTracker.addPosition(
+                            change.uptimeMillis,
+                            change.position,
+                        )
+                        scope.launch {
+                            val newOffset = (sidebarOffset.value + dragAmount * dragSign)
+                                .coerceIn(0f, sidebarWidthPx)
+                            sidebarOffset.snapTo(newOffset)
+                        }
+                    },
+                )
+            }
+        } else {
+            Modifier
+        }
+
+        Layout(
+            content = {
+                // Slot 0: Sidebar -- sidebarWidth wide, slides from off-screen left to x=0
+                Row(modifier = Modifier.fillMaxHeight()) {
+                    val sidebar: @Composable (Modifier) -> Unit = { sidebarModifier ->
+                        SidebarScaffold(
+                            isOpen = isSidebarOpen,
+                            onNewChat = {
+                                // A project's landing is not the plain one, so New chat still leaves it.
+                                if ((navigator.currentRoute as? NewChat)?.isPlainLanding != true) {
+                                    navigator.navigateToTopLevel(NewChat())
+                                }
+                            },
+                            onConversationClick = { conversationId ->
+                                navigator.navigateToChat(conversationId)
+                            },
+                            onSettingsClick = {
+                                navigator.navigate(SettingsTabbed)
+                            },
+                            onWorkspaceClick = { destination ->
+                                navigator.navigate(destination.route())
+                            },
+                            currentWorkspace = navigator.currentRoute.workspaceDestination(),
+                            onOpenProjectsIndex = {
+                                navigator.navigate(Projects)
+                            },
+                            onNewChatInProject = { projectId, projectName ->
+                                navigator.navigateToNewChatInProject(projectId, projectName)
+                            },
+                            onOpenSearch = { query ->
+                                navigator.navigateToSearch(query)
+                            },
+                            onMessageClick = { conversationId, messageId, query, inReasoning ->
+                                navigator.navigateToMessage(conversationId, messageId, query, inReasoning)
+                            },
+                            onSwitchAccount = { accountId ->
+                                navHostViewModel.switchAccount(accountId)
+                            },
+                            onAddAccount = {
+                                navigator.navigate(AddAccountServerUrl)
+                            },
+                            modifier = sidebarModifier,
+                        )
+                    }
+                    if (glass == null) {
+                        sidebar(Modifier.width(SidebarWidth).fillMaxHeight())
+                        VerticalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
+                    } else {
+                        // Beside the content rather than over it, so the flat frosted tier: there is
+                        // nothing behind the panel for a backdrop to show.
+                        GlassSidebarPanel(
+                            style = glass,
+                            backdrop = null,
+                            modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
+                        ) {
+                            sidebar(Modifier.fillMaxSize())
+                        }
+                    }
+                }
+                // Slot 1: Main content -- resizes to fill remaining space
+                MainContent(
+                    navDisplay = navDisplay,
+                    asideRequests = asideRequests,
+                    showBanner = true,
+                    banner = banner,
+                    onDismissBanner = navHostViewModel::dismissBanner,
+                    sessionRenewalBlocked = sessionRenewalBlocked,
+                    onSignInAgain = navHostViewModel::signInAgain,
+                    onToggleDrawer = {
+                        navHostViewModel.toggleTabletSidebar()
+                    },
+                )
+            },
+            // The page colour behind both slots: in Liquid Glass the sidebar is a floating panel, and
+            // without it the margin around the panel shows the bare window (black in dark mode).
+            // Material's sidebar is edge to edge, so it leaves no margin to fill.
+            modifier = modifier
+                .fillMaxSize()
+                .then(if (glass != null) Modifier.background(MaterialTheme.colorScheme.background) else Modifier)
+                .then(swipeModifier)
+                .clipToBounds(),
+        ) { measurables, constraints ->
+            val sidebarPx = sidebarWidth.roundToPx()
+            val animatedPx = (sidebarOffset.value * sidebarReveal).toInt()
+
+            val sidebarPlaceable = measurables[0].measure(
+                constraints.copy(minWidth = sidebarPx, maxWidth = sidebarPx),
+            )
+            val mainWidth = (constraints.maxWidth - animatedPx).coerceAtLeast(0)
+            val mainPlaceable = measurables[1].measure(
+                constraints.copy(minWidth = mainWidth, maxWidth = mainWidth),
+            )
+
+            layout(constraints.maxWidth, constraints.maxHeight) {
+                sidebarPlaceable.placeRelative(animatedPx - sidebarPx, 0)
+                mainPlaceable.placeRelative(animatedPx, 0)
+            }
+        }
+    } else {
+        // Auth flow or logged out -- no sidebar, just main content
+        MainContent(
+            navDisplay = navDisplay,
+            showBanner = false,
+            banner = banner,
+            onDismissBanner = navHostViewModel::dismissBanner,
+            sessionRenewalBlocked = false,
+            onSignInAgain = {},
+            onToggleDrawer = {},
+            modifier = modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun MainContent(
+    navDisplay: NavDisplaySlot,
+    showBanner: Boolean,
+    banner: Banner?,
+    onDismissBanner: (String) -> Unit,
+    sessionRenewalBlocked: Boolean,
+    onSignInAgain: () -> Unit,
+    onToggleDrawer: () -> Unit,
+    modifier: Modifier = Modifier,
+    asideRequests: SidebarAsideRequests? = null,
+) {
+    Column(modifier = modifier) {
+        if (showBanner) {
+            SessionRenewalBlockedBanner(
+                visible = sessionRenewalBlocked,
+                onSignInAgain = onSignInAgain,
+            )
+            BannerDisplay(
+                banner = banner,
+                onDismiss = onDismissBanner,
+            )
+        }
+        CompositionLocalProvider(LocalSidebarAsideRequests provides asideRequests) {
+            navDisplay(onToggleDrawer, Modifier.fillMaxSize())
+        }
+    }
+}

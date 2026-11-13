@@ -1,15 +1,21 @@
-@file:OptIn(org.koin.core.annotation.KoinExperimentalAPI::class)
-
 package com.garfiec.librechat.feature.chat.di
 
 import android.app.Application
 import android.content.Context
+import com.garfiec.librechat.core.common.AppInfo
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.network.ConnectivityObserver
+import com.garfiec.librechat.core.data.datastore.CodeWorkspacePreferenceStore
+import com.garfiec.librechat.core.data.datastore.ConversationWebSearchStore
+import com.garfiec.librechat.core.data.datastore.McpAppLocationConsentStore
+import com.garfiec.librechat.core.data.datastore.PreferenceStore
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.AgentRepository
+import com.garfiec.librechat.core.data.repository.BackgroundTaskRepository
 import com.garfiec.librechat.core.data.repository.ChatRepository
+import com.garfiec.librechat.core.data.repository.CodeEnvironmentRepository
+import com.garfiec.librechat.core.data.repository.CodeRunRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.ConversationRepository
 import com.garfiec.librechat.core.data.repository.DraftRepository
@@ -17,20 +23,48 @@ import com.garfiec.librechat.core.data.repository.EndpointTokenRepository
 import com.garfiec.librechat.core.data.repository.FavoritesRepository
 import com.garfiec.librechat.core.data.repository.FileRepository
 import com.garfiec.librechat.core.data.repository.KeyRepository
+import com.garfiec.librechat.core.data.repository.McpAppsRepository
+import com.garfiec.librechat.core.data.repository.McpOAuthLauncher
 import com.garfiec.librechat.core.data.repository.McpRepository
+import com.garfiec.librechat.core.data.repository.MemoryRepository
 import com.garfiec.librechat.core.data.repository.MessageRepository
 import com.garfiec.librechat.core.data.repository.PresetRepository
+import com.garfiec.librechat.core.data.repository.ProjectRepository
 import com.garfiec.librechat.core.data.repository.PromptRepository
+import com.garfiec.librechat.core.data.repository.PullRequestRepository
+import com.garfiec.librechat.core.data.repository.QueuedTurnRepository
+import com.garfiec.librechat.core.data.repository.ReasoningCapabilitiesRepository
 import com.garfiec.librechat.core.data.repository.ResumePinStore
 import com.garfiec.librechat.core.data.repository.RoleRepository
 import com.garfiec.librechat.core.data.repository.ShareRepository
+import com.garfiec.librechat.core.data.repository.SkillsRepository
 import com.garfiec.librechat.core.data.repository.SpeechRepository
+import com.garfiec.librechat.core.data.repository.SubagentRepository
+import com.garfiec.librechat.core.data.repository.TagRepository
+import com.garfiec.librechat.core.data.repository.TraceRepository
 import com.garfiec.librechat.core.data.repository.UserRepository
+import com.garfiec.librechat.core.data.repository.WebSearchReadinessRepository
+import com.garfiec.librechat.core.data.share.ShareLinkControllerFactory
+import com.garfiec.librechat.core.data.update.AppUpdateRepository
 import com.garfiec.librechat.core.data.util.PermissionGate
+import com.garfiec.librechat.core.network.client.ServerUrlProvider
+import com.garfiec.librechat.feature.chat.prompts.PromptsViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.SharedChatViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.SubagentThreadsViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.TraceViewerViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.UpdateBannerViewModel
+import io.mockk.mockk
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.serialization.json.Json
 import org.junit.Test
+import org.koin.core.Koin
+import org.koin.core.error.InstanceCreationException
+import org.koin.core.error.NoDefinitionFoundException
+import org.koin.core.parameter.parametersOf
+import org.koin.dsl.koinApplication
+import org.koin.dsl.module
 import org.koin.test.verify.verify
+import kotlin.test.assertTrue
 
 class ChatModuleVerificationTest {
     @Test
@@ -40,29 +74,51 @@ class ChatModuleVerificationTest {
                 Context::class,
                 Application::class,
                 AgentRepository::class,
+                BackgroundTaskRepository::class,
                 ChatRepository::class,
                 MessageRepository::class,
                 ConfigRepository::class,
                 ConversationRepository::class,
                 DraftRepository::class,
                 EndpointTokenRepository::class,
+                ReasoningCapabilitiesRepository::class,
                 FavoritesRepository::class,
                 FileRepository::class,
                 KeyRepository::class,
                 PresetRepository::class,
                 ResumePinStore::class,
+                ProjectRepository::class,
                 PromptRepository::class,
+                QueuedTurnRepository::class,
                 RoleRepository::class,
                 PermissionGate::class,
                 ShareRepository::class,
+                ShareLinkControllerFactory::class,
+                TagRepository::class,
+                SubagentRepository::class,
+                TraceRepository::class,
                 SpeechRepository::class,
                 McpRepository::class,
-                com.garfiec.librechat.core.data.repository.MarketRepository::class,
+                McpOAuthLauncher::class,
+                McpAppsRepository::class,
+                AppInfo::class,
+                MemoryRepository::class,
+                WebSearchReadinessRepository::class,
+                ConversationWebSearchStore::class,
+                McpAppLocationConsentStore::class,
+                CodeEnvironmentRepository::class,
+                CodeWorkspacePreferenceStore::class,
+                PullRequestRepository::class,
+                CodeRunRepository::class,
+                SkillsRepository::class,
                 UserRepository::class,
                 ConnectivityObserver::class,
                 ActiveAccountProvider::class,
                 ServerDataStore::class,
+                ServerUrlProvider::class,
                 SettingsDataStore::class,
+                PreferenceStore::class,
+                AppUpdateRepository::class,
                 // Dispatchers are supplied via Koin qualifiers in explicit blocks; verify()
                 // can't see qualifiers, so whitelist the type as externally provided.
                 CoroutineDispatcher::class,
@@ -71,4 +127,55 @@ class ChatModuleVerificationTest {
             ),
         )
     }
+
+    @Suppress("MissingScopedDependencyQualifier") // each mock binds a distinct interface; the rule keys on the mockk() call
+    @Test
+    fun everyViewModelTheScreensResolveByTypeIsRegistered() {
+        // `verify()` above checks that REGISTERED definitions have satisfiable dependencies. It
+        // cannot walk `koinViewModel<T>()` call sites, so a ViewModel nobody registered is
+        // invisible to it — mis-wired is caught, unregistered is not, and the latter throws
+        // NoDefinitionFoundException on the first tap with every gate green.
+        val koin = koinApplication {
+            modules(
+                chatModule,
+                module {
+                    single<PromptRepository> { mockk(relaxed = true) }
+                    single<SubagentRepository> { mockk(relaxed = true) }
+                    single<TraceRepository> { mockk(relaxed = true) }
+                    single<AppUpdateRepository> { mockk(relaxed = true) }
+                    single<ShareRepository> { mockk(relaxed = true) }
+                    single<ConversationRepository> { mockk(relaxed = true) }
+                    single<ActiveAccountProvider> { mockk(relaxed = true) }
+                    single<ServerUrlProvider> { mockk(relaxed = true) }
+                },
+            )
+        }.koin
+
+        assertTrue(koin.hasDefinitionFor { koin.get<PromptsViewModel>() }, "PromptsViewModel")
+        assertTrue(koin.hasDefinitionFor { koin.get<SubagentThreadsViewModel>() }, "SubagentThreadsViewModel")
+        assertTrue(koin.hasDefinitionFor { koin.get<TraceViewerViewModel>() }, "TraceViewerViewModel")
+        assertTrue(koin.hasDefinitionFor { koin.get<UpdateBannerViewModel>() }, "UpdateBannerViewModel")
+        assertTrue(
+            koin.hasDefinitionFor { koin.get<SharedChatViewModel> { parametersOf("share-1") } },
+            "SharedChatViewModel",
+        )
+    }
+
+    /**
+     * Whether a definition exists, as opposed to whether it can be BUILT here.
+     *
+     * A ViewModel that reaches its own constructor has a definition; failing afterwards is a
+     * JVM-test problem (no Main dispatcher, no Android framework) and not what this asks about.
+     * Only the missing definition is the bug this test exists for, and that one is named
+     * precisely.
+     */
+    private fun Koin.hasDefinitionFor(resolve: () -> Any?): Boolean =
+        try {
+            resolve()
+            true
+        } catch (_: NoDefinitionFoundException) {
+            false
+        } catch (_: InstanceCreationException) {
+            true
+        }
 }

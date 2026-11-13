@@ -4,23 +4,40 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.identity.cleanServerUrl
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.common.result.getOrNull
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
+import com.garfiec.librechat.core.data.pdf.PdfPasswordProtectedException
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.FileRepository
+import com.garfiec.librechat.core.logging.redact.LogRedactor
 import com.garfiec.librechat.core.model.FileObject
 import com.garfiec.librechat.core.model.request.DeleteFileEntry
 import com.garfiec.librechat.core.model.response.FileUploadConfig
-import com.garfiec.librechat.core.model.response.effectiveFileSizeLimit
 import com.garfiec.librechat.core.model.response.pickerMimeTypes
+import com.garfiec.librechat.core.ui.components.PdfPasswordPromptUi
 import com.garfiec.librechat.core.ui.media.MediaItem
 import com.garfiec.librechat.core.ui.media.MediaPreviewState
+import com.garfiec.librechat.core.ui.platform.formatFileSize
 import com.garfiec.librechat.feature.files.FileDisplayData
 import com.garfiec.librechat.feature.files.FilePreviewDisplayData
 import com.garfiec.librechat.feature.files.platform.FileReader
-import com.garfiec.librechat.feature.files.platform.formatFileSize
+import com.garfiec.librechat.feature.files.resources.Res
+import com.garfiec.librechat.feature.files.resources.filter_all
+import com.garfiec.librechat.feature.files.resources.filter_audio
+import com.garfiec.librechat.feature.files.resources.filter_documents
+import com.garfiec.librechat.feature.files.resources.filter_images
+import com.garfiec.librechat.feature.files.resources.filter_video
+import com.garfiec.librechat.feature.files.resources.no_filter_audio
+import com.garfiec.librechat.feature.files.resources.no_filter_documents
+import com.garfiec.librechat.feature.files.resources.no_filter_images
+import com.garfiec.librechat.feature.files.resources.no_filter_video
+import com.garfiec.librechat.feature.files.resources.sort_date
+import com.garfiec.librechat.feature.files.resources.sort_name
+import com.garfiec.librechat.feature.files.resources.sort_size
+import com.garfiec.librechat.feature.files.resources.sort_type
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -32,24 +49,35 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.StringResource
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-enum class FileTypeFilter(val label: String) {
-    ALL("All"),
-    IMAGES("Images"),
-    DOCUMENTS("Documents"),
-    AUDIO("Audio"),
-    VIDEO("Video"),
+/** [emptyTitle] is null for [ALL], whose empty state is the general "no files" one. */
+enum class FileTypeFilter(val label: StringResource, val emptyTitle: StringResource?) {
+    ALL(Res.string.filter_all, null),
+    IMAGES(Res.string.filter_images, Res.string.no_filter_images),
+    DOCUMENTS(Res.string.filter_documents, Res.string.no_filter_documents),
+    AUDIO(Res.string.filter_audio, Res.string.no_filter_audio),
+    VIDEO(Res.string.filter_video, Res.string.no_filter_video),
+    ;
+
+    fun matches(type: String): Boolean = when (this) {
+        ALL -> true
+        IMAGES -> type.startsWith("image/")
+        DOCUMENTS -> type.startsWith("application/") || type.startsWith("text/")
+        AUDIO -> type.startsWith("audio/")
+        VIDEO -> type.startsWith("video/")
+    }
 }
 
 // Stored strings are decoupled from the constant names so renaming a constant can't orphan a saved
 // preference (matches StarredModelsDisplay/ContextBarPlacement/etc. in :core:data).
-enum class FileSortField(val label: String) {
-    NAME("Name"),
-    DATE("Date"),
-    SIZE("Size"),
-    TYPE("Type");
+enum class FileSortField(val label: StringResource) {
+    NAME(Res.string.sort_name),
+    DATE(Res.string.sort_date),
+    SIZE(Res.string.sort_size),
+    TYPE(Res.string.sort_type);
 
     companion object {
         fun fromString(value: String?): FileSortField = when (value) {
@@ -102,7 +130,10 @@ enum class FileViewMode {
 
 @Immutable
 data class FilesUiState(
+    /** The selected filter's page: `filesByFilter[selectedFilter]`. */
     val displayFiles: List<FileDisplayData> = emptyList(),
+    /** Every filter's page, so the pager can show the one being swiped in before it's selected. */
+    val filesByFilter: Map<FileTypeFilter, List<FileDisplayData>> = emptyMap(),
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
     val isUploading: Boolean = false,
@@ -125,8 +156,11 @@ data class FilesUiState(
      * configured no allowlist, or it configured one we can't represent faithfully.
      */
     val pickerMimeTypes: List<String> = emptyList(),
+    /** A picked PDF needs its password before it can be uploaded; the screen asks for it. */
+    val pdfPasswordPrompt: PdfPasswordPromptUi? = null,
 )
 
+@Suppress("TooManyFunctions") // debt: 31 functions
 class FilesViewModel(
     private val fileRepository: FileRepository,
     private val configRepository: ConfigRepository,
@@ -169,24 +203,31 @@ class FilesViewModel(
     private val displayDataCache = mutableMapOf<String, FileDisplayData>()
 
     /**
-     * The filtered + sorted display list, derived only from the inputs that affect it. Kept
+     * Every filter's sorted display list, derived only from the inputs that affect it. Kept
      * separate from [_transientState] so that purely-overlay changes (opening/closing the image
-     * viewer, upload progress, selection) don't re-run filter+sort over the whole file list.
+     * viewer, upload progress, selection) don't re-run filter+sort over the whole file list, and
+     * from [_selectedFilter] so that swiping between filters doesn't either.
      */
-    private val displayList: Flow<DisplayList> = combine(
-        _files,
-        _selectedFilter,
-        _sort,
-    ) { files, filter, sortOrNull ->
+    private val pages: Flow<Pages> = combine(_files, _sort) { files, sortOrNull ->
         val sort = sortOrNull ?: DefaultSort
-        val filtered = filterFiles(files, filter)
-        val sorted = sortFiles(filtered, sort.field, sort.order)
-        DisplayList(
-            files = sorted.map { file -> displayDataCache.getOrPut(file.fileId) { file.toDisplayData() } },
+        val sorted = sortFiles(files, sort.field, sort.order)
+            .map { file -> displayDataCache.getOrPut(file.fileId) { file.toDisplayData() } }
+        Pages(
+            files = FileTypeFilter.entries.associateWith { filter -> sorted.filter { filter.matches(it.type) } },
             hasFiles = files.isNotEmpty(),
-            filter = filter,
             sortField = sort.field,
             sortOrder = sort.order,
+        )
+    }
+
+    private val displayList: Flow<DisplayList> = combine(pages, _selectedFilter) { pages, filter ->
+        DisplayList(
+            files = pages.files[filter].orEmpty(),
+            byFilter = pages.files,
+            hasFiles = pages.hasFiles,
+            filter = filter,
+            sortField = pages.sortField,
+            sortOrder = pages.sortOrder,
         )
     }
 
@@ -198,6 +239,7 @@ class FilesViewModel(
     ) { list, transient, mode, pickerMimeTypes ->
         FilesUiState(
             displayFiles = list.files,
+            filesByFilter = list.byFilter,
             isLoading = transient.isLoading,
             isRefreshing = transient.isRefreshing,
             isUploading = transient.isUploading,
@@ -214,6 +256,7 @@ class FilesViewModel(
             mediaPreview = transient.mediaPreview,
             hasFiles = list.hasFiles,
             viewMode = mode ?: FileViewMode.LIST,
+            pdfPasswordPrompt = transient.pdfPasswordPrompt,
             pickerMimeTypes = pickerMimeTypes,
         )
     }.stateIn(
@@ -285,12 +328,15 @@ class FilesViewModel(
 
     private var uploadJob: Job? = null
 
+    /** The picked PDF behind [FilesUiState.pdfPasswordPrompt], kept out of the UI state. */
+    private var pendingPdfRef: Any? = null
+
     /**
      * Upload a file from a platform-specific file reference.
      * On Android this is a Uri; on iOS it will be an NSURL.
      */
     @OptIn(ExperimentalUuidApi::class)
-    fun uploadFile(fileRef: Any) {
+    fun uploadFile(fileRef: Any, pdfPassword: String? = null) {
         uploadJob?.cancel()
         lateinit var thisJob: Job
         thisJob = viewModelScope.launch(ioDispatcher) {
@@ -301,12 +347,13 @@ class FilesViewModel(
                     uploadFilename = filename,
                     uploadProgress = null,
                     error = null,
+                    pdfPasswordPrompt = null,
                 )
             }
             val mimeType = fileReader.getMimeType(fileRef) ?: "application/octet-stream"
-            val source = fileReader.openUploadSource(fileRef)
-            if (source == null) {
-                Logger.e { "uploadFile: could not create a source from the file reference" }
+            val bytes = fileReader.readBytes(fileRef)
+            if (bytes == null) {
+                Logger.e { "uploadFile: could not read bytes from file reference" }
                 updateTransient {
                     copy(
                         isUploading = false,
@@ -318,36 +365,14 @@ class FilesViewModel(
                 return@launch
             }
 
-            val sizeLimit = when (val config = fileRepository.getFileConfig()) {
-                is Result.Success -> config.data.effectiveFileSizeLimit("agents")
-                else -> null
-            }
-            val contentLength = source.contentLength
-            if (
-                contentLength != null &&
-                sizeLimit != null &&
-                sizeLimit > 0L &&
-                contentLength > sizeLimit
-            ) {
-                updateTransient {
-                    copy(
-                        isUploading = false,
-                        uploadFilename = "",
-                        uploadProgress = null,
-                        error = "File is too large. Maximum size is ${formatFileSize(sizeLimit)}",
-                    )
-                }
-                return@launch
-            }
-
             val fileId = Uuid.random().toString()
             Logger.d {
-                "uploadFile: filename=$filename, mimeType=$mimeType, " +
-                    "size=${contentLength ?: "unknown"}, fileId=$fileId"
+                "uploadFile: filename=${LogRedactor.redactFileName(filename)}, mimeType=$mimeType, " +
+                    "size=${bytes.size}, fileId=$fileId"
             }
 
             when (val result = fileRepository.uploadFile(
-                source = source,
+                bytes = bytes,
                 filename = filename,
                 type = mimeType,
                 fileId = fileId,
@@ -357,6 +382,7 @@ class FilesViewModel(
                 onProgress = { pct ->
                     if (thisJob.isActive) updateTransient { copy(uploadProgress = pct) }
                 },
+                pdfPassword = pdfPassword,
             )) {
                 is Result.Success -> {
                     Logger.d { "uploadFile: success -- serverFileId=${result.data.fileId}" }
@@ -370,13 +396,19 @@ class FilesViewModel(
                     }
                 }
                 is Result.Error -> {
-                    Logger.e(result.exception) { "uploadFile: server error -- ${result.message}" }
+                    val locked = result.exception as? PdfPasswordProtectedException
+                    if (locked != null) {
+                        pendingPdfRef = fileRef
+                    } else {
+                        Logger.e(result.exception) { "uploadFile: server error -- ${result.message}" }
+                    }
                     updateTransient {
                         copy(
                             isUploading = false,
                             uploadFilename = "",
                             uploadProgress = null,
-                            error = result.message ?: "Upload failed",
+                            error = if (locked != null) null else result.message ?: "Upload failed",
+                            pdfPasswordPrompt = locked?.let { PdfPasswordPromptUi(filename, it.incorrectPassword) },
                         )
                     }
                 }
@@ -384,6 +416,18 @@ class FilesViewModel(
             }
         }
         uploadJob = thisJob
+    }
+
+    /** Uploads the prompted PDF again, decrypting it on-device with [password]. */
+    fun submitPdfPassword(password: String) {
+        val fileRef = pendingPdfRef ?: return
+        pendingPdfRef = null
+        uploadFile(fileRef, pdfPassword = password)
+    }
+
+    fun dismissPdfPassword() {
+        pendingPdfRef = null
+        updateTransient { copy(pdfPasswordPrompt = null) }
     }
 
     fun cancelUpload() {
@@ -399,14 +443,24 @@ class FilesViewModel(
 
     fun deleteFile(fileId: String) {
         viewModelScope.launch {
+            // The route drops any entry with a falsy filepath before doing anything else, so a
+            // row we cannot name a path for would be filtered away and answered 204 — a silent
+            // no-op the list would then render as a successful delete.
             val file = _files.value.find { it.fileId == fileId }
-            val entry = DeleteFileEntry(
-                fileId = fileId,
-                filepath = file?.filepath ?: "",
-            )
+            if (file == null || file.filepath.isBlank()) {
+                updateTransient { copy(error = "Failed to delete file") }
+                return@launch
+            }
+            val entry = DeleteFileEntry(fileId = fileId, filepath = file.filepath)
             when (val result = fileRepository.deleteFiles(listOf(entry))) {
                 is Result.Success -> {
-                    _files.value = _files.value.filter { it.fileId != fileId }
+                    // A partial delete answers 200, so success alone does not mean the file is
+                    // gone — dropping the row anyway hides a file that is still on the server.
+                    if (fileId in result.data.failedFileIds) {
+                        updateTransient { copy(error = result.data.message ?: "Failed to delete file") }
+                    } else {
+                        _files.value = _files.value.filter { it.fileId != fileId }
+                    }
                 }
                 is Result.Error -> {
                     updateTransient {
@@ -459,8 +513,10 @@ class FilesViewModel(
      */
     fun openImagePreview(fileId: String) {
         // Reuse the already filtered + sorted display list (URLs resolved once in `previewUrl`)
-        // instead of re-running filter+sort and re-resolving every URL on the tap.
-        val images = uiState.value.displayFiles.filter { it.previewUrl != null }
+        // instead of re-running filter+sort and re-resolving every URL on the tap. Every page that
+        // shows images shows all of them in the same order, so the Images page serves whichever page
+        // was tapped, even one swiped to before the selected filter caught up.
+        val images = uiState.value.filesByFilter[FileTypeFilter.IMAGES].orEmpty().filter { it.previewUrl != null }
         if (images.isEmpty()) return
         // Dedup by URL: the pager keys pages on url, so duplicate URLs would crash it.
         val items = images
@@ -583,17 +639,35 @@ class FilesViewModel(
         if (selectedIds.isEmpty()) return
 
         viewModelScope.launch {
+            // Only rows still in the list can be named; a selection is sticky across filter
+            // changes and survives a reload, so an id with no row is one nothing can be asked
+            // about — counting it as deleted is the same silent success as a blank filepath,
+            // which the repository now reports as a failure for every caller.
             val entries = selectedIds.mapNotNull { id ->
-                val file = _files.value.find { it.fileId == id }
-                file?.let { DeleteFileEntry(fileId = it.fileId, filepath = it.filepath) }
+                _files.value.find { it.fileId == id }
+                    ?.let { DeleteFileEntry(fileId = it.fileId, filepath = it.filepath) }
+            }
+            if (entries.isEmpty()) {
+                updateTransient { copy(error = "Failed to delete files") }
+                return@launch
             }
             when (val result = fileRepository.deleteFiles(entries)) {
                 is Result.Success -> {
-                    _files.value = _files.value.filter { it.fileId !in selectedIds }
+                    // Everything asked for MINUS what the server reported as failed. An older
+                    // server names no ids, so the failed set is empty and this evicts the whole
+                    // selection, exactly as before.
+                    val failed = result.data.failedFileIds.toSet()
+                    val removed = entries.map { it.fileId }.toSet() - failed
+                    _files.value = _files.value.filter { it.fileId !in removed }
                     updateTransient {
                         copy(
-                            isSelectionMode = false,
-                            selectedFileIds = emptySet(),
+                            isSelectionMode = failed.isNotEmpty(),
+                            selectedFileIds = failed,
+                            error = if (failed.isEmpty()) {
+                                error
+                            } else {
+                                result.data.message ?: "Failed to delete files"
+                            },
                         )
                     }
                 }
@@ -614,15 +688,7 @@ class FilesViewModel(
     // Private helpers
 
     private fun filterFiles(files: List<FileObject>, filter: FileTypeFilter): List<FileObject> =
-        when (filter) {
-            FileTypeFilter.ALL -> files
-            FileTypeFilter.IMAGES -> files.filter { it.type.startsWith("image/") }
-            FileTypeFilter.DOCUMENTS -> files.filter {
-                it.type.startsWith("application/") || it.type.startsWith("text/")
-            }
-            FileTypeFilter.AUDIO -> files.filter { it.type.startsWith("audio/") }
-            FileTypeFilter.VIDEO -> files.filter { it.type.startsWith("video/") }
-        }
+        if (filter == FileTypeFilter.ALL) files else files.filter { filter.matches(it.type) }
 
     private fun sortFiles(
         files: List<FileObject>,
@@ -644,7 +710,7 @@ class FilesViewModel(
     }
 
     private fun FileObject.buildFileUrl(): String {
-        val baseUrl = serverDataStore.getBaseUrl().trimEnd('/')
+        val baseUrl = cleanServerUrl(serverDataStore.getBaseUrl())
         val url = if (filepath.startsWith("http://") || filepath.startsWith("https://")) {
             filepath
         } else if (filepath.isNotBlank()) {
@@ -652,7 +718,7 @@ class FilesViewModel(
         } else {
             "$baseUrl/api/files/download/${user ?: ""}/$fileId"
         }
-        Logger.d { "File URL for $filename ($fileId): $url" }
+        Logger.d { "File URL built for ${LogRedactor.redactFileName(filename)} ($fileId)" }
         return url
     }
 
@@ -684,6 +750,13 @@ class FilesViewModel(
     }
 }
 
+private data class Pages(
+    val files: Map<FileTypeFilter, List<FileDisplayData>>,
+    val hasFiles: Boolean,
+    val sortField: FileSortField,
+    val sortOrder: FileSortOrder,
+)
+
 /**
  * Precomputed filtered + sorted display list, recomputed only when files/filter/sort change.
  * Carries the filter/sort inputs it was built from so the UI-state combine doesn't have to
@@ -691,6 +764,7 @@ class FilesViewModel(
  */
 private data class DisplayList(
     val files: List<FileDisplayData>,
+    val byFilter: Map<FileTypeFilter, List<FileDisplayData>>,
     val hasFiles: Boolean,
     val filter: FileTypeFilter,
     val sortField: FileSortField,
@@ -714,4 +788,5 @@ private data class TransientState(
     val selectedFileIds: Set<String> = emptySet(),
     val previewFile: FilePreviewDisplayData? = null,
     val mediaPreview: MediaPreviewState? = null,
+    val pdfPasswordPrompt: PdfPasswordPromptUi? = null,
 )

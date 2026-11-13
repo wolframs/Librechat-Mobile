@@ -1,14 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Drawer -->
-    <string name="settings">Ajustes</string>
 
     <!-- Content descriptions -->
-    <string name="cd_back_to_conversations">Volver a conversaciones</string>
 
     <!-- Version mismatch dialog -->
     <string name="version_mismatch_title">Versión del servidor incompatible</string>
     <string name="version_mismatch_message">Esta app se creó para LibreChat v%1$s, pero tu servidor ejecuta la v%2$s. Es posible que algunas funciones no funcionen correctamente.</string>
     <string name="dismiss">Descartar</string>
     <string name="dont_warn_again">No volver a avisar</string>
+    <string name="session_expired_title">Sesión cerrada</string>
+    <string name="session_expired_message">Tu sesión ha caducado. Vuelve a iniciar sesión para continuar.</string>
+    <string name="session_expired_message_named">Tu sesión en %1$s ha caducado. Vuelve a iniciar sesión para continuar.</string>
+    <string name="session_expired_switched_named">Tu sesión en %1$s ha caducado, así que ahora usas %2$s. Vuelve a iniciar sesión en %1$s desde el selector de cuentas.</string>
+    <string name="session_expired_switched">Tu sesión ha caducado, así que ahora usas %1$s. Vuelve a iniciar sesión desde el selector de cuentas.</string>
+    <string name="session_banned_title">Cuenta restringida</string>
+    <string name="session_banned_message">Tu servidor ha restringido temporalmente esta cuenta, por ejemplo tras demasiadas solicitudes o una infracción de sus normas. Hasta que se levante la restricción, no podrás enviar mensajes, usar agentes ni subir archivos, y es posible que se cierre tu sesión. Si no se levanta, contacta con el administrador del servidor.</string>
+    <string name="session_banned_message_named">Tu servidor ha restringido temporalmente %1$s, por ejemplo tras demasiadas solicitudes o una infracción de sus normas. Hasta que se levante la restricción, no podrás enviar mensajes, usar agentes ni subir archivos, y es posible que se cierre tu sesión. Si no se levanta, contacta con el administrador del servidor.</string>
+    <string name="session_renewal_blocked_message">No se pudo renovar tu sesión: el servidor rechazó la solicitud de actualización.</string>
+    <string name="session_renewal_sign_in_again">Iniciar sesión de nuevo</string>
+    <string name="shared_link_switch_title">¿Cambiar de cuenta?</string>
+    <string name="shared_link_switch_message">Este chat compartido está en %1$s, donde has iniciado sesión como %2$s. Cambia a esa cuenta para abrirlo aquí.</string>
+    <string name="shared_link_switch_confirm">Cambiar</string>
+    <string name="shared_link_open_in_browser">Abrir en el navegador</string>
 </resources>

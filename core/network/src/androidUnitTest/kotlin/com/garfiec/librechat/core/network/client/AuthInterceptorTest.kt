@@ -3,17 +3,24 @@ package com.garfiec.librechat.core.network.client
 import com.garfiec.librechat.core.common.identity.AccountId
 import com.garfiec.librechat.core.common.identity.AccountState
 import com.garfiec.librechat.core.common.identity.InMemoryActiveAccountProvider
-import com.garfiec.librechat.core.network.client.SessionEndReason
+import com.garfiec.librechat.core.common.identity.deriveAccountId
+import com.garfiec.librechat.core.common.identity.deriveServerId
+import com.garfiec.librechat.core.network.api.AuthApi
+import com.garfiec.librechat.core.network.di.librechatJson
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.get
+import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
-import io.ktor.http.headersOf
+import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -22,6 +29,10 @@ import kotlinx.coroutines.withContext
 import org.junit.Test
 
 class AuthInterceptorTest {
+
+    private val accountA = deriveAccountId(
+        deriveServerId("https://a.example.com"), "user-a",
+    ).value
 
     private class FakeTokenManager(
         private var accessToken: String? = "initial-token",
@@ -95,6 +106,15 @@ class AuthInterceptorTest {
             this.serverUrlProvider = serverUrlProvider
         }
     }
+
+    private fun createAuthApi(tokenManager: FakeTokenManager, engine: MockEngine): AuthApi =
+        AuthApi(
+            HttpClient(engine) {
+                install(ContentNegotiation) { json(librechatJson) }
+                defaultRequest { contentType(ContentType.Application.Json) }
+                install(AuthInterceptorPlugin) { this.tokenManager = tokenManager }
+            },
+        )
 
     @Test
     fun `attaches Bearer token to requests`() = runTest {
@@ -212,8 +232,11 @@ class AuthInterceptorTest {
 
         val engine = MockEngine {
             requestCount++
-            if (requestCount == 1) respond("Unauthorized", HttpStatusCode.Unauthorized)
-            else respond("OK", HttpStatusCode.OK)
+            if (requestCount == 1) {
+                respond("Unauthorized", HttpStatusCode.Unauthorized)
+            } else {
+                respond("OK", HttpStatusCode.OK)
+            }
         }
         val client = createClient(tokenManager, engine)
 
@@ -303,6 +326,63 @@ class AuthInterceptorTest {
         val response = client.get("https://example.com/api/data")
         assertThat(response.status).isEqualTo(HttpStatusCode.Unauthorized)
         assertThat(tokenManager.refreshCallCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `an MCP App route's invalid_token after a good refresh does not end the session`() = runTest {
+        // The App routes 401 `{error:"invalid_token"}` when the MCP server's own OpenID token needs
+        // a new sign-in. The LibreChat session is fine, so the refresh succeeds and the retry 401s
+        // again: that must reach the caller as a 401, not sign the user out.
+        val tokenManager = FakeTokenManager(
+            accessToken = "token",
+            refreshOutcome = RefreshResult.Refreshed,
+            refreshedToken = "token-2",
+        )
+        val engine = MockEngine {
+            respond("""{"error":"invalid_token"}""", HttpStatusCode.Unauthorized)
+        }
+        val client = createClient(tokenManager, engine)
+
+        val response = client.post("https://example.com/api/mcp/app-tool-call")
+        assertThat(response.status).isEqualTo(HttpStatusCode.Unauthorized)
+        assertThat(tokenManager.refreshCallCount).isEqualTo(1)
+        assertThat(tokenManager.sessionExpiredCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `a wrong 2FA code on the settings routes is sent once, with no refresh`() = runTest {
+        val calls: List<suspend AuthApi.() -> Unit> = listOf(
+            { disableTwoFactor(token = "123456") },
+            { disableTwoFactor(backupCode = "used-code") },
+            { regenerateBackupCodes(token = "123456") },
+            { enableTwoFactor(token = "123456") },
+        )
+        calls.forEachIndexed { index, call ->
+            val tokenManager = FakeTokenManager()
+            val engine = MockEngine {
+                respond("""{"message":"Invalid token or backup code"}""", HttpStatusCode.Unauthorized)
+            }
+            val api = createAuthApi(tokenManager, engine)
+
+            runCatching { api.call() }
+
+            assertWithMessage("call $index").that(engine.requestHistory).hasSize(1)
+            assertWithMessage("call $index").that(tokenManager.refreshCallCount).isEqualTo(0)
+            assertWithMessage("call $index").that(engine.requestHistory.single().headers[HttpHeaders.Authorization])
+                .isEqualTo("Bearer initial-token")
+        }
+    }
+
+    @Test
+    fun `a first-time 2FA enable without a code still refreshes on 401`() = runTest {
+        val tokenManager = FakeTokenManager()
+        val engine = MockEngine { respond("Unauthorized", HttpStatusCode.Unauthorized) }
+        val api = createAuthApi(tokenManager, engine)
+
+        runCatching { api.enableTwoFactor() }
+
+        assertThat(tokenManager.refreshCallCount).isEqualTo(1)
+        assertThat(engine.requestHistory).hasSize(2)
     }
 
     @Test
@@ -411,8 +491,11 @@ class AuthInterceptorTest {
         val engine = MockEngine { request ->
             requestCount++
             capturedTokens.add(request.headers[HttpHeaders.Authorization])
-            if (requestCount == 1) respond("Unauthorized", HttpStatusCode.Unauthorized)
-            else respond("OK", HttpStatusCode.OK)
+            if (requestCount == 1) {
+                respond("Unauthorized", HttpStatusCode.Unauthorized)
+            } else {
+                respond("OK", HttpStatusCode.OK)
+            }
         }
         val client = createClient(
             tokenManager,
@@ -455,7 +538,7 @@ class AuthInterceptorTest {
             respond("Unauthorized", HttpStatusCode.Unauthorized)
         }
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
             tokenManager = tokenManager,
             accountReadyGate = null,
@@ -483,7 +566,7 @@ class AuthInterceptorTest {
         val tokenManager = FakeTokenManager(accessToken = "a-token", refreshOutcome = RefreshResult.HardExpired)
         val engine = MockEngine { respond("Unauthorized", HttpStatusCode.Unauthorized) }
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
             tokenManager = tokenManager,
             accountReadyGate = null,
@@ -498,7 +581,148 @@ class AuthInterceptorTest {
 
         assertThat(response.status).isEqualTo(HttpStatusCode.Unauthorized)
         assertThat(tokenManager.sessionExpiredCount).isEqualTo(1)
-        assertThat(tokenManager.lastExpiredAccountId).isEqualTo("acct-a")
+        assertThat(tokenManager.lastExpiredAccountId).isEqualTo(accountA)
+    }
+
+    /**
+     * Sign-out leaves a screen on the back stack that can fetch once more. With no account, the
+     * request goes out with no bearer, and its 401 must not announce an expiry over the sign-in screen.
+     */
+    @Test
+    fun `a signed-out request's 401 neither refreshes nor expires a session`() = runTest {
+        val tokenManager = FakeTokenManager(accessToken = null, refreshOutcome = RefreshResult.HardExpired)
+        var capturedAuth: String? = "unset"
+        val engine = MockEngine { request ->
+            capturedAuth = request.headers[HttpHeaders.Authorization]
+            respond("Unauthorized", HttpStatusCode.Unauthorized)
+        }
+        val gate = SwitchGate(
+            activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(null)),
+            serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
+            tokenManager = tokenManager,
+            accountReadyGate = null,
+        )
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json() }
+            install(SwitchBarrierPlugin) { switchGate = gate }
+            install(AuthInterceptorPlugin) { this.tokenManager = tokenManager }
+        }
+
+        val response = client.get("/api/agents/agent_1/expanded")
+
+        assertThat(capturedAuth).isNull()
+        assertThat(response.status).isEqualTo(HttpStatusCode.Unauthorized)
+        assertThat(tokenManager.refreshCallCount).isEqualTo(0)
+        assertThat(tokenManager.sessionExpiredCount).isEqualTo(0)
+    }
+
+    /** The empty slot of a resolved account is a dead session, not a signed-out one: it still reports. */
+    @Test
+    fun `a resolved account with no bearer still reports its expiry`() = runTest {
+        val tokenManager = FakeTokenManager(accessToken = null, refreshOutcome = RefreshResult.HardExpired)
+        val engine = MockEngine { respond("Unauthorized", HttpStatusCode.Unauthorized) }
+        val gate = SwitchGate(
+            activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(AccountId(accountA))),
+            serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
+            tokenManager = tokenManager,
+            accountReadyGate = null,
+        )
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json() }
+            install(SwitchBarrierPlugin) { switchGate = gate }
+            install(AuthInterceptorPlugin) { this.tokenManager = tokenManager }
+        }
+
+        client.get("/api/user")
+
+        assertThat(tokenManager.refreshCallCount).isEqualTo(1)
+        assertThat(tokenManager.sessionExpiredCount).isEqualTo(1)
+        assertThat(tokenManager.lastExpiredAccountId).isEqualTo(accountA)
+    }
+
+    /**
+     * The image mount must never reach the expiry path: from 0.8.8-rc2 upstream secures it by
+     * default and authenticates on a cookie only, so a refreshed bearer 401s again, `alreadyRetried`
+     * fires, and a live session is torn down by every conversation holding a generated image.
+     */
+    @Test
+    fun `a 401 from the image mount neither refreshes nor expires the session`() = runTest {
+        val tokenManager = FakeTokenManager(accessToken = "my-token", refreshOutcome = RefreshResult.Refreshed)
+        var requestCount = 0
+
+        val engine = MockEngine {
+            requestCount++
+            respond("Unauthorized", HttpStatusCode.Unauthorized)
+        }
+        val client = createClient(
+            tokenManager,
+            engine,
+            serverUrlProvider = FakeServerUrlProvider("https://chat.example.com"),
+        )
+
+        val response = client.get("https://chat.example.com/images/user-1/img-abc.png")
+
+        assertThat(response.status).isEqualTo(HttpStatusCode.Unauthorized)
+        assertThat(requestCount).isEqualTo(1)
+        assertThat(tokenManager.refreshCallCount).isEqualTo(0)
+        assertThat(tokenManager.sessionExpiredCount).isEqualTo(0)
+    }
+
+    /** Upstream mounts the store at `${basePath}/images`, so a prefix match would miss these entirely. */
+    @Test
+    fun `a 401 from the image mount under a base path is exempt too`() = runTest {
+        val tokenManager = FakeTokenManager(accessToken = "my-token", refreshOutcome = RefreshResult.Refreshed)
+
+        val engine = MockEngine { respond("Unauthorized", HttpStatusCode.Unauthorized) }
+        val client = createClient(
+            tokenManager,
+            engine,
+            serverUrlProvider = FakeServerUrlProvider("https://chat.example.com/librechat"),
+        )
+
+        client.get("https://chat.example.com/librechat/images/user-1/img-abc.png")
+
+        assertThat(tokenManager.refreshCallCount).isEqualTo(0)
+        assertThat(tokenManager.sessionExpiredCount).isEqualTo(0)
+    }
+
+    /**
+     * `/api/files/images` is the multipart upload POST on the files router, behind entirely different
+     * middleware — a bearer route whose 401 is a real expired session.
+     */
+    @Test
+    fun `a 401 from the files upload route still refreshes`() = runTest {
+        val tokenManager = FakeTokenManager(accessToken = "my-token", refreshOutcome = RefreshResult.HardExpired)
+
+        val engine = MockEngine { respond("Unauthorized", HttpStatusCode.Unauthorized) }
+        val client = createClient(
+            tokenManager,
+            engine,
+            serverUrlProvider = FakeServerUrlProvider("https://chat.example.com"),
+        )
+
+        client.get("https://chat.example.com/api/files/images")
+
+        assertThat(tokenManager.refreshCallCount).isEqualTo(1)
+        assertThat(tokenManager.sessionExpiredCount).isEqualTo(1)
+    }
+
+    /** A host-root `/images/...` on a base-path deployment is not that deployment's mount. */
+    @Test
+    fun `a 401 outside the deployment's own image mount still refreshes`() = runTest {
+        val tokenManager = FakeTokenManager(accessToken = "my-token", refreshOutcome = RefreshResult.HardExpired)
+
+        val engine = MockEngine { respond("Unauthorized", HttpStatusCode.Unauthorized) }
+        val client = createClient(
+            tokenManager,
+            engine,
+            serverUrlProvider = FakeServerUrlProvider("https://chat.example.com/librechat"),
+        )
+
+        client.get("https://chat.example.com/images/user-1/img-abc.png")
+
+        assertThat(tokenManager.refreshCallCount).isEqualTo(1)
+        assertThat(tokenManager.sessionExpiredCount).isEqualTo(1)
     }
 
     @Test

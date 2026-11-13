@@ -1,18 +1,21 @@
 package com.garfiec.librechat.core.data.datastore
 
+import com.garfiec.librechat.core.model.auth.SessionCredentials
+import com.garfiec.librechat.core.network.client.ServerUrlProvider
+import com.garfiec.librechat.core.network.client.ServerUrlReadyPlugin
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockEngineConfig
 import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
-import io.ktor.client.request.url
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 
 /**
  * The one in-memory [CommonTokenDataStore] the datastore tests share: read-through/write-through
@@ -45,14 +48,25 @@ internal class FakeTokenStore(
     var readCount = 0
         private set
 
+    /** Added to the wall clock every cooldown deadline is judged against, so a test can lapse one. */
+    var clockOffsetMillis = 0L
+
+    override fun nowEpochMillis(): Long = super.nowEpochMillis() + clockOffsetMillis
+
     init {
         if (warmEagerly) runBlocking { warmTokenCache() }
     }
 
     /** The bare (no-account-resolved) slots, which is what a store with no active account uses. */
-    fun persistedAccess(): String? = store[KEY_ACCESS_TOKEN]
+    fun persistedAccess(account: String? = null): String? = persistedSession(account)?.accessToken
+        ?: if (sessionKeyOf(account) !in store) store[account?.let(::accessKeyOf) ?: KEY_ACCESS_TOKEN] else null
 
-    fun persistedRefresh(): String? = store[KEY_REFRESH_TOKEN]
+    fun persistedRefresh(account: String? = null): String? = persistedSession(account)?.cookies?.refreshToken
+        ?: if (sessionKeyOf(account) !in store) store[account?.let(::refreshKeyOf) ?: KEY_REFRESH_TOKEN] else null
+
+    fun persistedSession(account: String? = null): SessionCredentials? = store[sessionKeyOf(account)]?.let {
+        runCatching { Json.decodeFromString<SessionCredentials>(it) }.getOrNull()
+    }
 
     override fun readValue(key: String): String? {
         readCount++
@@ -62,6 +76,10 @@ internal class FakeTokenStore(
     override fun writeValue(key: String, value: String) {
         store[key] = value
         if (key == KEY_ACCESS_TOKEN) writeLog += value to (store[KEY_REFRESH_TOKEN] ?: "")
+        if (key == KEY_SESSION) {
+            val session = Json.decodeFromString<SessionCredentials>(value)
+            writeLog += session.accessToken to session.cookies.refreshToken
+        }
     }
 
     override fun writeValues(values: Map<String, String>) {
@@ -70,7 +88,7 @@ internal class FakeTokenStore(
 
     override fun removeValue(key: String) {
         store.remove(key)
-        if (key == KEY_ACCESS_TOKEN) removeCount++
+        if (key == KEY_ACCESS_TOKEN && KEY_SESSION !in store) removeCount++
     }
 
     override fun onKeystoreCorruption() = Unit
@@ -106,11 +124,16 @@ internal fun unconfinedMockEngine(handler: MockRequestHandler): MockEngine = Moc
     },
 )
 
+/** Resolves its URL the way the production refresh client does, through [ServerUrlReadyPlugin]. */
 internal fun refreshClientOf(engine: MockEngine, baseUrl: String = TEST_SERVER): Lazy<HttpClient> = lazy {
     HttpClient(engine) {
         install(ContentNegotiation) { json() }
+        install(ServerUrlReadyPlugin) {
+            serverUrlProvider = object : ServerUrlProvider {
+                override fun getBaseUrl(): String = baseUrl
+            }
+        }
         defaultRequest {
-            url(baseUrl)
             contentType(ContentType.Application.Json)
         }
     }
@@ -121,3 +144,6 @@ internal const val TEST_SERVER = "https://chat.example.com"
 internal val jsonResponseHeaders = headersOf("Content-Type", ContentType.Application.Json.toString())
 
 internal fun refreshResponseBody(token: String): String = """{"token":"$token"}"""
+
+internal fun sessionKeyOf(account: String? = null): String =
+    if (account == null) CommonTokenDataStore.KEY_SESSION else "acct:$account:${CommonTokenDataStore.KEY_SESSION}"

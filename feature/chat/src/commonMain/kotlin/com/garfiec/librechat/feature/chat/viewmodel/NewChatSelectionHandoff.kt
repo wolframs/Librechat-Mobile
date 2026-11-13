@@ -1,6 +1,9 @@
 package com.garfiec.librechat.feature.chat.viewmodel
 
 import com.garfiec.librechat.core.model.Message
+import com.garfiec.librechat.core.model.request.NO_PARENT
+import com.garfiec.librechat.core.ui.components.ModelParameters
+import com.garfiec.librechat.feature.chat.util.SpecTools
 
 /**
  * In-process, single-slot handoff of the model selection from the NewChat landing
@@ -35,8 +38,7 @@ class NewChatSelectionHandoff {
 
     data class Selection(
         val conversationId: String,
-        val endpoint: String,
-        val model: String?,
+        val choice: ModelChoice,
         /**
          * The optimistic user message the landing VM minted and sent (its id is adopted by the
          * server, PR #139). Handed off because the server persists the request message only when
@@ -46,12 +48,59 @@ class NewChatSelectionHandoff {
          * resumed stream instead of vanishing until completion.
          */
         val optimisticUserMessage: Message? = null,
+        /**
+         * The Skills toggle the first turn was sent with, so the Chat(id) VM shows it at once.
+         * Null when a model spec governed skills (nothing to carry). For a temporary chat, which
+         * stores no toggle, this is the only carrier.
+         */
+        val skillsToggle: Boolean? = null,
+        /**
+         * Skill chips still staged on the landing when it navigated: ones the first send held
+         * back (and any picked since). The landing is reset at navigation, so without this they
+         * would vanish with it.
+         */
+        val stagedManualSkills: List<String> = emptyList(),
+        /** The landing was showing the "skills not sent" notice for [stagedManualSkills]. */
+        val skillsNotSentNotice: Boolean = false,
+        /**
+         * The first turn went out "No workspace" because there was no workspace to pick, and the
+         * landing was about to say so. The landing is reset at navigation, so the chat it opens
+         * shows the notice instead.
+         */
+        val sentWithoutWorkspaceNotice: Boolean = false,
+        /**
+         * The parameters the first turn was sent with (a spec's preset, the user's tweaks), so the
+         * follow-ups send them too. Null when nothing was staged.
+         */
+        val modelParameters: ModelParameters? = null,
+        /** The tools added on top of the spec the first turn was sent on, so the chat keeps them. */
+        val specTools: SpecTools? = null,
     )
 
     private var pending: Selection? = null
 
-    fun put(conversationId: String, endpoint: String, model: String?, optimisticUserMessage: Message? = null) {
-        pending = Selection(conversationId, endpoint, model, optimisticUserMessage)
+    fun put(
+        conversationId: String,
+        choice: ModelChoice,
+        optimisticUserMessage: Message? = null,
+        skillsToggle: Boolean? = null,
+        stagedManualSkills: List<String> = emptyList(),
+        skillsNotSentNotice: Boolean = false,
+        sentWithoutWorkspaceNotice: Boolean = false,
+        modelParameters: ModelParameters? = null,
+        specTools: SpecTools? = null,
+    ) {
+        pending = Selection(
+            conversationId = conversationId,
+            choice = choice,
+            optimisticUserMessage = optimisticUserMessage,
+            skillsToggle = skillsToggle,
+            stagedManualSkills = stagedManualSkills,
+            skillsNotSentNotice = skillsNotSentNotice,
+            sentWithoutWorkspaceNotice = sentWithoutWorkspaceNotice,
+            modelParameters = modelParameters,
+            specTools = specTools,
+        )
     }
 
     /** Returns and clears the pending selection only when it was staged for [conversationId]. */
@@ -62,3 +111,23 @@ class NewChatSelectionHandoff {
         return current
     }
 }
+
+/**
+ * Whether this server row is the persisted copy of a handed-off [seed] user message.
+ *
+ * Not by id: the server does not adopt the id the client minted. It persists the user message
+ * under `overrideUserMessageId ?? overrideParentMessageId ?? randomUUID()`
+ * (`resolvePreallocatedUserMessageId`, `api/server/controllers/agents/request.js`) and overwrites
+ * the request's `messageId`, so an id match only ever retires the seed at Final, which carries the
+ * server's copy. A run that ends without one — a resume that finds the job already gone — would leave
+ * the seed in the list as a second root sibling, and the path's newest-sibling default would then show
+ * it alone, hiding the persisted turn beside it. Matched on what the server keeps from the request:
+ * the author, the parent, and the text. A turn the server redacted (`privacyRevision`, v0.8.9-rc1)
+ * keeps the filtered text, never what was typed, so for it the author and parent decide.
+ */
+internal fun Message.isServerCopyOf(seed: Message): Boolean =
+    isCreatedByUser && seed.isCreatedByUser &&
+        (text == seed.text || privacyRevision != null) &&
+        parentMessageId.orNoParent() == seed.parentMessageId.orNoParent()
+
+private fun String?.orNoParent(): String = this?.takeIf { it.isNotBlank() } ?: NO_PARENT

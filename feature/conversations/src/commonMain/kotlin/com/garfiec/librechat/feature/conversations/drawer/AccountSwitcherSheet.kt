@@ -9,7 +9,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,18 +19,17 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,11 +49,22 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
 import com.garfiec.librechat.core.ui.components.AvatarImage
+import com.garfiec.librechat.core.ui.components.ListDragSelection
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
 import com.garfiec.librechat.core.ui.components.avatarColorForSeed
+import com.garfiec.librechat.core.ui.components.dragSelectExclude
+import com.garfiec.librechat.core.ui.components.dragSelectRow
+import com.garfiec.librechat.core.ui.components.dragSelectRowIcon
+import com.garfiec.librechat.core.ui.components.listDragSelection
+import com.garfiec.librechat.core.ui.components.rememberListDragSelection
 import com.garfiec.librechat.core.ui.components.testTagsAsResourceIdSubtree
 import com.garfiec.librechat.feature.conversations.resources.Res
+import com.garfiec.librechat.feature.conversations.resources.account_signed_out
+import com.garfiec.librechat.feature.conversations.resources.account_two_factor_setup_required
 import com.garfiec.librechat.feature.conversations.resources.accounts
 import com.garfiec.librechat.feature.conversations.resources.add_account
 import com.garfiec.librechat.feature.conversations.resources.cancel
@@ -194,11 +203,12 @@ fun AccountChip(
  * Cycles a STABLE order (by [AccountUiModel.accountId]) rather than the display list's active-first
  * order — the latter moves the target under the user's finger after every switch. [delta] is +1
  * (next) / -1 (previous), wrapping at the ends. Returns null when there's nothing to switch to
- * (fewer than two accounts, or no active entry).
+ * (no other signed-in account, or no active entry).
  */
 internal fun adjacentAccountId(accounts: List<AccountUiModel>, delta: Int): String? {
-    if (accounts.size < 2) return null
-    val ordered = accounts.sortedBy { it.accountId }
+    // A signed-out account has nothing to switch to; the swipe skips it.
+    val ordered = accounts.filter { it.isActive || !it.needsSignIn }.sortedBy { it.accountId }
+    if (ordered.size < 2) return null
     val activeIndex = ordered.indexOfFirst { it.isActive }
     if (activeIndex < 0) return null
     val size = ordered.size
@@ -208,24 +218,33 @@ internal fun adjacentAccountId(accounts: List<AccountUiModel>, delta: Int): Stri
 
 /**
  * The roster bottom sheet: every signed-in account (active first), tap to switch, per-row remove
- * (confirmed by [RemoveAccountDialog], hoisted by the caller), and an add-account entry.
+ * (confirmed by [RemoveAccountDialog], hoisted by the caller), and an add-account entry. A null
+ * [onRemoveAccountRequest] or [onAddAccount] leaves that action out, for a sheet that only switches
+ * (a sign-in screen's way to another signed-in account).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountSwitcherSheet(
     accounts: List<AccountUiModel>,
     onSwitchAccount: (String) -> Unit,
-    onRemoveAccountRequest: (AccountUiModel) -> Unit,
-    onAddAccount: () -> Unit,
+    onRemoveAccountRequest: ((AccountUiModel) -> Unit)?,
+    onAddAccount: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
+    AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
         dragHandle = { LowProfileDragHandle() },
         sheetState = sheetState,
     ) {
-        Column(modifier = Modifier.testTagsAsResourceIdSubtree().navigationBarsPadding()) {
+        val dragSelection = rememberListDragSelection()
+        Column(
+            modifier = Modifier
+                .testTagsAsResourceIdSubtree()
+                .verticalScroll(rememberScrollState())
+                .listDragSelection(dragSelection, holdOnly = true)
+                .navigationBarsPadding(),
+        ) {
             Text(
                 text = stringResource(Res.string.accounts),
                 style = MaterialTheme.typography.titleMedium,
@@ -234,34 +253,18 @@ fun AccountSwitcherSheet(
             accounts.forEach { account ->
                 AccountRow(
                     account = account,
-                    onClick = { if (!account.isActive) onSwitchAccount(account.accountId) },
-                    onRemoveRequest = { onRemoveAccountRequest(account) },
+                    onClick = {
+                        when {
+                            account.isActive -> Unit
+                            account.needsSignIn -> onAddAccount?.invoke()
+                            else -> onSwitchAccount(account.accountId)
+                        }
+                    },
+                    onRemoveRequest = onRemoveAccountRequest?.let { remove -> { remove(account) } },
+                    dragSelection = dragSelection,
                 )
             }
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                color = MaterialTheme.colorScheme.outlineVariant,
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("account_add")
-                    .clickable(onClick = onAddAccount)
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = stringResource(Res.string.add_account),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            }
+            if (onAddAccount != null) AddAccountRow(onAddAccount, dragSelection)
             Spacer(modifier = Modifier.height(8.dp))
         }
     }
@@ -271,12 +274,13 @@ fun AccountSwitcherSheet(
 private fun AccountRow(
     account: AccountUiModel,
     onClick: () -> Unit,
-    onRemoveRequest: () -> Unit,
+    onRemoveRequest: (() -> Unit)?,
+    dragSelection: ListDragSelection,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .dragSelectRow(dragSelection, onClick = onClick)
             .padding(start = 24.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -286,6 +290,7 @@ private fun AccountRow(
             fallbackText = account.displayLabel,
             fallbackBackgroundColor = avatarColorForSeed(account.accountId),
             contentDescription = null,
+            modifier = Modifier.dragSelectRowIcon(),
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -296,9 +301,18 @@ private fun AccountRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = account.serverHost,
+                text = when {
+                    account.needsTwoFactorSetup ->
+                        stringResource(Res.string.account_two_factor_setup_required, account.serverHost)
+                    account.needsSignIn -> stringResource(Res.string.account_signed_out, account.serverHost)
+                    else -> account.serverHost
+                },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (account.needsSignIn) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -312,7 +326,12 @@ private fun AccountRow(
             )
             Spacer(modifier = Modifier.width(12.dp))
         }
-        IconButton(onClick = onRemoveRequest) {
+        if (onRemoveRequest == null) {
+            // The remove button's own inset, so the text ends where the add row's does.
+            Spacer(modifier = Modifier.width(16.dp))
+            return@Row
+        }
+        IconButton(onClick = onRemoveRequest, modifier = Modifier.dragSelectExclude(dragSelection)) {
             Icon(
                 imageVector = Icons.Outlined.Delete,
                 contentDescription = stringResource(Res.string.remove_account),
@@ -323,6 +342,34 @@ private fun AccountRow(
     }
 }
 
+@Composable
+private fun AddAccountRow(onAddAccount: () -> Unit, dragSelection: ListDragSelection) = Column {
+    AdaptiveDivider(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        color = MaterialTheme.colorScheme.outlineVariant,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("account_add")
+            .dragSelectRow(dragSelection, onClick = onAddAccount)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp).dragSelectRowIcon(),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = stringResource(Res.string.add_account),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    }
+}
+
 /** Destructive-action confirmation for removing [account] and its on-device data. */
 @Composable
 fun RemoveAccountDialog(
@@ -330,7 +377,7 @@ fun RemoveAccountDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    AdaptiveAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.remove_account_title)) },
         text = { Text(stringResource(Res.string.remove_account_message, account.displayLabel)) },

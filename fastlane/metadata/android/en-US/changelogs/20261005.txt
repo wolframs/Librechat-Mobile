@@ -1,0 +1,7 @@
+- Full-text message search, offline and on the server
+- Prefetch conversations by default
+- Model predictive back on the system's cross-activity animation
+- Size server requests to the caller, read offline as offline, land jumps on the message
+- Drop the author user ID from marketplace agent cards
+- Upload profile pictures to the files avatar route
+- Fit markdown tables to the screen and render cell markdown

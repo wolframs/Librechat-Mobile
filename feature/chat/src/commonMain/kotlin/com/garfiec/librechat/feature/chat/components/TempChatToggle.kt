@@ -1,5 +1,7 @@
 package com.garfiec.librechat.feature.chat.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -7,11 +9,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
+import com.garfiec.librechat.feature.chat.resources.Res
+import com.garfiec.librechat.feature.chat.resources.cd_temporary_chat
+import com.garfiec.librechat.feature.chat.resources.temporary_chat_enforced
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Ghost icon toggle for temporary chat mode.
@@ -23,30 +32,39 @@ fun TempChatToggle(
     isTemporary: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    /** What the icon shows, which trails [isTemporary] while the temporary-chat band sweeps back in. */
+    showsTemporary: Boolean = isTemporary,
+    /** An administrator forces temporary chats: the toggle stays on and says so. */
+    enforced: Boolean = false,
 ) {
+    val temporaryChatCd =
+        stringResource(if (enforced) Res.string.temporary_chat_enforced else Res.string.cd_temporary_chat)
+    val tint by animateColorAsState(
+        targetValue = if (showsTemporary) {
+            ChatInputDefaults.temporaryAccent
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(TINT_MS),
+    )
     IconButton(
         onClick = onToggle,
         modifier = modifier.semantics {
-            contentDescription = if (isTemporary) {
-                "Disable temporary chat"
-            } else {
-                "Enable temporary chat"
-            }
+            contentDescription = temporaryChatCd
+            toggleableState = ToggleableState(isTemporary)
             role = Role.Switch
         },
     ) {
         Icon(
-            imageVector = if (isTemporary) {
+            imageVector = if (showsTemporary) {
                 Icons.Default.VisibilityOff
             } else {
                 Icons.Default.Visibility
             },
             contentDescription = null,
-            tint = if (isTemporary) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
+            tint = tint,
         )
     }
 }
+
+private const val TINT_MS = 150

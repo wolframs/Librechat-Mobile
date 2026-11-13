@@ -18,6 +18,7 @@ The framework is static (`isStatic = true`) and named `Shared`.
 | `IosSharedModule.kt` | iOS Koin graph: `includes(sharedKoinModules)` (which brings in `networkModule` → Darwin engine + iOS `SseHttpTransport` via `networkPlatformModule.ios`, HTTP clients, all API services, SSE client) and adds only the one iOS-only binding, `LibreChatSDK`. |
 | `IosKoinAccessor.kt` | Swift-accessible Koin resolver. `KoinHelper.swift` calls these to get SDK, repos, etc. |
 | `IosCrashReporting.kt` | Unhandled exception hook — logs via Kermit + raises NSException for readable iOS crash logs. |
+| `NsLog.kt` | `nsLogVerbatim(text)` — the only way to call `NSLog` from Kotlin. Direct calls crash: Kotlin text in the format string has its `%` read as specifiers, and a Kotlin `String` vararg isn't converted to `NSString`. |
 | `MainViewController.kt` | `MainViewController()` — the Compose Multiplatform entry point wrapped by `ComposeView.swift`. |
 
 ## Common Files (`src/commonMain/`)
@@ -26,13 +27,6 @@ The framework is static (`isStatic = true`) and named `Shared`.
 - `di/SharedKoinModules.kt` — `sharedKoinModules`, the single Koin module list both platforms start from (Android loads it directly; iOS `includes` it). Add a feature module here, not in the per-platform entry points. Verified against Android actuals by `:app` `KoinGraphVerificationTest` and against iOS actuals by `iosTest/IosKoinGraphTest` (`:shared:iosSimulatorArm64Test`).
 - `navigation/` — Nav 3 route definitions and entry providers shared across platforms
 - `app/` — Shared app-level composables (root navigation host)
-
-### Cold-start auth routing
-
-`NavHostViewModel.isLoggedIn` is nullable during startup. `AccountRegistry` warms secure token storage
-off Main and completes `AccountReadyGate`; the VM then resolves the authoritative auth state on IO.
-`LibreChatNavHost` renders a neutral loading surface and `awaitAuthResolution()` gates initial auth and
-deep-link routing, preventing either authenticated-content or login-screen flashes.
 
 ## SKIE
 

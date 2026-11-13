@@ -9,12 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,14 +21,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedButton
+import com.garfiec.librechat.core.ui.components.AdaptiveRadioButton
+import com.garfiec.librechat.core.ui.components.AdaptiveSwitch
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
-import com.garfiec.librechat.feature.chat.util.copyToClipboard
+import com.garfiec.librechat.feature.chat.util.rememberClipboardWriter
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
-enum class SharePermission(val label: String) {
-    VIEW_ONLY("View only"),
-    CAN_EDIT("Can edit"),
+enum class SharePermission(val label: StringResource) {
+    VIEW_ONLY(Res.string.prompt_permission_view_only),
+    CAN_EDIT(Res.string.prompt_permission_can_edit),
 }
 
 @Composable
@@ -43,9 +44,10 @@ fun PromptShareDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val clipboard = rememberClipboardWriter()
     var isShared by remember { mutableStateOf(isCurrentlyShared) }
     var permission by remember { mutableStateOf(SharePermission.VIEW_ONLY) }
-    AlertDialog(
+    AdaptiveAlertDialog(
         onDismissRequest = onDismiss,
         modifier = modifier,
         title = { Text(stringResource(Res.string.dialog_title_share_prompt)) },
@@ -65,11 +67,11 @@ fun PromptShareDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = if (isShared) "Shared" else "Private",
+                        text = stringResource(if (isShared) Res.string.prompt_shared else Res.string.prompt_private),
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(
+                    AdaptiveSwitch(
                         checked = isShared,
                         onCheckedChange = { isShared = it },
                     )
@@ -86,22 +88,22 @@ fun PromptShareDialog(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RadioButton(
+                            AdaptiveRadioButton(
                                 selected = permission == perm,
                                 onClick = { permission = perm },
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = perm.label,
+                                text = stringResource(perm.label),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedButton(
+                    AdaptiveOutlinedButton(
                         onClick = {
-                            copyToClipboard("prompt://$promptName", "Prompt Link")
+                            clipboard.copy("prompt://$promptName", "Prompt Link")
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {

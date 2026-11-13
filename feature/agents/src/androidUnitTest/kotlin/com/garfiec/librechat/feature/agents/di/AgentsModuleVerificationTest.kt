@@ -1,20 +1,21 @@
-@file:OptIn(org.koin.core.annotation.KoinExperimentalAPI::class)
-
 package com.garfiec.librechat.feature.agents.di
 
 import android.app.Application
 import android.content.Context
-import androidx.lifecycle.SavedStateHandle
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AgentRepository
 import com.garfiec.librechat.core.data.repository.AgentToolsRepository
+import com.garfiec.librechat.core.data.repository.CodeEnvironmentRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
+import com.garfiec.librechat.core.data.repository.FavoritesRepository
 import com.garfiec.librechat.core.data.repository.FileRepository
 import com.garfiec.librechat.core.data.repository.McpRepository
 import com.garfiec.librechat.core.data.repository.PermissionsRepository
 import com.garfiec.librechat.core.data.repository.RoleRepository
 import com.garfiec.librechat.core.data.repository.SkillsRepository
 import com.garfiec.librechat.core.data.repository.ToolFavoritesRepository
+import com.garfiec.librechat.core.data.repository.UserRepository
+import com.garfiec.librechat.core.data.repository.WebSearchReadinessRepository
 import com.garfiec.librechat.core.data.util.PermissionGate
 import kotlinx.coroutines.CoroutineDispatcher
 import org.junit.Test
@@ -29,17 +30,19 @@ class AgentsModuleVerificationTest {
                 Application::class,
                 AgentRepository::class,
                 AgentToolsRepository::class,
+                CodeEnvironmentRepository::class,
                 ConfigRepository::class,
+                FavoritesRepository::class,
                 FileRepository::class,
                 McpRepository::class,
                 PermissionsRepository::class,
                 RoleRepository::class,
                 SkillsRepository::class,
                 ToolFavoritesRepository::class,
+                WebSearchReadinessRepository::class,
+                UserRepository::class,
                 PermissionGate::class,
                 ServerDataStore::class,
-                // Supplied dynamically by Koin's ViewModel factory from CreationExtras.
-                SavedStateHandle::class,
                 // Provided by core:common CommonModule via KoinQualifiers.IO.
                 CoroutineDispatcher::class,
             ),

@@ -16,8 +16,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -29,7 +27,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.model.ChatProject
+import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.conversations.resources.Res
 import com.garfiec.librechat.feature.conversations.resources.project_create
 import com.garfiec.librechat.feature.conversations.resources.project_new_name
@@ -55,9 +56,9 @@ fun ProjectPicker(
 ) {
     var newName by remember { mutableStateOf("") }
 
-    ModalBottomSheet(
+    AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
-        modifier = modifier,
+        modifier = modifier.clearFocusOnTap(),
         dragHandle = { LowProfileDragHandle() },
     ) {
         Column(
@@ -79,7 +80,9 @@ fun ProjectPicker(
                 onClick = { onSelect(null); onDismiss() },
             )
 
-            LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
+            // Weighted, so the rows above and the create field below are measured first: with the
+            // keyboard up the list gives up its height instead of pushing the field off the sheet.
+            LazyColumn(modifier = Modifier.weight(1f, fill = false).heightIn(max = 280.dp)) {
                 items(projects, key = { it.id }) { project ->
                     ProjectRow(
                         label = project.name,
@@ -93,7 +96,7 @@ fun ProjectPicker(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                AdaptiveOutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
                     singleLine = true,
@@ -124,7 +127,7 @@ fun ProjectPicker(
 }
 
 @Composable
-private fun ProjectRow(
+internal fun ProjectRow(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
@@ -141,6 +144,7 @@ private fun ProjectRow(
             text = label,
             style = MaterialTheme.typography.bodyLarge,
             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
         )
         if (selected) {
             Icon(

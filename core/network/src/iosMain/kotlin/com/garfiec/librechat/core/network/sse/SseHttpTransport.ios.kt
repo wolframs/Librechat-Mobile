@@ -1,15 +1,19 @@
 package com.garfiec.librechat.core.network.sse
 
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.identity.cleanServerUrl
 import com.garfiec.librechat.core.common.result.AccessGatewayException
+import com.garfiec.librechat.core.model.auth.OpenIdMarkers
 import com.garfiec.librechat.core.network.client.AccessGatewaySignal
 import com.garfiec.librechat.core.network.client.BearerResult
 import com.garfiec.librechat.core.network.client.LibreChatHttpClient
 import com.garfiec.librechat.core.network.client.SwitchGate
 import com.garfiec.librechat.core.network.client.TokenManager
-import com.garfiec.librechat.core.network.client.customHeaderLines
 import com.garfiec.librechat.core.network.client.refreshBearerFor
+import com.garfiec.librechat.core.network.client.sseCustomHeaderLines
+import com.garfiec.librechat.core.network.sse.nwparams.librechat_make_default_tcp_parameters
 import com.garfiec.librechat.core.network.sse.nwparams.librechat_make_default_tls_tcp_parameters
+import com.garfiec.librechat.core.network.sse.nwparams.librechat_nw_connection_receive
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
@@ -20,7 +24,6 @@ import kotlinx.cinterop.ptr
 import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -30,7 +33,6 @@ import platform.Foundation.NSURL
 import platform.Network.nw_connection_cancel
 import platform.Network.nw_connection_create
 import platform.Network.nw_connection_force_cancel
-import platform.Network.nw_connection_receive
 import platform.Network.nw_connection_send
 import platform.Network.nw_connection_set_queue
 import platform.Network.nw_connection_set_state_changed_handler
@@ -38,7 +40,6 @@ import platform.Network.nw_connection_start
 import platform.Network.nw_connection_state_cancelled
 import platform.Network.nw_connection_state_failed
 import platform.Network.nw_connection_state_ready
-import platform.Network.nw_connection_state_t
 import platform.Network.nw_connection_t
 import platform.Network.nw_content_context_t
 import platform.Network.nw_endpoint_create_host
@@ -52,7 +53,6 @@ import platform.darwin.dispatch_data_create
 import platform.darwin.dispatch_data_create_map
 import platform.darwin.dispatch_data_get_size
 import platform.darwin.dispatch_data_t
-import platform.darwin.dispatch_get_global_queue
 import platform.darwin.dispatch_queue_create
 import platform.posix.ECONNRESET
 import platform.posix.EPIPE
@@ -83,7 +83,7 @@ import platform.posix.size_tVar
 // addresses Ktor-layer buffering, which is a different layer.
 //
 // This implementation uses Network.framework's NWConnection to open a
-// raw TCP+TLS connection and speak HTTP/1.1 directly, avoiding
+// raw TCP (+TLS for https) connection and speak HTTP/1.1 directly, avoiding
 // NSURLSession entirely for the SSE endpoint only. All other HTTP
 // traffic (JSON requests, auth, conversation list, etc.) continues to
 // use the Darwin engine, which works fine for non-text/* responses.
@@ -110,10 +110,11 @@ actual class SseHttpTransport(
         // against the account and server it started on, whose tokens are retained.
         val snapshot = switchGate.captureSnapshot(renewIfStale = true)
         var token = snapshot.bearer
+        var markers = snapshot.openId
         var triedRefresh = false
         while (true) {
             try {
-                emitAll(openConnection(streamPath, resume, snapshot.baseUrl, token, snapshot.customHeaders))
+                emitAll(openConnection(streamPath, resume, snapshot.baseUrl, token, snapshot.customHeaders, markers))
                 return@flow
             } catch (e: SseHttpStatusException) {
                 if (e.statusCode == 401 && !triedRefresh) {
@@ -125,6 +126,7 @@ actual class SseHttpTransport(
                     when (val refresh = tokenManager.refreshBearerFor(snapshot)) {
                         is BearerResult.Refreshed -> {
                             token = refresh.token
+                            markers = refresh.openId
                             // loop to retry with new token
                         }
                         BearerResult.Expired -> {
@@ -146,20 +148,24 @@ actual class SseHttpTransport(
         }
     }
 
+    // debt — CyclomaticComplexMethod: complexity 38
+    // debt — LongMethod: 100 lines
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun openConnection(
         streamPath: String,
         resume: Boolean,
         snapshotBaseUrl: String,
         bearerToken: String?,
         customHeaders: Map<String, String>,
+        markers: OpenIdMarkers?,
     ): Flow<ByteArray> = callbackFlow {
-        // Normalize base URL + stream path so there's exactly one slash between
-        // them. The base URL comes from the snapshot captured before this connection
-        // (already awaited past cold-start warm-up in SwitchGate.captureSnapshot), so
-        // a switch can't repoint it under a live stream. SseClient passes the stream
-        // path without a leading slash, matching how ChatRepositoryImpl builds it
-        // ("api/agents/chat/stream/$streamId").
-        val baseUrl = snapshotBaseUrl.trimEnd('/')
+        // This URL is built by hand, so it joins onto the cleaned base like every other hand-built
+        // join (Android's Ktor merge resolves the same GET itself). The base URL comes from the
+        // snapshot captured before this connection (already awaited past cold-start warm-up in
+        // SwitchGate.captureSnapshot), so a switch can't repoint it under a live stream.
+        // SseClient passes the stream path without a leading slash, matching how
+        // ChatRepositoryImpl builds it ("api/agents/chat/stream/$streamId").
+        val baseUrl = cleanServerUrl(snapshotBaseUrl)
         val normalizedPath = streamPath.trimStart('/')
         val queryString = if (resume) "?resume=true" else ""
         val fullUrl = "$baseUrl/$normalizedPath$queryString"
@@ -170,26 +176,20 @@ actual class SseHttpTransport(
             }
 
         val scheme = url.scheme?.lowercase() ?: "https"
-        // The iOS NWConnection transport only supports HTTPS. Plain HTTP would
-        // require passing NW_PARAMETERS_DISABLE_PROTOCOL for the TLS layer,
-        // which is a non-null block sentinel that we cannot construct from
-        // Kotlin/Native without an Obj-C/Swift shim. Production LibreChat
-        // deployments run HTTPS (Cloudflare, reverse proxies, etc.), so we
-        // refuse non-HTTPS here instead of silently misconfiguring. File an
-        // issue if you actually need plain HTTP support.
-        if (scheme != "https") {
-            close(SseStreamException("iOS SSE transport only supports HTTPS (got scheme=$scheme)"))
+        val secure = scheme == "https"
+        if (!secure && scheme != "http") {
+            close(SseStreamException("unsupported SSE URL scheme: $scheme"))
             return@callbackFlow
         }
         val host = url.host ?: run {
             close(SseStreamException("missing host in SSE URL: $url"))
             return@callbackFlow
         }
-        val port = (url.port?.intValue ?: DEFAULT_HTTPS_PORT).toUShort()
-        val requestPath = buildRequestPath(url)
+        val port = (url.port?.intValue ?: if (secure) DEFAULT_HTTPS_PORT else DEFAULT_HTTP_PORT).toUShort()
+        val requestPath = requestTarget(fullUrl)
 
         val endpoint = nw_endpoint_create_host(host, port.toString())
-        // Default TLS+TCP parameters for NWConnection must come from a C shim.
+        // Default TLS+TCP (or, for http, plain TCP) parameters for NWConnection must come from a C shim.
         //
         // `nw_parameters_create_secure_tcp` takes two `configure` block-pointer
         // arguments. Apple exposes `NW_PARAMETERS_DEFAULT_CONFIGURATION` (which
@@ -217,13 +217,14 @@ actual class SseHttpTransport(
         // The only fix is a C cinterop shim that calls the macro at C compile
         // time and hands the block pointer directly to Network.framework with
         // no Kotlin code in the middle. That shim lives in
-        // `src/iosMain/cinterop/nwparams_defaults.def` and exposes the
-        // function `librechat_make_default_tls_tcp_parameters`.
-        val parameters: nw_parameters_t = librechat_make_default_tls_tcp_parameters()
-            ?: run {
-                close(SseStreamException("nw_parameters_create_secure_tcp returned null"))
-                return@callbackFlow
-            }
+        // `src/iosMain/cinterop/nwparams_defaults.def` and exposes
+        // `librechat_make_default_tls_tcp_parameters` and `librechat_make_default_tcp_parameters`.
+        val parameters: nw_parameters_t =
+            (if (secure) librechat_make_default_tls_tcp_parameters() else librechat_make_default_tcp_parameters())
+                ?: run {
+                    close(SseStreamException("nw_parameters_create_secure_tcp returned null"))
+                    return@callbackFlow
+                }
 
         val connection: nw_connection_t = nw_connection_create(endpoint, parameters)
             ?: run {
@@ -251,20 +252,25 @@ actual class SseHttpTransport(
             }
         }
 
-        // Recursive receive loop. Each call to nw_connection_receive arms a
-        // single-shot callback; we re-arm inside the callback until isComplete
-        // or an error fires.
+        // Recursive receive loop. Each call arms a single-shot callback; we re-arm
+        // inside the callback until isComplete or an error fires. A minimum of one
+        // byte is what delivers v0.8.9-rc1's 3-byte keepalive (`:\n\n`) as it
+        // arrives, so it restarts the shared line parser's stall timeout on iOS as
+        // it does on Android. Goes through the C shim, never
+        // platform.Network.nw_connection_receive: the completion's content context
+        // can be one of Network.framework's predefined contexts, which Kotlin/Native
+        // mistakes for a block and throws on (see the shim).
         fun armReceive() {
-            nw_connection_receive(
+            librechat_nw_connection_receive(
                 connection = connection,
                 minimum_incomplete_length = 1u,
                 maximum_length = RECEIVE_MAX_LENGTH.toUInt(),
-            ) { data, _, isComplete, error ->
-                if (handled) return@nw_connection_receive
+            ) { data, isComplete, error ->
+                if (handled) return@librechat_nw_connection_receive
 
                 if (error != null) {
                     handleError(mapNwError(error))
-                    return@nw_connection_receive
+                    return@librechat_nw_connection_receive
                 }
 
                 if (data != null) {
@@ -280,11 +286,11 @@ actual class SseHttpTransport(
                                     // Parser headers are lower-cased.
                                     if (AccessGatewaySignal.isGatewayChallenge(event.headers["www-authenticate"])) {
                                         handleError(AccessGatewayException())
-                                        return@nw_connection_receive
+                                        return@librechat_nw_connection_receive
                                     }
                                     if (event.statusCode !in SUCCESS_LOW..SUCCESS_HIGH) {
                                         handleError(SseHttpStatusException(event.statusCode))
-                                        return@nw_connection_receive
+                                        return@librechat_nw_connection_receive
                                     }
                                 }
 
@@ -294,12 +300,12 @@ actual class SseHttpTransport(
 
                                 HttpResponseParser.ParseEvent.EndOfStream -> {
                                     handleCompletion()
-                                    return@nw_connection_receive
+                                    return@librechat_nw_connection_receive
                                 }
 
                                 is HttpResponseParser.ParseEvent.Error -> {
                                     handleError(SseStreamException("parser: ${event.message}"))
-                                    return@nw_connection_receive
+                                    return@librechat_nw_connection_receive
                                 }
                             }
                         }
@@ -308,7 +314,7 @@ actual class SseHttpTransport(
 
                 if (isComplete) {
                     handleCompletion()
-                    return@nw_connection_receive
+                    return@librechat_nw_connection_receive
                 }
 
                 armReceive()
@@ -323,6 +329,7 @@ actual class SseHttpTransport(
                         host = host,
                         bearerToken = bearerToken,
                         customHeaders = customHeaders,
+                        markers = markers,
                     )
                     val requestBytes = request.encodeToByteArray()
                     val dispatchData = byteArrayToDispatchData(requestBytes, queue)
@@ -375,11 +382,15 @@ actual class SseHttpTransport(
         }
     }
 
-    private fun buildRequestPath(url: NSURL): String {
-        val path = url.path ?: "/"
-        val query = url.query
-        val effectivePath = if (path.isEmpty()) "/" else path
-        return if (query.isNullOrEmpty()) effectivePath else "$effectivePath?$query"
+    /**
+     * The request-target, cut from the URL string as built rather than read back off `NSURL`, whose
+     * `path` percent-decodes: a deployment root with an escaped segment (`/my%20chat`) would
+     * otherwise go out as a raw space and break the request line. Keeps the query.
+     */
+    private fun requestTarget(fullUrl: String): String {
+        val afterScheme = fullUrl.substringAfter("://")
+        val pathStart = afterScheme.indexOf('/')
+        return if (pathStart < 0) "/" else afterScheme.substring(pathStart)
     }
 
     private fun buildHttpRequest(
@@ -387,6 +398,7 @@ actual class SseHttpTransport(
         host: String,
         bearerToken: String?,
         customHeaders: Map<String, String>,
+        markers: OpenIdMarkers?,
     ): String = buildString {
         append("GET ").append(path).append(" HTTP/1.1\r\n")
         append("Host: ").append(host).append("\r\n")
@@ -400,9 +412,9 @@ actual class SseHttpTransport(
         // The user's gateway headers (issue #287). No host-scoping check is needed here the way the
         // Ktor plugin needs one: this connection is dialled at the snapshot's own base URL and never
         // follows a redirect, so it cannot arrive anywhere but the server the headers belong to.
-        // Sanitised again inside customHeaderLines — the names reserved there are exactly the ones
+        // Sanitised again inside sseCustomHeaderLines — the names reserved there are exactly the ones
         // hand-written above, so a user value can never emit a second, ambiguous copy of one.
-        append(customHeaderLines(customHeaders))
+        append(sseCustomHeaderLines(customHeaders, markers))
         append("\r\n")
     }
 
@@ -473,6 +485,7 @@ actual class SseHttpTransport(
 
     private companion object {
         const val DEFAULT_HTTPS_PORT = 443
+        const val DEFAULT_HTTP_PORT = 80
         const val RECEIVE_MAX_LENGTH = 16384
         const val SUCCESS_LOW = 200
         const val SUCCESS_HIGH = 299
@@ -483,6 +496,9 @@ actual class SseHttpTransport(
         // link time; for our one-shot request we can pass null and let the
         // default-message context apply automatically (Apple docs confirm
         // null is equivalent to default-message for the send path).
+        // Don't swap in platform.Network.NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT:
+        // reading it from Kotlin throws the same block-conversion NSException as
+        // the receive context (see librechat_nw_connection_receive).
         val NW_CONTENT_CONTEXT_DEFAULT_MESSAGE: nw_content_context_t? = null
     }
 }

@@ -2,42 +2,65 @@ package com.garfiec.librechat.feature.chat.di
 
 import com.garfiec.librechat.core.common.di.KoinQualifiers
 import com.garfiec.librechat.feature.chat.components.artifact.ArtifactViewerHandoff
-import com.garfiec.librechat.feature.chat.navigation.ModelShortcutBus
 import com.garfiec.librechat.feature.chat.prompts.PromptEditorViewModel
 import com.garfiec.librechat.feature.chat.prompts.PromptsViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.BackgroundTasksViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.ChatNoticeHandoff
 import com.garfiec.librechat.feature.chat.viewmodel.ConversationMediaViewModel
-import com.garfiec.librechat.feature.chat.viewmodel.MarketViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.ConversationSeenViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.LocalQueueStash
+import com.garfiec.librechat.feature.chat.viewmodel.McpAppsViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.McpSignInViewModel
 import com.garfiec.librechat.feature.chat.viewmodel.NewChatSelectionHandoff
+import com.garfiec.librechat.feature.chat.viewmodel.ProjectLandingViewModel
 import com.garfiec.librechat.feature.chat.viewmodel.PromptInsertionHandoff
 import com.garfiec.librechat.feature.chat.viewmodel.ServerFileSelectionHandoff
+import com.garfiec.librechat.feature.chat.viewmodel.SharedChatViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.SiteIconPromptSession
+import com.garfiec.librechat.feature.chat.viewmodel.SubagentThreadsViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.TraceViewerViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.UpdateBannerViewModel
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
 val chatModule = module {
-    viewModelOf(::MarketViewModel)
     includes(chatPlatformModule)
     single { NewChatSelectionHandoff() }
     single { PromptInsertionHandoff() }
+    single { ChatNoticeHandoff() }
     single { ServerFileSelectionHandoff() }
     single { ArtifactViewerHandoff() }
-    single { ModelShortcutBus() }
+    single { SiteIconPromptSession() }
+    single { LocalQueueStash() }
     viewModelOf(::PromptsViewModel)
+    viewModelOf(::SubagentThreadsViewModel)
+    viewModelOf(::TraceViewerViewModel)
+    viewModelOf(::BackgroundTasksViewModel)
+    viewModelOf(::ConversationSeenViewModel)
+    viewModelOf(::UpdateBannerViewModel)
+    viewModelOf(::McpSignInViewModel)
+    viewModelOf(::McpAppsViewModel)
     // Koin's constructor-DSL (`viewModelOf`) wires every argument via `get()` and cannot read
     // values passed through `parametersOf`. This VM receives its `initialGroupId` from the
     // navigation layer via `parametersOf`, so the lambda-form `viewModel { params -> ... }` is
-    // the only DSL that works here. Detekt's `DeprecatedKoinApi` is a blanket stylistic rule,
-    // not a real `@Deprecated` API, so we suppress it in the narrow place it applies.
-    @Suppress("DeprecatedKoinApi")
+    // the only DSL that works here.
     viewModel { params ->
         PromptEditorViewModel(
             promptRepository = get(),
             initialGroupId = params.getOrNull(),
         )
     }
+    // The project's id and the name it was opened with, from the NewChat route via parametersOf.
+    viewModel { params ->
+        ProjectLandingViewModel(
+            projectId = params[0],
+            initialName = params[1],
+            projectRepository = get(),
+        )
+    }
     // conversationId arrives from the navigation layer via parametersOf — same reason as above.
-    @Suppress("DeprecatedKoinApi")
     viewModel { params ->
         ConversationMediaViewModel(
             conversationId = params.get(),
@@ -46,6 +69,16 @@ val chatModule = module {
             userRepository = get(),
             serverDataStore = get(),
             defaultDispatcher = get(KoinQualifiers.Default),
+        )
+    }
+    viewModel { params ->
+        SharedChatViewModel(
+            shareId = params.get(),
+            shareRepository = get(),
+            conversationRepository = get(),
+            activeAccountProvider = get(),
+            serverUrlProvider = get(),
+            configRepository = get(),
         )
     }
 }

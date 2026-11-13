@@ -2,6 +2,7 @@ package com.garfiec.librechat.feature.chat.util
 
 import androidx.compose.runtime.Immutable
 import com.garfiec.librechat.core.model.Message
+import com.garfiec.librechat.core.model.media.IconSource
 import com.garfiec.librechat.core.model.request.NO_PARENT
 
 @Immutable
@@ -14,6 +15,11 @@ data class MessageNode(
      *  when orphan re-parenting moves the message under NO_PARENT. Use this as the
      *  key for activeBranches in switchBranch(). */
     val treeParentKey: String = NO_PARENT,
+    /**
+     * The reply avatar, resolved where the screen's state is mapped ([withReplyAvatars]) so a bubble
+     * draws it as given. Null for the user's messages and on a path not yet mapped.
+     */
+    val avatar: IconSource? = null,
 )
 
 /**
@@ -36,6 +42,7 @@ data class MessageNode(
  *        (e.g. an optimistic message not yet inserted), in which case the normal
  *        activeBranches walk applies.
  */
+@Suppress("CyclomaticComplexMethod") // debt: complexity 26
 fun buildActiveMessagePath(
     messages: List<Message>,
     activeBranches: Map<String, Int> = emptyMap(),
@@ -43,27 +50,8 @@ fun buildActiveMessagePath(
 ): List<MessageNode> {
     if (messages.isEmpty()) return emptyList()
 
-    // Group children by their parentMessageId
-    val childrenByParent = mutableMapOf<String, MutableList<Message>>()
     val messageIds = messages.mapTo(mutableSetOf()) { it.messageId }
-    for (message in messages) {
-        val parentId = message.parentMessageId
-            ?.takeIf { it != NO_PARENT && it.isNotBlank() }
-            ?: NO_PARENT
-        childrenByParent.getOrPut(parentId) { mutableListOf() }.add(message)
-    }
-
-    // Re-parent orphans: messages whose parentId isn't NO_PARENT and isn't
-    // in the message set (e.g. system/root messages not returned by the API).
-    // Move them under NO_PARENT so the tree walk can find them.
-    val orphanParents = childrenByParent.keys
-        .filter { it != NO_PARENT && it !in messageIds }
-    if (orphanParents.isNotEmpty()) {
-        val roots = childrenByParent.getOrPut(NO_PARENT) { mutableListOf() }
-        for (orphanParentId in orphanParents) {
-            childrenByParent.remove(orphanParentId)?.let { roots.addAll(it) }
-        }
-    }
+    val childrenByParent = childrenByTreeParent(messages, messageIds)
 
     // Ancestor chain of the streaming leaf (inclusive), so the walk can follow it
     // and stop there regardless of activeBranches. Each level on the way to the leaf
@@ -132,6 +120,79 @@ fun buildActiveMessagePath(
 }
 
 /**
+ * Children grouped under the key the walk and `activeBranches` use: the parent id, with a missing,
+ * blank or [NO_PARENT] parent mapped to [NO_PARENT], and orphans (a parent not in the list, e.g. a
+ * system root the API didn't return) moved under [NO_PARENT] too. Siblings keep input order.
+ */
+private fun childrenByTreeParent(messages: List<Message>, messageIds: Set<String>): Map<String, List<Message>> {
+    val childrenByParent = mutableMapOf<String, MutableList<Message>>()
+    for (message in messages) {
+        val parentId = message.parentMessageId
+            ?.takeIf { it != NO_PARENT && it.isNotBlank() }
+            ?: NO_PARENT
+        childrenByParent.getOrPut(parentId) { mutableListOf() }.add(message)
+    }
+    val orphanParents = childrenByParent.keys.filter { it != NO_PARENT && it !in messageIds }
+    if (orphanParents.isNotEmpty()) {
+        val roots = childrenByParent.getOrPut(NO_PARENT) { mutableListOf() }
+        for (orphanParentId in orphanParents) {
+            childrenByParent.remove(orphanParentId)?.let { roots.addAll(it) }
+        }
+    }
+    return childrenByParent
+}
+
+/**
+ * The path without the partial the server saved for the reply a resumed stream is writing
+ * ([replyId], `MessagesState.resumedReplyId`), which the streaming bubble already shows. Only an
+ * `unfinished` copy goes: the finished reply arrives under the same id. The same list when nothing
+ * is dropped.
+ */
+fun List<MessageNode>.withoutLivePartial(replyId: String?): List<MessageNode> {
+    if (replyId == null) return this
+    val isPartial = { node: MessageNode -> node.message.messageId == replyId && node.message.unfinished }
+    return if (any(isPartial)) filterNot(isPartial) else this
+}
+
+/**
+ * The `activeBranches` key [buildActiveMessagePath] files [messageId] under: its parent, or
+ * [NO_PARENT] when the parent is blank or not in [messages]. Null when [messageId] isn't there.
+ */
+fun treeParentKeyOf(messages: List<Message>, messageId: String): String? {
+    val message = messages.firstOrNull { it.messageId == messageId } ?: return null
+    val parentId = message.parentMessageId?.takeIf { it != NO_PARENT && it.isNotBlank() } ?: return NO_PARENT
+    return parentId.takeIf { id -> messages.any { it.messageId == id } } ?: NO_PARENT
+}
+
+/**
+ * The `activeBranches` entries that make [buildActiveMessagePath] pass through [targetId]: for each
+ * ancestor of the target (and the target itself), its index among its siblings, keyed by the same
+ * tree-parent key the walk uses. Null when [targetId] isn't in [messages]. One pass over the list,
+ * then one step per ancestor.
+ *
+ * Merge the result over the current selection: branches below the target, and those off its
+ * ancestor chain, keep whatever the user had chosen.
+ */
+fun branchSelectionFor(messages: List<Message>, targetId: String): Map<String, Int>? {
+    val byId = messages.associateBy { it.messageId }
+    if (targetId !in byId) return null
+    val childrenByParent = childrenByTreeParent(messages, byId.keys)
+    val parentKeyOf = HashMap<String, String>(messages.size)
+    childrenByParent.forEach { (parentKey, children) -> children.forEach { parentKeyOf[it.messageId] = parentKey } }
+    val selection = HashMap<String, Int>()
+    val visited = HashSet<String>()
+    var id: String? = targetId
+    while (id != null && visited.add(id)) {
+        val parentKey = parentKeyOf[id] ?: break
+        val index = childrenByParent[parentKey]?.indexOfFirst { it.messageId == id } ?: -1
+        if (index < 0) break
+        selection[parentKey] = index
+        id = parentKey.takeIf { it != NO_PARENT }
+    }
+    return selection
+}
+
+/**
  * Reconciles an [incoming] message list against the one currently displayed ([previous]),
  * reusing the existing [Message] instance whenever the incoming one differs only in
  * **volatile, non-rendered** fields (timestamps, token count, finish reason).
@@ -162,8 +223,8 @@ fun stabilizeMessageInstances(incoming: List<Message>, previous: List<Message>):
  *  - **Volatile, server-canonical fields** the backfill reformats/injects: `createdAt`,
  *    `updatedAt`, `tokenCount`, `finishReason`.
  *  - **Fields `MessageEntity` does not persist** (`responseMessageId`,
- *    `overrideParentMessageId`, `user`, `threadId`, `contextMeta`, `title`, `manualSkills`,
- *    `alwaysAppliedSkills`): the finalized SSE messages carry some of these, but Room nulls
+ *    `overrideParentMessageId`, `user`, `threadId`, `contextMeta`, `title`): the finalized SSE
+ *    messages carry some of these, but Room nulls
  *    them on round-trip, so an emission can only ever *drop* them — never introduce a new
  *    value — making this neutralization one-directional-safe. Keep in sync with the columns
  *    [com.garfiec.librechat.core.data.db.entity.MessageEntity] omits.
@@ -184,6 +245,4 @@ private fun Message.isRenderEquivalentTo(other: Message): Boolean =
         threadId = threadId,
         contextMeta = contextMeta,
         title = title,
-        manualSkills = manualSkills,
-        alwaysAppliedSkills = alwaysAppliedSkills,
     )

@@ -1,0 +1,119 @@
+package com.garfiec.librechat.feature.chat.screen
+
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import com.garfiec.librechat.core.common.speech.mapSttLanguageToLocale
+import com.garfiec.librechat.core.common.speech.sttSupportsLiveRecognition
+import com.garfiec.librechat.core.model.speech.SttEngine
+import com.garfiec.librechat.feature.chat.resources.Res
+import com.garfiec.librechat.feature.chat.resources.stt_mic_permission_required
+import com.garfiec.librechat.feature.chat.resources.stt_recognition_unavailable
+import com.garfiec.librechat.feature.chat.resources.stt_speak_now
+import com.garfiec.librechat.feature.chat.viewmodel.ChatViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
+
+/**
+ * Builds the "start recording" action for the chat composer.
+ *
+ * Routing here is only about *which mechanism* to use, decided by OS capability:
+ * - API 31+ (or the External engine): defer to [ChatViewModel.startRecording]; the voice-input
+ *   delegate owns the Browser-vs-External and on-device-vs-network choice (it already collects the
+ *   `sttEngine`/`sttOnDevice` preferences).
+ * - API 26–30 with the Browser engine: `createOnDeviceSpeechRecognizer` isn't available, so fall
+ *   back to today's full-screen Intent-overlay recognizer.
+ *
+ * Rebuilt on each recomposition so it always sees the latest [sttEngine]/[sttLanguage].
+ */
+@Composable
+internal actual fun rememberChatStartRecording(
+    viewModel: ChatViewModel,
+    sttEngine: String,
+    sttLanguage: String,
+    snackbarHostState: SnackbarHostState,
+    coroutineScope: CoroutineScope,
+): () -> Unit {
+    val context = LocalContext.current
+    val micPermissionMessage = stringResource(Res.string.stt_mic_permission_required)
+    val speakNowPrompt = stringResource(Res.string.stt_speak_now)
+    val unavailableMessage = stringResource(Res.string.stt_recognition_unavailable)
+
+    // Legacy full-screen Intent-overlay recognizer (API 26–30 Browser fallback).
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val transcribed = matches?.firstOrNull()
+            if (!transcribed.isNullOrBlank()) {
+                viewModel.onDeviceSpeechResult(transcribed)
+            }
+        }
+    }
+
+    // Runtime permission request for RECORD_AUDIO (in-process recognizer + External upload paths).
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.startRecording()
+        } else {
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar(micPermissionMessage)
+            }
+        }
+    }
+
+    return {
+        val engine = SttEngine.fromStored(sttEngine)
+        // The in-process live recognizer needs API 31+ (shared capability seam, same predicate the
+        // settings toggles gate on). Below that, Browser falls back to the full-screen Intent overlay.
+        val useIntentOverlay = engine == SttEngine.BROWSER && !sttSupportsLiveRecognition()
+
+        if (useIntentOverlay) {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+                )
+                putExtra(RecognizerIntent.EXTRA_PROMPT, speakNowPrompt)
+                val languageLocale = mapSttLanguageToLocale(sttLanguage)
+                if (languageLocale != null) {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageLocale)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, languageLocale)
+                }
+            }
+            // This path skips startRecording(), which stops a read the mic would otherwise hear.
+            viewModel.stopReading()
+            try {
+                speechRecognizerLauncher.launch(intent)
+            } catch (_: Exception) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(unavailableMessage)
+                }
+            }
+        } else {
+            // API 31+ Browser (in-process recognizer) or External (record + upload); the delegate
+            // routes. Both need RECORD_AUDIO.
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasPermission) {
+                viewModel.startRecording()
+            } else {
+                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+}

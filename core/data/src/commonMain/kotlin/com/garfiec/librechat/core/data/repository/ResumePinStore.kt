@@ -58,6 +58,7 @@ data class ResumeTurnPin(
     val endpointType: String?,
     val agentId: String?,
     val model: String?,
+    val spec: String? = null,
     val promptPrefix: String?,
     val ephemeralAgent: EphemeralAgent?,
     val isTemporary: Boolean,

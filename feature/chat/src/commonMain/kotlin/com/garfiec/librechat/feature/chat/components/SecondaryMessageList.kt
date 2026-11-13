@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
@@ -12,18 +13,23 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.common.ChatLayoutConstants
 import com.garfiec.librechat.core.model.Attachment
+import com.garfiec.librechat.core.model.media.IconSource
 import com.garfiec.librechat.feature.chat.resources.*
-import com.garfiec.librechat.feature.chat.resources.Res
 import com.garfiec.librechat.feature.chat.util.MessageNode
+import com.garfiec.librechat.feature.chat.util.withPreviews
 import com.garfiec.librechat.feature.chat.viewmodel.ActiveToolCall
-import org.jetbrains.compose.resources.stringResource
 
 /**
  * Simplified message list for the secondary comparison pane.
@@ -38,11 +44,13 @@ fun SecondaryMessageList(
     modifier: Modifier = Modifier,
     justSettledMessageId: String? = null,
     activeToolCalls: List<ActiveToolCall> = emptyList(),
+    sandboxStartingToolCallIds: Set<String> = emptySet(),
     streamingAttachments: List<Attachment> = emptyList(),
     error: String? = null,
     baseUrl: String = "",
     fontSizeMultiplier: Float = 1.0f,
-    selectedEndpoint: String? = null,
+    /** The streaming reply's avatar, resolved like each node's [MessageNode.avatar]. */
+    streamingAvatar: IconSource? = null,
     streamingSenderName: String = "Assistant",
     showImageDescriptions: Boolean = true,
     chatLayoutStyle: String = ChatLayoutConstants.THREAD,
@@ -50,20 +58,50 @@ fun SecondaryMessageList(
     showBubbles: Boolean = false,
     useKatex: Boolean = false,
     bottomContentPadding: Dp = 160.dp,
+    /** Where the jump-to-bottom button floats, as in [MessageList]. */
+    scrollToBottomPadding: Dp? = null,
+    /** The user's own name and avatar, so pane B labels their messages as pane A does. */
+    userAvatarUrl: String? = null,
+    userName: String? = null,
+    /** Hoisted by Compare so the pane keeps its place across layout switches. */
+    listState: LazyListState = rememberLazyListState(),
+    /** Compare's scroll sync is holding this pane level with the other; its tail follower stands down. */
+    syncHold: () -> Boolean = { false },
+    /** Reading room past the last line, as in [MessageList]. */
+    extraEndSpace: Dp = 0.dp,
+    /** The cut-short reply's chip, as in [MessageList]. */
+    stoppedReply: StoppedReplyAction? = null,
 ) {
-    val listState = rememberLazyListState()
-    // This pane hosts no PendingActionCard, so an unanswered ask has no affordance to resolve it.
+    val extraEndPx = with(LocalDensity.current) { extraEndSpace.toPx() }
+    val follower = rememberTailFollowerState()
+    val isNearBottom = rememberIsNearBottom(listState, extraEndPx)
+    // This pane hosts no AskUserQuestionPanel, so an unanswered ask has no affordance to resolve it.
     val renderedToolCalls = remember(activeToolCalls) { activeToolCalls.withoutAnyUnansweredQuestions() }
-    val totalItemCount = displayMessages.size +
-        (if (isStreaming) 1 else 0) +
-        (if (isStreaming) renderedToolCalls.size else 0)
+    // Parsed once per list; `contentType` runs on every measure pass.
+    val wakeups = remember(displayMessages) { wakeupsByMessageId(displayMessages) }
 
-    // Auto-scroll to bottom during streaming
-    LaunchedEffect(streamingContent.length, totalItemCount) {
-        if (totalItemCount > 0) {
-            listState.scrollToItem(totalItemCount - 1, scrollOffset = Int.MAX_VALUE)
+    ClearExpansionStatesAfterReply(isStreaming, ExpansionPane.SECONDARY)
+
+    // Opens at the latest message once, like the primary pane. Saveable so a restored position
+    // (the pane leaving and re-entering composition) isn't overridden.
+    var hasScrolledToBottom by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(displayMessages.isNotEmpty()) {
+        if (!hasScrolledToBottom && displayMessages.isNotEmpty()) {
+            // From the data, not layoutInfo: this can run before the list's first layout.
+            val untouched = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+            if (untouched) listState.scrollToTail(displayMessages.lastIndex, extraEndPx)
+            hasScrolledToBottom = true
         }
     }
+
+    TailFollowEffects(
+        listState = listState,
+        state = follower,
+        isNearBottom = isNearBottom,
+        isStreaming = isStreaming,
+        syncHold = syncHold,
+        extraEndPx = extraEndPx,
+    )
 
     Box(modifier = modifier.fillMaxSize()) {
         if (error != null) {
@@ -75,25 +113,30 @@ fun SecondaryMessageList(
                     .align(Alignment.Center)
                     .padding(16.dp),
             )
-        } else if (!isStreaming && displayMessages.isEmpty() && streamingContent.isBlank()) {
-            Text(
-                text = stringResource(Res.string.waiting_for_response),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(16.dp),
-            )
         } else {
+            // An empty pane stays empty, like the primary one beside it: nothing has been sent yet.
+            val previewOverrides = LocalPreviewOverrides.current
+            val liveAttachments = remember(streamingAttachments, previewOverrides) {
+                streamingAttachments.withPreviews(previewOverrides)
+            }
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .tailFollowerTouch(follower),
                 state = listState,
-                contentPadding = PaddingValues(top = 8.dp, bottom = bottomContentPadding),
+                // The same reading gap as the primary pane, so the two tails rest at one height.
+                contentPadding = PaddingValues(top = 8.dp, bottom = bottomContentPadding + MESSAGE_LIST_BOTTOM_GAP + extraEndSpace),
             ) {
                 items(
                     items = displayMessages,
-                    key = { node -> "secondary_${node.message.messageId}" },
-                    contentType = { "message" },
+                    // Keyed by conversation slot, as in MessageList, so the streaming reply (keyed to
+                    // the same slot below) and its finalized message stay one in-place item.
+                    key = { node -> "secondary_${node.treeParentKey}" },
+                    // A wake-up renders as a system row, not a bubble; its own type keeps slot reuse
+                    // from crossing the two layouts.
+                    contentType = { node ->
+                        if (wakeups.wakeupOf(node, isEditing = false) != null) "system" else "message"
+                    },
                 ) { node ->
                     CompositionLocalProvider(
                         LocalSuppressGroupAutoCollapse provides
@@ -101,7 +144,21 @@ fun SecondaryMessageList(
                         // No feedback affordance in a comparison pane, but provided for the same
                         // reason as the primary list so the two cannot drift.
                         LocalFeedbackEnabled provides !isStreaming,
+                        LocalExpansionScope provides
+                            expansionScope(ExpansionPane.SECONDARY, node.message.parentMessageId),
                     ) {
+                    // Same branch as MessageList; this pane never edits. Its bubbles take no
+                    // actions and no sibling navigation (their callbacks are no-ops), so neither
+                    // does the row.
+                    val systemEvent = wakeups.wakeupOf(node, isEditing = false)
+                    if (systemEvent != null) {
+                        SystemEventRow(
+                            display = systemEvent,
+                            messageId = node.message.messageId,
+                            fontSizeMultiplier = fontSizeMultiplier,
+                            useKatex = useKatex,
+                        )
+                    } else {
                     MessageBubble(
                         message = node.message,
                         siblingIndex = node.siblingIndex,
@@ -111,29 +168,50 @@ fun SecondaryMessageList(
                         onCopy = {},
                         baseUrl = baseUrl,
                         fontSizeMultiplier = fontSizeMultiplier,
-                        selectedEndpoint = selectedEndpoint,
+                        userAvatarUrl = userAvatarUrl,
+                        userName = userName,
                         showImageDescriptions = showImageDescriptions,
                         chatLayoutStyle = chatLayoutStyle,
                         showAvatars = showAvatars,
                         showBubbles = showBubbles,
+                        avatar = node.avatar,
                         useKatex = useKatex,
                     )
+                    if (stoppedReply?.messageId == node.message.messageId) {
+                        StoppedReplyFooter(
+                            action = stoppedReply,
+                            modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                        )
+                    }
+                    }
                     }
                 }
 
                 if (isStreaming) {
-                    item(key = "secondary_streaming_message") {
-                        StreamingMessageBubble(
-                            streamingContent = streamingContent,
-                            senderName = streamingSenderName,
-                            senderIconUrl = null,
-                            fontSizeMultiplier = fontSizeMultiplier,
-                            selectedEndpoint = selectedEndpoint,
-                            chatLayoutStyle = chatLayoutStyle,
-                            showAvatars = showAvatars,
-                            showBubbles = showBubbles,
-                            useKatex = useKatex,
-                        )
+                    val streamingWorkspace = partitionWorkspaceChanges(liveAttachments)
+                    // The message the reply answers, which its saved message names as its parent.
+                    val replyScope = expansionScope(
+                        ExpansionPane.SECONDARY,
+                        displayMessages.lastOrNull()?.message?.messageId,
+                    )
+                    val streamingSlotKey = displayMessages.lastOrNull()?.message?.messageId
+                        ?: "streaming_message"
+                    // No "Running X" stand-ins for picked skills here (MessageList draws them for
+                    // the primary pane): whether the added conversation's run primes the picks
+                    // was not established. Its final message still renders any skill cards.
+                    item(key = "secondary_$streamingSlotKey") {
+                        ProvideMarkdownMedia(liveAttachments, baseUrl) {
+                            StreamingMessageBubble(
+                                streamingContent = streamingContent,
+                                senderName = streamingSenderName,
+                                avatar = streamingAvatar,
+                                fontSizeMultiplier = fontSizeMultiplier,
+                                chatLayoutStyle = chatLayoutStyle,
+                                showAvatars = showAvatars,
+                                showBubbles = showBubbles,
+                                useKatex = useKatex,
+                            )
+                        }
                     }
 
                     if (renderedToolCalls.isNotEmpty()) {
@@ -142,19 +220,45 @@ fun SecondaryMessageList(
                             key = { "secondary_tool_call_${it.id}" },
                             contentType = { "tool_call" },
                         ) { toolCall ->
-                            StreamingToolCallCard(
-                                toolCall = toolCall,
-                                modifier = Modifier.padding(
-                                    horizontal = 16.dp,
-                                    vertical = 4.dp,
-                                ),
-                                baseUrl = baseUrl,
-                                streamingAttachments = streamingAttachments,
-                            )
+                            CompositionLocalProvider(LocalExpansionScope provides replyScope) {
+                                StreamingToolCallCard(
+                                    toolCall = toolCall,
+                                    modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                    baseUrl = baseUrl,
+                                    streamingAttachments = streamingWorkspace.inline,
+                                    sandboxStarting = toolCall.id in sandboxStartingToolCallIds,
+                                    isLatestStep = toolCall.id == renderedToolCalls.lastOrNull()?.id,
+                                    replyLength = streamingContent.length,
+                                )
+                            }
+                        }
+                    }
+
+                    if (streamingWorkspace.changes.isNotEmpty()) {
+                        item(key = "secondary_streaming_workspace_changes", contentType = "workspace_changes") {
+                            CompositionLocalProvider(LocalExpansionScope provides replyScope) {
+                                WorkspaceChangesSection(
+                                    changes = streamingWorkspace.changes,
+                                    baseUrl = baseUrl,
+                                    stateKey = "secondary_streaming",
+                                    modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                    live = true,
+                                )
+                            }
                         }
                     }
                 }
             }
+            ScrollToBottomButton(
+                listState = listState,
+                follower = follower,
+                extraEndPx = extraEndPx,
+                // Compare's panes don't record the glass backdrop (see MessageList's recordsGlassBackdrop).
+                backdrop = null,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = scrollToBottomPadding ?: scrollToBottomButtonPadding(bottomContentPadding)),
+            )
         }
     }
 }

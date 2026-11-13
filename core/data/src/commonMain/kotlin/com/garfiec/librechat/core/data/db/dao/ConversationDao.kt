@@ -6,7 +6,6 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import com.garfiec.librechat.core.common.identity.CrossAccount
 import com.garfiec.librechat.core.data.db.entity.ConversationEntity
-import com.garfiec.librechat.core.data.db.preserveLocalCacheFieldsFrom
 import kotlinx.coroutines.flow.Flow
 
 /** The three columns the prefetcher's selection and freshness rules need. */
@@ -29,6 +28,20 @@ data class PrefetchCandidateDetail(
     fun toCandidate(): PrefetchCandidate = PrefetchCandidate(conversationId, updatedAt, pinned)
 }
 
+/** A row's id and its tags column (a JSON list), for overlaying cached tags on rows from the server. */
+data class ConversationTagsRow(
+    val conversationId: String,
+    val tags: String,
+)
+
+/** What a search hit shows of its conversation. */
+data class ConversationTitle(
+    val conversationId: String,
+    val title: String,
+    val isArchived: Boolean,
+)
+
+@Suppress("TooManyFunctions") // debt: 22 functions
 @Dao
 interface ConversationDao {
 
@@ -47,22 +60,6 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations WHERE conversationId = :id AND accountId = :accountId")
     fun observeByIdForAccount(id: String, accountId: String): Flow<ConversationEntity?>
 
-    /**
-     * Bounded reconciliation read: returns only rows whose serialized tag array contains the exact
-     * JSON string token (for example `"Saved"`), across active and archived conversations.
-     *
-     * This deliberately avoids observing/loading either complete history partition merely to remove
-     * a stale reserved tag. Tag names are JSON-encoded strings, so including the quotes in
-     * [tagJsonToken] prevents a substring such as `Saved for later` from matching.
-     */
-    @Query(
-        "SELECT * FROM conversations WHERE accountId = :accountId " +
-            "AND tags LIKE '%' || :tagJsonToken || '%'",
-    )
-    suspend fun getConversationsWithTagForAccount(
-        accountId: String,
-        tagJsonToken: String,
-    ): List<ConversationEntity>
     // --- Background prefetch. Projections rather than entities: the prefetcher needs three columns
     // and reading the entity would decode the `tags` JSON of every row for nothing. ---
 
@@ -77,6 +74,17 @@ interface ConversationDao {
             "WHERE accountId = :accountId AND isArchived = 0 AND pinned = 1",
     )
     suspend fun pinnedForPrefetch(accountId: String): List<PrefetchCandidate>
+
+    /** Titles for search hits. Chunk the ids — SQLite binds at most ~999 variables per statement. */
+    @Query(
+        "SELECT conversationId, title, isArchived FROM conversations " +
+            "WHERE accountId = :accountId AND conversationId IN (:conversationIds)",
+    )
+    suspend fun titlesFor(accountId: String, conversationIds: List<String>): List<ConversationTitle>
+
+    /** Archived conversation ids, so a search that excludes them can filter scanned rows. */
+    @Query("SELECT conversationId FROM conversations WHERE accountId = :accountId AND isArchived = 1")
+    suspend fun archivedIds(accountId: String): List<String>
 
     /** Prune candidates. Archived rows are included: they are the least likely to be reopened. */
     @Query("SELECT conversationId FROM conversations WHERE accountId = :accountId AND updatedAt < :cutoff")
@@ -104,11 +112,13 @@ interface ConversationDao {
     @Upsert
     suspend fun upsertAll(conversations: List<ConversationEntity>)
 
-    // Atomic read-merge-write that preserves locally-stored tags and a complete model-parameter
-    // snapshot when a sparse server response omits either. Used by paths such as the list endpoint
-    // and streaming save. Must run inside a single transaction so it can't be interleaved by a
-    // concurrent local write. The body threads `accountId` (reads via `getByIdForAccount`), so it is
-    // account-safe despite @CrossAccount suppressing the concrete-body lint.
+    // Atomic read-merge-write that preserves locally-stored tags when a row already exists for this
+    // account, and its cached model parameters when the incoming row has none. Used by paths that
+    // receive server responses without the `tags` field (list endpoint + streaming save). Must run
+    // inside a single transaction so it can't be interleaved by a concurrent
+    // updateTags write from `syncFavoritesFromServer` (which would otherwise get clobbered). The body
+    // threads `accountId` (reads via `getByIdForAccount`), so it is account-safe despite @CrossAccount
+    // suppressing the concrete-body lint.
     @CrossAccount
     @Transaction
     suspend fun upsertPreservingTags(accountId: String, entities: List<ConversationEntity>) {
@@ -118,7 +128,19 @@ interface ConversationDao {
                 continue
             }
             val existing = getByIdForAccount(entity.conversationId, accountId)
-            upsert(entity.preserveLocalCacheFieldsFrom(existing))
+            // The list route sends no parameters either: keep the ones a full read cached.
+            val toUpsert = if (existing != null) {
+                entity.copy(
+                    tags = existing.tags,
+                    modelParams = entity.modelParams ?: existing.modelParams,
+                    // A list row from an older replica (or a stream's stub) doesn't say; keep what a
+                    // full read learned.
+                    isCodeConversation = entity.isCodeConversation ?: existing.isCodeConversation,
+                ).withReadStateOf(existing)
+            } else {
+                entity
+            }
+            upsert(toUpsert)
         }
     }
 
@@ -128,27 +150,30 @@ interface ConversationDao {
     }
 
     /**
-     * Stores an authoritative detail response while retaining local-only tags.
-     *
-     * Unlike [upsertPreservingTags], a null [ConversationEntity.modelParams] clears an older
-     * snapshot: it means the detail response resolved entirely to endpoint defaults, not that a
-     * sparse list response omitted the fields.
+     * The user caught up (`POST /api/convos/seen` answered). Does NOT touch `updatedAt`: reading a
+     * chat is not activity, and the server writes with `timestamps: false` for the same reason.
      */
-    @CrossAccount
-    @Transaction
-    suspend fun upsertAuthoritativeSnapshot(accountId: String, entity: ConversationEntity) {
-        if (entity.conversationId.isBlank()) {
-            upsert(entity)
-            return
-        }
-        val existing = getByIdForAccount(entity.conversationId, accountId)
-        upsert(
-            entity.preserveLocalCacheFieldsFrom(
-                existing = existing,
-                preserveModelParamsWhenMissing = false,
-            ),
-        )
-    }
+    @Query(
+        "UPDATE conversations SET lastSeenAt = :lastSeenAt, isMarkedUnread = NULL " +
+            "WHERE conversationId = :id AND accountId = :accountId",
+    )
+    suspend fun markSeen(id: String, lastSeenAt: Long, accountId: String)
+
+    /** The read state `POST /api/convos/unread` answered with. Leaves `updatedAt` alone, as [markSeen]. */
+    @Query(
+        "UPDATE conversations SET lastResponseAt = COALESCE(:lastResponseAt, lastResponseAt), " +
+            "lastResponseMessageId = :lastResponseMessageId, lastResponseIsManual = :lastResponseIsManual, " +
+            "isMarkedUnread = :isMarkedUnread, lastSeenAt = NULL " +
+            "WHERE conversationId = :id AND accountId = :accountId",
+    )
+    suspend fun markUnread(
+        id: String,
+        lastResponseAt: Long?,
+        lastResponseMessageId: String?,
+        lastResponseIsManual: Boolean?,
+        isMarkedUnread: Boolean?,
+        accountId: String,
+    )
 
     @Query("DELETE FROM conversations WHERE conversationId = :id AND accountId = :accountId")
     suspend fun deleteById(id: String, accountId: String)
@@ -156,17 +181,41 @@ interface ConversationDao {
     @Query("UPDATE conversations SET title = :title, updatedAt = :updatedAt WHERE conversationId = :id AND accountId = :accountId")
     suspend fun updateTitle(id: String, title: String, updatedAt: Long, accountId: String)
 
+    /**
+     * Deliberately does NOT touch `updatedAt`.
+     *
+     * Filing a chat away is not activity, and the archived list is ordered by `updatedAt`, so
+     * stamping it here would collapse the list onto the moment of archiving and — on unarchive —
+     * restore the chat to the wrong place in the date groups. Upstream's own route passes
+     * `preserveUpdatedAt: true` for exactly this.
+     */
     @Query(
-        "UPDATE conversations SET isArchived = :isArchived, updatedAt = :updatedAt " +
+        "UPDATE conversations SET isArchived = :isArchived " +
             "WHERE conversationId = :id AND accountId = :accountId",
     )
-    suspend fun updateArchived(id: String, isArchived: Boolean, updatedAt: Long, accountId: String)
+    suspend fun updateArchived(id: String, isArchived: Boolean, accountId: String)
+
+    /** Same rule as [updateArchived], and upstream passes `timestamps: false` for the same reason. */
+    @Query("UPDATE conversations SET isArchived = 1 WHERE accountId = :accountId AND isArchived = 0")
+    suspend fun archiveAllForAccount(accountId: String)
 
     @Query("UPDATE conversations SET pinned = :pinned WHERE conversationId = :id AND accountId = :accountId")
     suspend fun updatePinned(id: String, pinned: Boolean, accountId: String)
 
     @Query("UPDATE conversations SET tags = :tagsJson, updatedAt = :updatedAt WHERE conversationId = :id AND accountId = :accountId")
     suspend fun updateTags(id: String, tagsJson: String, updatedAt: Long, accountId: String)
+
+    /** Rewrites a row's tags without touching `updatedAt`, for a bookmark renamed or deleted account-wide. */
+    @Query("UPDATE conversations SET tags = :tagsJson WHERE conversationId = :id AND accountId = :accountId")
+    suspend fun replaceTags(id: String, tagsJson: String, accountId: String)
+
+    /** Rows that carry at least one tag (archived included). */
+    @Query("SELECT * FROM conversations WHERE accountId = :accountId AND tags != '[]'")
+    suspend fun taggedForAccount(accountId: String): List<ConversationEntity>
+
+    /** The cached tags of each of [ids] this account has a row for. At most ~999 ids per call (SQLite's bind limit). */
+    @Query("SELECT conversationId, tags FROM conversations WHERE accountId = :accountId AND conversationId IN (:ids)")
+    fun observeTagsFor(accountId: String, ids: List<String>): Flow<List<ConversationTagsRow>>
 
     @Query("UPDATE conversations SET chatProjectId = :chatProjectId WHERE conversationId = :id AND accountId = :accountId")
     suspend fun updateChatProjectId(id: String, chatProjectId: String?, accountId: String)
@@ -175,3 +224,20 @@ interface ConversationDao {
     @Query("DELETE FROM conversations WHERE accountId = :accountId")
     suspend fun deleteAllForAccount(accountId: String)
 }
+
+/**
+ * Read state travels as one group: a payload that carries none of it (an older server, or a write
+ * path whose response omits it) keeps what the cache knew rather than reading the chat as seen.
+ */
+internal fun ConversationEntity.withReadStateOf(existing: ConversationEntity): ConversationEntity =
+    if (lastResponseAt != null || lastSeenAt != null || isMarkedUnread != null) {
+        this
+    } else {
+        copy(
+            lastResponseAt = existing.lastResponseAt,
+            lastResponseMessageId = existing.lastResponseMessageId,
+            lastResponseIsManual = existing.lastResponseIsManual,
+            isMarkedUnread = existing.isMarkedUnread,
+            lastSeenAt = existing.lastSeenAt,
+        )
+    }

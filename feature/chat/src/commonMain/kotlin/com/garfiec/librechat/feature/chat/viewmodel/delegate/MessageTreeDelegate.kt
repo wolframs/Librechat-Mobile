@@ -30,7 +30,7 @@ class MessageTreeDelegate(
         // its parent (see anchorStreamTo / buildActiveMessagePath's streamingLeafId), and
         // mutating activeBranches re-triggers loadConversation's combine, which rebuilds
         // displayMessages WITHOUT the leaf — un-truncating the path and dropping the
-        // streaming reply back to the end. editMessage/regenerateMessage are likewise
+        // streaming reply back to the end. rerunEdit/regenerateMessage are likewise
         // gated on isStreaming; this closes the same gap for sibling navigation.
         if (handle.state.isStreaming) return
         // Only mutate the branch selection; the observeMessages/activeBranches combine in
@@ -39,12 +39,10 @@ class MessageTreeDelegate(
         handle.update {
             val newBranches = content.activeBranches.toMutableMap()
             newBranches[parentMessageId] = siblingIndex
-            // The sibling we're switching to has a different message history, so the seeded context
-            // gauge no longer describes it. Clear it (we're !isStreaming here, so no live SSE to
-            // disturb) and let ContextProjectionDelegate re-project once displayMessages rebuilds
-            // with the new tail. sameWindowAs() ignores the tail, so without this the stale numerator
-            // would linger until the next send.
-            content = content.copy(activeBranches = newBranches, contextUsage = null)
+            // The context gauge is left alone: ContextProjectionDelegate re-resolves it from the
+            // rebuilt displayMessages one dispatch later. Clearing it here would flash the gauge
+            // hidden in between.
+            content = content.copy(activeBranches = newBranches)
         }
     }
 
@@ -78,13 +76,16 @@ class MessageTreeDelegate(
         // active the toggle is a read-only indicator — the server already created
         // it temporary, so flipping it off here would be misleading.
         if (handle.state.conversationId != null) return
+        // An administrator forces temporary chats; the toggle is a read-only indicator.
+        if (handle.state.temporaryChatEnforced) return
         handle.update { conversation = conversation.copy(isTemporaryChat = !conversation.isTemporaryChat) }
     }
 
     /**
      * Finalizes a chat's display purely in memory by merging the SSE [event]'s
-     * request/response into the in-memory list (replacing the optimistic user message by id)
-     * and recomputing the display path — no Room access. This keeps the just-streamed reply
+     * request/response into the in-memory list (folding the request over this turn's optimistic
+     * user message, [optimisticUserMessageId], whose id the server replaced; see
+     * [mergeFinalMessagesInMemory]) and recomputing the display path — no Room access. This keeps the just-streamed reply
      * on screen the instant `isStreaming` flips false, instead of round-tripping a network
      * reload. Normal chats follow up with a background Room reconcile (server stays source of
      * truth); temp chats deliberately skip it, since the read-through cache would upsert their
@@ -95,9 +96,8 @@ class MessageTreeDelegate(
      * from the POST-merge state, not the raw event, so the cached rows are the same merged
      * instances the screen shows (caching the frame's skeletal request would diverge disk from
      * display). The request resolves via the response's parentMessageId when the payload omits
-     * it — the server adopts the client-minted id (PR #139), so it matches the optimistic user
-     * message, which was never written to Room during streaming and would otherwise be lost on
-     * reopen. Temp chats ignore the return value.
+     * it. The optimistic user message was never written to Room during streaming, so this is what
+     * keeps it on reopen. Temp chats ignore the return value.
      */
     /**
      * Names the response that is about to take over from the streaming bubble, for the one path
@@ -109,10 +109,10 @@ class MessageTreeDelegate(
         handle.update { content = content.copy(justSettledMessageId = messageId) }
     }
 
-    fun finalizeChatDisplay(event: StreamEvent.Final): List<Message> {
+    fun finalizeChatDisplay(event: StreamEvent.Final, optimisticUserMessageId: String? = null): List<Message> {
         // Defensive: upstream 0.8.7 sets responseMessage.attachments before saving, but the app
         // supports a backend version range. If the Final payload omitted a file that streamed in
-        // via `attachment` SSE events, fold it back in (by fileId) so it survives the reload — the
+        // via `attachment` SSE events, fold it back in (by fileId or filepath) so it survives the reload — the
         // streamed list is about to be cleared in the update below. Cheap insurance.
         val streamedAttachments = handle.state.streamingAttachments
         val response = event.resolvedResponseMessage()?.let { mergeStreamedAttachments(it, streamedAttachments) }
@@ -125,7 +125,7 @@ class MessageTreeDelegate(
             val mergedMessages = if (finalMessages.isEmpty()) {
                 content.messages
             } else {
-                mergeFinalMessagesInMemory(content.messages, finalMessages)
+                mergeFinalMessagesInMemory(content.messages, finalMessages, optimisticUserMessageId)
             }
             // Retire the streaming bubble and swap in the finalized message in ONE slice copy —
             // all these fields live in `content`, so this stays a single StateFlow emission and
@@ -136,11 +136,13 @@ class MessageTreeDelegate(
                 screenState = ChatScreenState.ACTIVE,
                 isStreaming = false,
                 streamingContent = "",
+                streamingThinking = "",
                 // The stream is over, so no retry can be pending. Matters for a Final that
                 // lands while a reconnect banner is up (e.g. a stop during a retry window):
                 // without this the stale banner survives the finalize.
                 retryInfo = null,
                 activeToolCalls = emptyList(),
+                sandboxStartingToolCallIds = emptySet(),
                 streamingAttachments = emptyList(),
                 // The turn is finalized and (for normal chats) about to be persisted, so the
                 // handed-off optimistic seed has done its job. Clear it unconditionally — not just
@@ -154,6 +156,7 @@ class MessageTreeDelegate(
                 // activity groups have already picked their initial expansion and nothing re-opens
                 // them. See MessagesState.justSettledMessageId.
                 justSettledMessageId = response?.messageId,
+                isCompacting = false,
             )
         }
         if (finalMessages.isEmpty()) return emptyList()
@@ -191,30 +194,39 @@ class MessageTreeDelegate(
                 displayMessages = buildActiveMessagePath(remaining, content.activeBranches),
                 isStreaming = false,
                 streamingContent = "",
+                streamingThinking = "",
                 retryInfo = null,
                 activeToolCalls = emptyList(),
+                sandboxStartingToolCallIds = emptySet(),
                 streamingAttachments = emptyList(),
                 // Defensive: earlyAbort means `created` never fired, so no handoff seeded this —
                 // but clearing keeps the invariant "finalize/unsend always retires the seed".
                 pendingResumeUserMessage = null,
                 // Nothing settled — the turn was un-sent.
                 justSettledMessageId = null,
+                isCompacting = false,
             )
         }
     }
 }
 
 /**
- * Upserts [streamed] attachments into [message] by `fileId`, keeping the server's copy on
- * conflict. Only fills gaps — when the Final payload already carried every streamed file, the
- * message is returned unchanged. Attachments with no fileId are skipped (can't be deduped, and
- * generated files always carry one).
+ * Upserts [streamed] attachments into [message] by `fileId ?: filepath`, keeping the server's copy
+ * on conflict. Only fills gaps — when the Final payload already carried every streamed file, the
+ * message is returned unchanged.
+ *
+ * Not every generated file has a fileId: a code-output download fallback (the server could not
+ * store the file) has only a filepath, and the Final's response carries its own copy of each.
+ * Keying on the fileId alone would add the streamed copy beside it. An attachment with neither key
+ * is skipped, since nothing could tell it apart from the server's.
  */
 internal fun mergeStreamedAttachments(message: Message, streamed: List<Attachment>): Message {
     if (streamed.isEmpty()) return message
     val existing = message.attachments.orEmpty()
-    val existingIds = existing.mapNotNull { it.fileId }.toHashSet()
-    val toAdd = streamed.filter { it.fileId != null && it.fileId !in existingIds }
+    val existingKeys = existing.mapNotNull { it.mergeKey() }.toHashSet()
+    val toAdd = streamed.filter { att -> att.mergeKey()?.let { existingKeys.add(it) } == true }
     if (toAdd.isEmpty()) return message
     return message.copy(attachments = existing + toAdd)
 }
+
+private fun Attachment.mergeKey(): String? = fileId ?: filepath

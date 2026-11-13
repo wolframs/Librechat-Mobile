@@ -1,39 +1,65 @@
 package com.garfiec.librechat.shared.navigation
 
 import androidx.navigation3.runtime.NavKey
-import com.garfiec.librechat.feature.chat.navigation.ArtifactShortcutViewer
+import com.garfiec.librechat.core.model.code.CodeSetupAttempt
 import com.garfiec.librechat.feature.chat.navigation.Chat
 import com.garfiec.librechat.feature.chat.navigation.NewChat
+import com.garfiec.librechat.feature.schedules.navigation.SchedulesList
+import com.garfiec.librechat.feature.settings.navigation.CodeSetup
+import io.ktor.http.parseUrl
 
 /**
  * Platform-neutral view of an incoming `librechat://` URI, so [DeepLinks.resolve] — the routing
- * decision — lives in common and can be reused per platform. Android builds this from
- * `android.net.Uri` (see `DeepLinkUriAdapter`); an iOS intake (from `NSURLComponents`) would build
- * the same shape and reuse [DeepLinks.resolve] — not yet wired. Only field extraction is per-platform.
+ * decision — lives in common. Android builds it from `android.net.Uri` (`DeepLinkUriAdapter`); iOS
+ * from the URL string, through [parse].
  */
 data class DeepLinkUri(
     val host: String?,
     val pathSegments: List<String>,
     val query: Map<String, String>,
-)
+) {
+    companion object {
+        /**
+         * Parses a `librechat://host/segments?query` string; null for anything else. Opaque forms
+         * (`librechat:foo`) are refused here, as Android hands them over with no host and they
+         * resolve to nothing there.
+         */
+        fun parse(raw: String): DeepLinkUri? {
+            if (!raw.startsWith("${DeepLinks.SCHEME}://", ignoreCase = true)) return null
+            val url = parseUrl(raw) ?: return null
+            return DeepLinkUri(
+                host = url.host.takeIf { it.isNotEmpty() },
+                pathSegments = url.segments,
+                query = url.parameters.names().associateWith { url.parameters[it].orEmpty() },
+            )
+        }
+    }
+}
 
 /**
- * The outcome of resolving a deep link. A sealed result (not a bare `NavKey?`) so the three
- * genuinely different link kinds are each expressible: navigate, accept-but-don't-navigate, ignore.
+ * The outcome of resolving a deep link. A sealed result (not a bare `NavKey?`) so each link kind is
+ * expressible: navigate, open outside the nav host, accept-but-don't-navigate, ignore.
  */
 sealed interface DeepLinkResolution {
     /**
-     * Navigate to [target]. [requiresAuth] links redirect to login when logged out (a conversation
-     * or a model-preselect chat is useless without a session); non-auth links open even logged out
-     * (a device-scoped artifact snapshot renders from local Room).
+     * Navigate to [target]; logged out, the link lands on login instead. [forAccount] (a
+     * notification's link) is honoured only while that account is active: it can refuse a
+     * navigation, never switch accounts.
      */
-    data class Route(val target: NavKey, val requiresAuth: Boolean) : DeepLinkResolution
+    data class Route(val target: NavKey, val forAccount: String? = null) : DeepLinkResolution
+
+    /**
+     * A home-screen-pinned artifact. It opens in its own task outside the nav host, logged in or
+     * not, since the snapshot renders from local Room.
+     */
+    data class ArtifactApp(val snapshotId: String) : DeepLinkResolution
 
     /**
      * Accepted — the app should come to the foreground — but there is nothing to place on the back
-     * stack: the payload is consumed by an in-progress flow. The OAuth redirect is the case; its
-     * refresh token rides back in a cookie read by the login screen (`checkOAuthResult`), so the
-     * link only needs to return focus to the app.
+     * stack: the payload is consumed by an in-progress flow. The OAuth redirect is the case.
+     * Sign-in now completes inside the app's own WebView, so nothing arrives by this route any
+     * more; it stays mapped so a link from an older build returns focus instead of falling to
+     * [None].
      */
     data object Consumed : DeepLinkResolution
 
@@ -64,28 +90,47 @@ object DeepLinks {
     )
 
     fun resolve(uri: DeepLinkUri): DeepLinkResolution = when (uri.host) {
+        // `?message=<uuid>` opens the chat at that message. Without `?account=`, it resolves within
+        // whichever account is active; a message that isn't there reports "not found".
         "conversation" -> uri.pathSegments.firstOrNull()
             ?.takeIf { UUID_PATTERN.matches(it) }
-            ?.let { DeepLinkResolution.Route(Chat(it), requiresAuth = true) }
+            ?.let { id ->
+                val message = uri.query["message"]?.takeIf { UUID_PATTERN.matches(it) }
+                val account = uri.query["account"]?.takeIf { it.isNotBlank() }
+                DeepLinkResolution.Route(Chat(id, targetMessageId = message), forAccount = account)
+            }
             ?: DeepLinkResolution.None
 
         "artifact" -> uri.pathSegments.firstOrNull()
             ?.takeIf { UUID_PATTERN.matches(it) }
-            ?.let { DeepLinkResolution.Route(ArtifactShortcutViewer(it), requiresAuth = false) }
+            ?.let { DeepLinkResolution.ArtifactApp(it) }
             ?: DeepLinkResolution.None
 
-        // Home-screen model shortcut (librechat://model?endpoint=<endpoint>&model=<model>): the payload
+        // Home-screen model shortcut (librechat://model?endpoint=<endpoint>&model=<model>[&spec=<spec>]): the payload
         // rides on the NewChat route so it replaces a bare landing NewChat (dedup-by-value) and re-seeds
-        // even when already on the landing. Auth-required — a model preselect is useless without a session.
+        // even when already on the landing.
         "model" -> {
             val endpoint = uri.query["endpoint"]
             val model = uri.query["model"]
             if (!endpoint.isNullOrBlank() && !model.isNullOrBlank()) {
-                DeepLinkResolution.Route(NewChat(endpoint = endpoint, model = model), requiresAuth = true)
+                val spec = uri.query["spec"]?.takeIf { it.isNotBlank() }
+                DeepLinkResolution.Route(NewChat(endpoint = endpoint, model = model, spec = spec))
             } else {
                 DeepLinkResolution.None
             }
         }
+
+        // A machine's setup request (librechat://code-setup/<attemptId>), the app's form of the
+        // worker's `<server>/code/setup/<attemptId>` link. The id is 43 base64url characters; the
+        // page loads it for the active account, which must be the one that started the setup.
+        "code-setup" -> uri.pathSegments.firstOrNull()
+            ?.let(CodeSetupAttempt::idFrom)
+            ?.let { DeepLinkResolution.Route(CodeSetup(it)) }
+            ?: DeepLinkResolution.None
+
+        // The Schedules list (librechat://schedules), for a scheduled-chat notification with no chat.
+        // `?account=` refuses it unless that account is active, as for a conversation.
+        "schedules" -> DeepLinkResolution.Route(SchedulesList, forAccount = uri.query["account"]?.takeIf { it.isNotBlank() })
 
         // OAuth redirect (librechat://oauth): token comes back via cookie, not the URI — see [Consumed].
         "oauth" -> DeepLinkResolution.Consumed

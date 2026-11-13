@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions") // debt: 24 functions
+
 package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.animation.AnimatedContent
@@ -6,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,7 +15,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -33,9 +33,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -48,9 +48,13 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.garfiec.librechat.core.ui.theme.SyntaxColors
+import com.garfiec.librechat.core.ui.theme.chatColors
+import com.garfiec.librechat.core.ui.theme.isSurfaceDark
+import com.garfiec.librechat.core.ui.theme.themeShapes
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
-import com.garfiec.librechat.feature.chat.util.copyToClipboard
+import com.garfiec.librechat.feature.chat.util.rememberClipboardWriter
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
@@ -68,7 +72,18 @@ fun CodeBlock(
     // While streaming, [code] grows every flush and the highlight re-runs from scratch, so it is
     // computed off the main thread with the previous result retained.
     streaming: Boolean = false,
+    /**
+     * Wrap long lines to the block's width instead of scrolling sideways. Tool input and output
+     * wrap, as web's `whitespace-pre-wrap break-words` does: a single long line (a file listing,
+     * a JSON result) is otherwise read through a sideways scroll inside a vertically scrolling
+     * chat, which on a phone reads as text running off the screen.
+     */
+    wrap: Boolean = false,
+    /** A reply's fence the chat can run ([rememberCodeRunTarget]); null draws no Run button. */
+    run: CodeRunTarget? = null,
 ) {
+    val runHost = LocalCodeRunHost.current.takeIf { run != null }
+    val clipboard = rememberClipboardWriter()
     var showCopied by remember { mutableStateOf(false) }
 
     LaunchedEffect(showCopied) {
@@ -78,37 +93,48 @@ fun CodeBlock(
         }
     }
 
-    val languageLabel = language?.lowercase() ?: "code"
+    val languageLabel = language?.lowercase()
+    val blockCd = if (languageLabel != null) {
+        stringResource(Res.string.cd_code_block_language, languageLabel)
+    } else {
+        stringResource(Res.string.cd_code_block)
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clip(themeShapes().codeBlock)
+            .background(chatColors().codeBody)
             .semantics {
-                contentDescription = "$languageLabel code block"
+                contentDescription = blockCd
             },
     ) {
         // Language header with copy button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .background(chatColors().codeHeader)
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             DisableSelection {
                 Text(
-                    text = language?.lowercase() ?: "code",
+                    text = languageLabel ?: stringResource(Res.string.label_code),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
+            if (run != null && runHost != null) RunCodeButton(run, runHost)
+            // Inside a tool card whose content is still a preview, Copy would copy shortened text:
+            // it waits (disabled, keeping its label) until the full part lands.
+            val copyEnabled = !toolContentIsPreview()
             IconButton(
                 onClick = {
-                    copyToClipboard(code, "Code")
+                    clipboard.copy(code, "Code")
                     showCopied = true
                 },
+                enabled = copyEnabled,
+                modifier = if (copyEnabled) Modifier else Modifier.alpha(DISABLED_ALPHA),
             ) {
                 AnimatedContent(
                     targetState = showCopied,
@@ -132,12 +158,13 @@ fun CodeBlock(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
+                .then(if (wrap) Modifier else Modifier.horizontalScroll(rememberScrollState()))
                 .padding(12.dp),
         ) {
-            val isDarkTheme = isSystemInDarkTheme()
+            val isDarkTheme = isSurfaceDark()
+            val syntax = chatColors().syntax
             val highlightedCode = rememberHighlightedCode(
-                input = HighlightInput(code, language, searchQuery, searchFocusedOccurrence, isDarkTheme),
+                input = HighlightInput(code, language, searchQuery, searchFocusedOccurrence, isDarkTheme, syntax),
                 streaming = streaming,
             )
             val focusedRange = remember(code, searchQuery, searchFocusedOccurrence) {
@@ -155,10 +182,12 @@ fun CodeBlock(
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
                 ),
+                color = syntax.text,
                 onTextLayout = { layoutResult = it },
                 modifier = Modifier.reportFocusedMatchPosition(layoutResult, focusedRange, onFocusedMatchPosition),
             )
         }
+        if (run != null && runHost != null) CodeRunOutput(run, runHost)
     }
 }
 
@@ -168,10 +197,11 @@ private data class HighlightInput(
     val searchQuery: String?,
     val searchFocusedOccurrence: Int,
     val isDarkTheme: Boolean,
+    val syntax: SyntaxColors,
 )
 
 private fun highlight(input: HighlightInput): AnnotatedString {
-    val syntax = highlightSyntax(input.code, input.language?.lowercase())
+    val syntax = highlightSyntax(input.code, input.language?.lowercase(), SyntaxPalette(input.syntax))
     return if (input.searchQuery.isNullOrBlank()) {
         syntax
     } else {
@@ -214,7 +244,7 @@ private fun rememberHighlightedCode(
  * and numbers for common languages. Uses a priority-ordered token list so that
  * earlier matches (e.g. comments) take precedence over later ones (e.g. keywords).
  */
-private fun highlightSyntax(code: String, language: String?): AnnotatedString {
+internal fun highlightSyntax(code: String, language: String?, palette: SyntaxPalette): AnnotatedString {
     val tokenRules = getTokenRules(language) ?: return AnnotatedString(code)
     return buildAnnotatedString {
         // Collect all matches, sort by position, resolve overlaps
@@ -230,7 +260,7 @@ private fun highlightSyntax(code: String, language: String?): AnnotatedString {
                     SyntaxToken(
                         start = range.first,
                         end = range.last + 1,
-                        style = rule.style,
+                        kind = rule.kind,
                         priority = rule.priority,
                     ),
                 )
@@ -256,7 +286,7 @@ private fun highlightSyntax(code: String, language: String?): AnnotatedString {
             if (token.start > pos) {
                 append(code.substring(pos, token.start))
             }
-            withStyle(token.style) {
+            withStyle(palette.styleOf(token.kind)) {
                 append(code.substring(token.start, token.end))
             }
             pos = token.end
@@ -270,32 +300,46 @@ private fun highlightSyntax(code: String, language: String?): AnnotatedString {
 private data class SyntaxToken(
     val start: Int,
     val end: Int,
-    val style: SpanStyle,
+    val kind: TokenKind,
     val priority: Int,
 )
 
 private data class TokenRule(
     val regex: Regex,
-    val style: SpanStyle,
+    val kind: TokenKind,
     val priority: Int,
     val captureGroup: Int = 0,
 )
 
-// Color palette for syntax highlighting (works on both light and dark themes)
-// These are chosen to be visible on dark backgrounds (surfaceContainerHighest)
-// and also acceptable on light backgrounds.
-private val commentStyle = SpanStyle(color = Color(0xFF6A9955), fontStyle = FontStyle.Italic)
-private val stringStyle = SpanStyle(color = Color(0xFFCE9178))
-private val keywordStyle = SpanStyle(color = Color(0xFF569CD6))
-private val numberStyle = SpanStyle(color = Color(0xFFB5CEA8))
-private val typeStyle = SpanStyle(color = Color(0xFF4EC9B0))
-private val functionStyle = SpanStyle(color = Color(0xFFDCDCAA))
-private val annotationStyle = SpanStyle(color = Color(0xFFD7BA7D))
-private val constantStyle = SpanStyle(color = Color(0xFF4FC1FF))
+private const val DISABLED_ALPHA = 0.38f
+
+internal enum class TokenKind { COMMENT, STRING, KEYWORD, NUMBER, TYPE, FUNCTION, ANNOTATION, CONSTANT }
+
+/** The highlighter's span style for each [TokenKind], in [colors]. */
+internal class SyntaxPalette(colors: SyntaxColors) {
+    private val styles: Map<TokenKind, SpanStyle> = TokenKind.entries.associateWith { kind ->
+        SpanStyle(
+            color = when (kind) {
+                TokenKind.COMMENT -> colors.comment
+                TokenKind.STRING -> colors.string
+                TokenKind.KEYWORD -> colors.keyword
+                TokenKind.NUMBER -> colors.number
+                TokenKind.TYPE -> colors.type
+                TokenKind.FUNCTION -> colors.function
+                TokenKind.ANNOTATION -> colors.annotation
+                TokenKind.CONSTANT -> colors.constant
+            },
+            fontStyle = if (kind == TokenKind.COMMENT) FontStyle.Italic else null,
+        )
+    }
+
+    fun styleOf(kind: TokenKind): SpanStyle = styles.getValue(kind)
+}
 
 // Cache token rules per language to avoid recreating Regex objects on every code block render.
 private val tokenRulesCache = mutableMapOf<String, List<TokenRule>>()
 
+@Suppress("CyclomaticComplexMethod") // debt: complexity 36
 private fun getTokenRules(language: String?): List<TokenRule>? {
     if (language == null || language == "markdown" || language == "md") return null
     val key = when (language) {
@@ -340,6 +384,11 @@ private fun getTokenRules(language: String?): List<TokenRule>? {
 
 // --- Language rule sets ---
 
+// Quoted strings with escapes. The repeat must stay possessive (`*+`): Kotlin/Native's regex engine
+// recurses once per repetition of a greedy group, so a long string overflows the thread stack on iOS.
+private const val DOUBLE_QUOTED = "\"(?:[^\"\\\\]|\\\\.)*+\""
+private const val SINGLE_QUOTED = "'(?:[^'\\\\]|\\\\.)*+'"
+
 private fun kotlinRules(): List<TokenRule> {
     val keywords = "val|var|fun|class|object|interface|enum|sealed|data|annotation|companion|" +
         "if|else|when|for|while|do|return|break|continue|throw|try|catch|finally|" +
@@ -347,16 +396,16 @@ private fun kotlinRules(): List<TokenRule> {
         "private|protected|internal|public|open|abstract|override|final|suspend|inline|" +
         "crossinline|noinline|reified|typealias|lateinit|const|vararg|operator|infix|tailrec"
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("\"\"\"[\\s\\S]*?\"\"\""), stringStyle, 1),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)'"), stringStyle, 1),
-        TokenRule(Regex("@\\w+"), annotationStyle, 2),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*[fFLl]?\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*\\("), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("\"\"\"[\\s\\S]*?\"\"\""), TokenKind.STRING, 1),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)'"), TokenKind.STRING, 1),
+        TokenRule(Regex("@\\w+"), TokenKind.ANNOTATION, 2),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*[fFLl]?\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*\\("), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
@@ -367,15 +416,15 @@ private fun javaRules(): List<TokenRule> {
         "try|catch|finally|new|instanceof|import|package|this|super|void|" +
         "boolean|byte|char|short|int|long|float|double|null|true|false"
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)'"), stringStyle, 1),
-        TokenRule(Regex("@\\w+"), annotationStyle, 2),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*[fFdDlL]?\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*\\("), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)'"), TokenKind.STRING, 1),
+        TokenRule(Regex("@\\w+"), TokenKind.ANNOTATION, 2),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*[fFdDlL]?\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*\\("), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
@@ -384,16 +433,16 @@ private fun pythonRules(): List<TokenRule> {
         "import|from|as|try|except|finally|raise|with|lambda|and|or|not|is|in|" +
         "True|False|None|del|global|nonlocal|assert|async|await"
     return listOf(
-        TokenRule(Regex("#.*"), commentStyle, 0),
-        TokenRule(Regex("\"\"\"[\\s\\S]*?\"\"\""), stringStyle, 1),
-        TokenRule(Regex("'''[\\s\\S]*?'''"), stringStyle, 1),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex("@\\w+"), annotationStyle, 2),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*[jJ]?\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*\\("), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("#.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("\"\"\"[\\s\\S]*?\"\"\""), TokenKind.STRING, 1),
+        TokenRule(Regex("'''[\\s\\S]*?'''"), TokenKind.STRING, 1),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("@\\w+"), TokenKind.ANNOTATION, 2),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*[jJ]?\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*\\("), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
@@ -403,15 +452,15 @@ private fun jsRules(): List<TokenRule> {
         "class|extends|super|import|export|from|as|default|async|await|yield|" +
         "this|null|undefined|true|false|void|static|get|set"
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("`[\\s\\S]*?`"), stringStyle, 1),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*\\("), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("`[\\s\\S]*?`"), TokenKind.STRING, 1),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*\\("), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
@@ -423,25 +472,26 @@ private fun tsRules(): List<TokenRule> {
         "type|interface|enum|implements|namespace|declare|abstract|readonly|keyof|" +
         "infer|never|unknown|any|string|number|boolean|symbol|bigint"
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("`[\\s\\S]*?`"), stringStyle, 1),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex("@\\w+"), annotationStyle, 2),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*\\("), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("`[\\s\\S]*?`"), TokenKind.STRING, 1),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("@\\w+"), TokenKind.ANNOTATION, 2),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*\\("), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
 private fun jsonRules(): List<TokenRule> {
     return listOf(
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\"\\s*:"), constantStyle, 1), // keys
-        TokenRule(Regex(":\\s*\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 2), // string values
-        TokenRule(Regex("\\b(true|false|null)\\b"), keywordStyle, 3),
-        TokenRule(Regex("-?\\b\\d+\\.?\\d*([eE][+-]?\\d+)?\\b"), numberStyle, 4),
+        TokenRule(Regex("$DOUBLE_QUOTED\\s*:"), TokenKind.CONSTANT, 1), // keys
+        // String values: only the string is the token, since the key's token already ends past the colon.
+        TokenRule(Regex(":\\s*($DOUBLE_QUOTED)"), TokenKind.STRING, 2, captureGroup = 1),
+        TokenRule(Regex("\\b(true|false|null)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("-?\\b\\d+\\.?\\d*([eE][+-]?\\d+)?\\b"), TokenKind.NUMBER, 4),
     )
 }
 
@@ -451,36 +501,37 @@ private fun bashRules(): List<TokenRule> {
         "readonly|shift|exit|echo|printf|read|cd|pwd|ls|cp|mv|rm|mkdir|chmod|" +
         "chown|grep|sed|awk|find|sort|cat|head|tail|wc|cut|tr|xargs"
     return listOf(
-        TokenRule(Regex("#.*"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'[^']*'"), stringStyle, 1),
-        TokenRule(Regex("\\$\\{?\\w+\\}?"), constantStyle, 2),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b\\d+\\b"), numberStyle, 5),
+        TokenRule(Regex("#.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("'[^']*'"), TokenKind.STRING, 1),
+        TokenRule(Regex("\\$\\{?\\w+\\}?"), TokenKind.CONSTANT, 2),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b\\d+\\b"), TokenKind.NUMBER, 5),
     )
 }
 
 private fun xmlRules(): List<TokenRule> {
     return listOf(
-        TokenRule(Regex("<!--[\\s\\S]*?-->"), commentStyle, 0),
-        TokenRule(Regex("\"[^\"]*\""), stringStyle, 1),
-        TokenRule(Regex("'[^']*'"), stringStyle, 1),
-        TokenRule(Regex("</?\\w[\\w.-]*"), keywordStyle, 2),
-        TokenRule(Regex("/?>"), keywordStyle, 2),
-        TokenRule(Regex("\\b\\w+(?==)"), typeStyle, 3),
+        TokenRule(Regex("<!--[\\s\\S]*?-->"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("\"[^\"]*\""), TokenKind.STRING, 1),
+        TokenRule(Regex("'[^']*'"), TokenKind.STRING, 1),
+        TokenRule(Regex("</?\\w[\\w.-]*"), TokenKind.KEYWORD, 2),
+        TokenRule(Regex("/?>"), TokenKind.KEYWORD, 2),
+        TokenRule(Regex("\\b\\w+(?==)"), TokenKind.TYPE, 3),
     )
 }
 
 private fun cssRules(): List<TokenRule> {
     return listOf(
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex("#[0-9a-fA-F]{3,8}\\b"), numberStyle, 2),
-        TokenRule(Regex("\\b\\d+\\.?\\d*(px|em|rem|vh|vw|%|s|ms)?\\b"), numberStyle, 2),
-        TokenRule(Regex("[.#][\\w-]+"), typeStyle, 3),
-        TokenRule(Regex("@\\w+"), annotationStyle, 3),
-        TokenRule(Regex("[\\w-]+(?=\\s*:)"), constantStyle, 4),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("#[0-9a-fA-F]{3,8}\\b"), TokenKind.NUMBER, 2),
+        TokenRule(Regex("\\b\\d+\\.?\\d*(px|em|rem|vh|vw|%|s|ms)?\\b"), TokenKind.NUMBER, 2),
+        TokenRule(Regex("[.#][\\w-]+"), TokenKind.TYPE, 3),
+        TokenRule(Regex("@\\w+"), TokenKind.ANNOTATION, 3),
+        // Start only at the head of a run: unanchored, every position in a long run rescans it.
+        TokenRule(Regex("(?<![\\w-])[\\w-]+(?=\\s*:)"), TokenKind.CONSTANT, 4),
     )
 }
 
@@ -491,11 +542,11 @@ private fun sqlRules(): List<TokenRule> {
         "DISTINCT|EXISTS|CASE|WHEN|THEN|ELSE|END|BEGIN|COMMIT|ROLLBACK|PRIMARY|" +
         "KEY|FOREIGN|REFERENCES|CONSTRAINT|DEFAULT|CHECK|UNIQUE|AUTO_INCREMENT"
     return listOf(
-        TokenRule(Regex("--.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex("\\b($keywords)\\b", RegexOption.IGNORE_CASE), keywordStyle, 3),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
+        TokenRule(Regex("--.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("\\b($keywords)\\b", RegexOption.IGNORE_CASE), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
     )
 }
 
@@ -504,15 +555,15 @@ private fun goRules(): List<TokenRule> {
         "go|goto|if|import|interface|map|package|range|return|select|struct|switch|" +
         "type|var|true|false|nil|iota"
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("`[\\s\\S]*?`"), stringStyle, 1),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*\\("), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("`[\\s\\S]*?`"), TokenKind.STRING, 1),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*\\("), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
@@ -521,15 +572,15 @@ private fun rustRules(): List<TokenRule> {
         "fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|" +
         "static|struct|super|trait|true|type|unsafe|use|where|while|yield"
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)'"), stringStyle, 1),
-        TokenRule(Regex("#\\[.*?]"), annotationStyle, 2),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*(_\\d+)*([fui]\\d+)?\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*[!(]"), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)'"), TokenKind.STRING, 1),
+        TokenRule(Regex("#\\[.*?]"), TokenKind.ANNOTATION, 2),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*(_\\d+)*([fui]\\d+)?\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*[!(]"), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
@@ -541,15 +592,15 @@ private fun cRules(): List<TokenRule> {
         "try|catch|throw|new|delete|nullptr|true|false|this|using|include|define|" +
         "ifdef|ifndef|endif|pragma"
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("#\\s*\\w+"), annotationStyle, 1),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 2),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 2),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*[fFlLuU]*\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*\\("), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("#\\s*\\w+"), TokenKind.ANNOTATION, 1),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 2),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 2),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*[fFlLuU]*\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*\\("), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
@@ -561,14 +612,14 @@ private fun swiftRules(): List<TokenRule> {
         "unowned|optional|required|convenience|final|where|typealias|associatedtype|" +
         "async|await|actor"
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("@\\w+"), annotationStyle, 2),
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
-        TokenRule(Regex("\\b(\\w+)\\s*\\("), functionStyle, 6, captureGroup = 1),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("@\\w+"), TokenKind.ANNOTATION, 2),
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
+        TokenRule(Regex("\\b(\\w+)\\s*\\("), TokenKind.FUNCTION, 6, captureGroup = 1),
     )
 }
 
@@ -578,37 +629,37 @@ private fun rubyRules(): List<TokenRule> {
         "require|include|extend|attr_accessor|attr_reader|attr_writer|" +
         "self|super|nil|true|false|and|or|not|in|then|puts|print"
     return listOf(
-        TokenRule(Regex("#.*"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex(":\\w+"), constantStyle, 2), // symbols
-        TokenRule(Regex("\\b($keywords)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), typeStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
+        TokenRule(Regex("#.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(":\\w+"), TokenKind.CONSTANT, 2), // symbols
+        TokenRule(Regex("\\b($keywords)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\b[A-Z][A-Za-z0-9_]*\\b"), TokenKind.TYPE, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
     )
 }
 
 private fun yamlRules(): List<TokenRule> {
     return listOf(
-        TokenRule(Regex("#.*"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex("\\b(true|false|yes|no|null|on|off)\\b", RegexOption.IGNORE_CASE), keywordStyle, 3),
-        TokenRule(Regex("^\\s*[\\w.-]+(?=\\s*:)", RegexOption.MULTILINE), constantStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
+        TokenRule(Regex("#.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("\\b(true|false|yes|no|null|on|off)\\b", RegexOption.IGNORE_CASE), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("^\\s*[\\w.-]+(?=\\s*:)", RegexOption.MULTILINE), TokenKind.CONSTANT, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
     )
 }
 
 private fun tomlRules(): List<TokenRule> {
     return listOf(
-        TokenRule(Regex("#.*"), commentStyle, 0),
-        TokenRule(Regex("\"\"\"[\\s\\S]*?\"\"\""), stringStyle, 1),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'[^']*'"), stringStyle, 1),
-        TokenRule(Regex("\\b(true|false)\\b"), keywordStyle, 3),
-        TokenRule(Regex("\\[+[\\w.-]+]+"), typeStyle, 4),
-        TokenRule(Regex("^\\s*[\\w.-]+(?=\\s*=)", RegexOption.MULTILINE), constantStyle, 4),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
+        TokenRule(Regex("#.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("\"\"\"[\\s\\S]*?\"\"\""), TokenKind.STRING, 1),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("'[^']*'"), TokenKind.STRING, 1),
+        TokenRule(Regex("\\b(true|false)\\b"), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\[+[\\w.-]+]+"), TokenKind.TYPE, 4),
+        TokenRule(Regex("^\\s*[\\w.-]+(?=\\s*=)", RegexOption.MULTILINE), TokenKind.CONSTANT, 4),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
     )
 }
 
@@ -616,22 +667,22 @@ private fun dockerRules(): List<TokenRule> {
     val keywords = "FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|" +
         "USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL|AS"
     return listOf(
-        TokenRule(Regex("#.*"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'[^']*'"), stringStyle, 1),
-        TokenRule(Regex("\\b($keywords)\\b", RegexOption.IGNORE_CASE), keywordStyle, 3),
-        TokenRule(Regex("\\$\\{?\\w+\\}?"), constantStyle, 4),
+        TokenRule(Regex("#.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("'[^']*'"), TokenKind.STRING, 1),
+        TokenRule(Regex("\\b($keywords)\\b", RegexOption.IGNORE_CASE), TokenKind.KEYWORD, 3),
+        TokenRule(Regex("\\$\\{?\\w+\\}?"), TokenKind.CONSTANT, 4),
     )
 }
 
 private fun genericRules(): List<TokenRule> {
     // Minimal highlighting for unknown languages: strings, comments, numbers
     return listOf(
-        TokenRule(Regex("//.*"), commentStyle, 0),
-        TokenRule(Regex("#.*"), commentStyle, 0),
-        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), commentStyle, 0),
-        TokenRule(Regex("\"(?:[^\"\\\\]|\\\\.)*\""), stringStyle, 1),
-        TokenRule(Regex("'(?:[^'\\\\]|\\\\.)*'"), stringStyle, 1),
-        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), numberStyle, 5),
+        TokenRule(Regex("//.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("#.*"), TokenKind.COMMENT, 0),
+        TokenRule(Regex("/\\*[\\s\\S]*?\\*/"), TokenKind.COMMENT, 0),
+        TokenRule(Regex(DOUBLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex(SINGLE_QUOTED), TokenKind.STRING, 1),
+        TokenRule(Regex("\\b\\d+\\.?\\d*\\b"), TokenKind.NUMBER, 5),
     )
 }

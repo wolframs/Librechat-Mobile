@@ -1,16 +1,22 @@
 package com.garfiec.librechat.core.data.repository
 
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.identity.AccountId
 import com.garfiec.librechat.core.common.identity.AccountState
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
+import com.garfiec.librechat.core.common.identity.currentAccountId
 import com.garfiec.librechat.core.common.result.Result
-import com.garfiec.librechat.core.common.result.onApiDispatcher
+import com.garfiec.librechat.core.common.result.apiCallCatching
 import com.garfiec.librechat.core.common.result.safeApiCall
+import com.garfiec.librechat.core.common.result.toSafeError
 import com.garfiec.librechat.core.data.datastore.RoleCacheDataStore
 import com.garfiec.librechat.core.model.permissions.UserRolePermissions
+import com.garfiec.librechat.core.model.request.UpdateRoleMemoriesRequest
 import com.garfiec.librechat.core.model.request.UpdateRoleSkillsRequest
 import com.garfiec.librechat.core.network.api.RolesApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +29,7 @@ class RoleRepositoryImpl(
     private val userRepository: UserRepository,
     private val cacheDataStore: RoleCacheDataStore,
     private val activeAccountProvider: ActiveAccountProvider,
-    applicationScope: CoroutineScope,
+    private val applicationScope: CoroutineScope,
 ) : RoleRepository {
 
     private val _userPermissions = MutableStateFlow<UserRolePermissions?>(null)
@@ -35,14 +41,28 @@ class RoleRepositoryImpl(
         // null and never re-prime. Re-primes per account; PermissionGate's permissive default covers the
         // gap until this lands or the live fetch repopulates.
         applicationScope.launch {
+            var primed = false
             activeAccountProvider.state
                 .mapNotNull { (it as? AccountState.Resolved)?.id }
                 .distinctUntilChanged()
-                .collect { cacheDataStore.load()?.let { role -> _userPermissions.value = role } }
+                .collect {
+                    val cached = cacheDataStore.load()
+                    // On a switch the incoming account's cache replaces the role even when it has
+                    // none: priming only a non-null value would leave the OUTGOING account's
+                    // permissions gating the new one until a fetch landed (and for good if it failed). Null is
+                    // the permissive default PermissionGate already handles for the gap. The first
+                    // resolution at cold start keeps the old rule and never clears.
+                    if (primed || cached != null) _userPermissions.value = cached
+                    primed = true
+                }
         }
     }
 
     override suspend fun fetchUserRole(): Result<UserRolePermissions> {
+        // The account this fetch is for. Captured before the first suspension: a switch while it is
+        // in flight must not let the outgoing account's role gate the incoming one — nor land in the
+        // incoming account's cache slot, since the cache resolves the account when it saves.
+        val origin = activeAccountProvider.currentAccountId()
         val userResult = userRepository.getUser()
         val user = when (userResult) {
             is Result.Success -> userResult.data
@@ -50,21 +70,23 @@ class RoleRepositoryImpl(
             is Result.Loading -> return Result.Error(message = "User load still in progress")
         }
 
-        return try {
-            // Not safeApiCall: the catch below falls back to the cached role rather than mapping
-            // the failure. The hop is still needed (#326).
-            val role = onApiDispatcher { rolesApi.getRole(user.role) }
+        // Not safeApiCall: a failure falls back to the cached role rather than mapping to an error.
+        return apiCallCatching({
+            val role = rolesApi.getRole(user.role)
+            if (activeAccountProvider.currentAccountId() != origin) {
+                Logger.w { "fetchUserRole: account changed while in flight, dropping the result" }
+                return@apiCallCatching Result.Error(message = "Account changed while the role was loading")
+            }
             _userPermissions.value = role
             cacheDataStore.save(role)
             Result.Success(role)
-        } catch (e: Exception) {
+        }) { e ->
             val cached = _userPermissions.value
             if (cached != null) {
                 Logger.w(e) { "fetchUserRole failed, keeping cached role '${cached.name}'" }
                 Result.Success(cached)
             } else {
-                Logger.w(e) { "fetchUserRole failed with no cached value" }
-                Result.Error(e, e.message ?: "Failed to load role permissions")
+                e.toSafeError()
             }
         }
     }
@@ -77,9 +99,51 @@ class RoleRepositoryImpl(
     override suspend fun getRole(roleName: String): Result<UserRolePermissions> =
         safeApiCall { rolesApi.getRole(roleName) }
 
+    override suspend fun listRoleNames(): Result<List<String>> =
+        safeApiCall { rolesApi.listRoles().roles.map { it.name }.filter { it.isNotBlank() } }
+
     override suspend fun updateRoleSkills(
         roleName: String,
         request: UpdateRoleSkillsRequest,
+    ): Result<UserRolePermissions> {
+        val origin = activeAccountProvider.currentAccountId()
+        return putRole(origin) { rolesApi.updateRoleSkills(roleName, request) }
+    }
+
+    override suspend fun updateRoleMemories(
+        roleName: String,
+        request: UpdateRoleMemoriesRequest,
+    ): Result<UserRolePermissions> {
+        val origin = activeAccountProvider.currentAccountId()
+        return putRole(origin) { rolesApi.updateRoleMemories(roleName, request) }
+    }
+
+    /**
+     * Runs a role PUT in the application scope, so a caller cancelled mid-request (the admin leaves
+     * the editor by swipe-back, a deep link or a destroyed activity) still publishes what the server
+     * stored: the PUT was already sent. Started undispatched so the request goes out before this
+     * returns control, as [MemoryRepositoryImpl.updatePreferences] does.
+     */
+    private suspend fun putRole(
+        origin: AccountId?,
+        call: suspend () -> UserRolePermissions,
     ): Result<UserRolePermissions> =
-        safeApiCall { rolesApi.updateRoleSkills(roleName, request) }
+        applicationScope.async(start = CoroutineStart.UNDISPATCHED) {
+            safeApiCall { call() }.also { if (it is Result.Success) publishIfOwnRole(it.data, origin) }
+        }.await()
+
+    /**
+     * An admin who edited their OWN role: the PUT answers with the updated role (the same document
+     * `GET /api/roles/:name` returns), so it replaces the cached permissions here rather than in the
+     * editor, whose scope ends the moment the admin leaves.
+     */
+    private fun publishIfOwnRole(role: UserRolePermissions, origin: AccountId?) {
+        if (role.name != _userPermissions.value?.name) return
+        // An account switch while the PUT ran: the role belongs to the outgoing account.
+        if (activeAccountProvider.currentAccountId() != origin) return
+        _userPermissions.value = role
+        applicationScope.launch {
+            if (activeAccountProvider.currentAccountId() == origin) cacheDataStore.save(role)
+        }
+    }
 }

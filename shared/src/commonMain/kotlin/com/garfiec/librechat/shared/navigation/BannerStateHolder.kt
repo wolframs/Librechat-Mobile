@@ -3,7 +3,7 @@ package com.garfiec.librechat.shared.navigation
 import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.common.identity.deriveServerId
 import com.garfiec.librechat.core.common.result.Result
-import com.garfiec.librechat.core.data.datastore.SettingsDataStore
+import com.garfiec.librechat.core.common.result.suspendRunCatching
 import com.garfiec.librechat.core.data.repository.BannerRepository
 import com.garfiec.librechat.core.model.Banner
 import com.garfiec.librechat.core.network.client.ServerUrlProvider
@@ -11,7 +11,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -27,7 +26,6 @@ class BannerStateHolder(
     private val bannerRepository: BannerRepository,
     private val serverUrlProvider: ServerUrlProvider,
     private val scope: CoroutineScope,
-    private val settingsDataStore: SettingsDataStore? = null,
 ) {
 
     // serverId the held banner came from, so a failed re-fetch can tell a banner carried over from
@@ -49,14 +47,9 @@ class BannerStateHolder(
             // awaitBaseUrl, not getBaseUrl: the init fetch runs inside the ViewModel constructor on
             // Main.immediate, before the persisted URL has resolved off "", and deriveServerId("")
             // throws — which would stamp a null id and silently disable the carry-over guard below.
-            val serverId = runCatching { deriveServerId(serverUrlProvider.awaitBaseUrl()).value }
+            val serverId = suspendRunCatching { deriveServerId(serverUrlProvider.awaitBaseUrl()).value }
                 .getOrNull()
-            val persisted = serverId?.let { settingsDataStore?.dismissedBannerIds(it)?.first() }.orEmpty()
-            persisted.forEach { dismissedKeys += dismissKey(serverId, it) }
-            val result = bannerRepository.getBanner()
-            val currentServerId = runCatching { deriveServerId(serverUrlProvider.getBaseUrl()).value }.getOrNull()
-            if (currentServerId != serverId) return@launch
-            when (result) {
+            when (val result = bannerRepository.getBanner()) {
                 is Result.Success -> {
                     bannerServerId = serverId
                     _banner.value = result.data?.takeUnless { it.isDismissed() }
@@ -78,10 +71,7 @@ class BannerStateHolder(
      * place; [BannerDisplay] animates it out because it stays composed across the change.
      */
     fun dismissBanner(bannerId: String) {
-        if (_banner.value?.persistable == true) return
-        val serverId = bannerServerId
-        dismissedKeys += dismissKey(serverId, bannerId)
-        if (serverId != null) scope.launch { settingsDataStore?.dismissBanner(serverId, bannerId) }
+        dismissedKeys += dismissKey(bannerServerId, bannerId)
         _banner.value = null
     }
 

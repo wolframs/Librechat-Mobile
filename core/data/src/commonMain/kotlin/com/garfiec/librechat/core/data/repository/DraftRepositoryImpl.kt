@@ -25,7 +25,7 @@ class DraftRepositoryImpl(
 ) : DraftRepository {
 
     private val mutex = Mutex()
-    private val cache = mutableMapOf<String, DraftSnapshot>()
+    private val cache = mutableMapOf<String, String>()
     private val debounceJobs = mutableMapOf<String, Job>()
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
@@ -51,10 +51,6 @@ class DraftRepositoryImpl(
     }
 
     override suspend fun getDraft(conversationId: String): String? {
-        return getDraftState(conversationId)?.text
-    }
-
-    override suspend fun getDraftState(conversationId: String): DraftSnapshot? {
         // Resolve identity first, then read the cache under that account's key. drafts share
         // NEW_CHAT_DRAFT_KEY across accounts, so the compose box is the live cross-account vector;
         // binding the cache key to the account closes the leak at the source rather than racing the
@@ -62,32 +58,23 @@ class DraftRepositoryImpl(
         val account = activeAccountProvider.currentAccountId() ?: return null
         val key = cacheKey(account.value, conversationId)
         mutex.withLock { cache[key] }?.let { return it }
-        val entity = draftDao.getDraftForAccount(conversationId, account.value)
-        val snapshot = entity?.let { DraftSnapshot(text = it.text, stateJson = it.stateJson) }
-        if (snapshot != null) {
-            mutex.withLock { cache[key] = snapshot }
+        val text = draftDao.getDraftForAccount(conversationId, account.value)?.text
+        if (text != null) {
+            mutex.withLock { cache[key] = text }
         }
-        return snapshot
+        return text
     }
 
     override suspend fun awaitDraft(conversationId: String): String? {
-        return awaitDraftState(conversationId)?.text
-    }
-
-    override suspend fun awaitDraftState(conversationId: String): DraftSnapshot? {
         // Wait out the cold-start / post-migration warming window before reading, so screen-entry
         // draft restore doesn't race identity resolution. Once resolved, getDraft sees a non-null
         // active account and reads under it.
         activeAccountProvider.awaitResolvedAccount()
-        return getDraftState(conversationId)
+        return getDraft(conversationId)
     }
 
     override suspend fun saveDraft(conversationId: String, text: String) {
-        saveDraftState(conversationId, text, stateJson = null)
-    }
-
-    override suspend fun saveDraftState(conversationId: String, text: String, stateJson: String?) {
-        if (text.isBlank() && stateJson == null) {
+        if (text.isBlank()) {
             deleteDraft(conversationId)
             return
         }
@@ -99,7 +86,7 @@ class DraftRepositoryImpl(
         val key = cacheKey(accountId, conversationId)
         // Update cache immediately for fast reads
         mutex.withLock {
-            cache[key] = DraftSnapshot(text = text, stateJson = stateJson)
+            cache[key] = text
             // Schedule debounced write to Room
             debounceJobs[key]?.cancel()
             debounceJobs[key] = scope.launch {
@@ -112,7 +99,6 @@ class DraftRepositoryImpl(
                         DraftEntity(
                             conversationId = conversationId,
                             text = text,
-                            stateJson = stateJson,
                             accountId = accountId,
                         ),
                     )

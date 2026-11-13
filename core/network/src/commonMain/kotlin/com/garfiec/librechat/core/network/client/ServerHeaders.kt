@@ -207,7 +207,7 @@ internal fun HeadersBuilder.applyCustomHeaders(custom: Map<String, String>) {
             val existing = getAll(HttpHeaders.Cookie).orEmpty().flatMap(::cookieSegments)
             // Case-SENSITIVE: RFC 6265 cookie names are case-sensitive, so `refreshToken` and
             // `refreshtoken` are genuinely different cookies and folding them would over-drop.
-            val ownNames = existing.map { it.cookieName() }.toSet()
+            val ownNames = existing.map { it.cookieName() }.toSet() + CookieHelper.openIdCookieNames
             val merged = (cookieSegments(value).filterNot { it.cookieName() in ownNames } + existing)
                 .distinct()
             remove(HttpHeaders.Cookie)
@@ -243,11 +243,11 @@ internal fun HeadersBuilder.stripCustomHeaders(custom: Map<String, String>) {
     }
 }
 
-private fun cookieSegments(value: String): List<String> =
+internal fun cookieSegments(value: String): List<String> =
     value.split(';').map { it.trim() }.filter { it.isNotEmpty() }
 
 /** The name half of a `name=value` cookie segment; the whole segment when there is no `=`. */
-private fun String.cookieName(): String = substringBefore('=').trim()
+internal fun String.cookieName(): String = substringBefore('=').trim()
 
 /**
  * [custom] rendered as raw HTTP/1.1 header lines (each CRLF-terminated), for the iOS SSE transport,

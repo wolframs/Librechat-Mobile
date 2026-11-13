@@ -1,8 +1,10 @@
 package com.garfiec.librechat.feature.chat.util
 
+import com.garfiec.librechat.core.model.Attachment
 import com.garfiec.librechat.core.model.ContentType
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.content.MessageContentPart
+import com.garfiec.librechat.core.ui.media.MediaItem
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -28,6 +30,12 @@ class ConversationMediaExtractorTest {
         val groups = extractConversationArtifacts(listOf(message(text = artifact("a"))))
         assertEquals(1, groups.size)
         assertEquals("a", groups[0][0].identifier)
+    }
+
+    @Test
+    fun `skips artifacts in a user's own message text`() {
+        val user = Message(messageId = "m1", conversationId = "c1", text = artifact("a"), isCreatedByUser = true)
+        assertEquals(emptyList<Any>(), extractConversationArtifacts(listOf(user)))
     }
 
     @Test
@@ -89,5 +97,39 @@ class ConversationMediaExtractorTest {
         val links = extractConversationLinks(listOf(message))
         assertEquals(listOf("https://example.com/a", "https://other.test/b"), links.map { it.url })
         assertEquals("example.com", links[0].host)
+    }
+
+    @Test
+    fun `the files tab drops what the chat never shows as a file`() {
+        val attachments = listOf(
+            Attachment(fileId = "w", type = "web_search"),
+            Attachment(fileId = "p", filename = "_.gitkeep-a1b2c3"),
+            Attachment(fileId = "o", filename = "deck.pptx", type = "application/vnd.librechat.docx-preview"),
+            Attachment(fileId = "csv", filename = "_.config-abcdef.csv", type = "text/csv", bytes = 42),
+            Attachment(filename = "big.csv", filepath = "/api/files/code/download/s/f", bytes = 7),
+        )
+        val files = extractConversationFiles(listOf(message().copy(attachments = attachments)))
+
+        // A generated office document is a real file under its preview-bucket type: it stays listed.
+        assertEquals(listOf("o", "csv", "/api/files/code/download/s/f"), files.map { it.key })
+        assertEquals(".config.csv", files[1].filename)
+        assertEquals(42L, files[1].bytes)
+        assertEquals(attachments[4], files[2].attachment)
+    }
+
+    @Test
+    fun `a generated image is tagged with its attachment and a link is not`() {
+        val chart = Attachment(fileId = "f1", filename = "chart.png", filepath = "/images/u/chart.png")
+        val items = listOf(
+            MediaItem(url = "https://chat.example.com/images/u/chart.png", contentDescription = ""),
+            MediaItem(url = "https://elsewhere.example/cat.png", contentDescription = ""),
+        )
+
+        val attachments = listOf(Attachment(type = "web_search"), chart)
+
+        val tagged = withAttachmentSources(items, attachments, "https://chat.example.com")
+
+        assertEquals(chart, tagged[0].attachment)
+        assertEquals(null, tagged[1].attachment)
     }
 }

@@ -59,8 +59,8 @@ import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
  * (no constant SQL to read the table name from) can't be inferred and must be added to [TENANT_DAOS]
  * explicitly; until then its opaque statements are not flagged.
  *
- * The rule runs without a binding context, so it works on the `detektMetadataCommonMain` source set
- * (where commonMain DAOs live).
+ * The rule runs without a binding context, so it works under the plain (non-type-resolved) `detekt`
+ * gate, which is where commonMain DAOs are analysed.
  */
 class AccountScopedDaoRule(config: Config) : Rule(config) {
 
@@ -249,11 +249,19 @@ class AccountScopedDaoRule(config: Config) : Rule(config) {
     }
 
     private companion object {
-        val TENANT_TABLES = listOf("conversations", "messages", "drafts", "conversation_tags")
+        val TENANT_TABLES = listOf(
+            "conversations",
+            "messages",
+            "drafts",
+            "conversation_tags",
+            // Listed by name: `\bmessages\b` matches neither, since `_` is a word character.
+            "message_search",
+            "messages_fts",
+        )
         // Case-insensitive: SQLite identifiers are case-insensitive, so `FROM Messages` / `FROM
         // CONVERSATIONS` hit the real tenant table and must not slip past the matcher as "no table".
         val TENANT_TABLE_REGEXES: List<Pair<String, Regex>> = TENANT_TABLES.map { it to Regex("(?i)\\b$it\\b") }
-        val TENANT_DAOS = setOf("ConversationDao", "MessageDao", "DraftDao", "ConversationTagDao")
+        val TENANT_DAOS = setOf("ConversationDao", "MessageDao", "DraftDao", "ConversationTagDao", "MessageSearchDao")
         const val CROSS_ACCOUNT = "CrossAccount"
         const val RAW_QUERY = "RawQuery"
         const val DELETE = "Delete"

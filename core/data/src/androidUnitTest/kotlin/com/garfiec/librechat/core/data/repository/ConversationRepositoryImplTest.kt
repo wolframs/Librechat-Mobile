@@ -7,7 +7,9 @@ import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.AccountRoster
 import com.garfiec.librechat.core.data.db.dao.ConversationDao
 import com.garfiec.librechat.core.data.db.dao.MessageDao
+import com.garfiec.librechat.core.data.db.dao.PrefetchWatermarkDao
 import com.garfiec.librechat.core.data.db.entity.ConversationEntity
+import com.garfiec.librechat.core.data.search.SearchIndexMaintenance
 import com.garfiec.librechat.core.model.Conversation
 import com.garfiec.librechat.core.model.SAVED_TAG
 import com.garfiec.librechat.core.model.response.ConversationListResponse
@@ -20,6 +22,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -32,23 +35,32 @@ class ConversationRepositoryImplTest {
     private val conversationsApi = mockk<ConversationsApi>(relaxed = true)
     private val conversationDao = mockk<ConversationDao>(relaxed = true)
     private val messageDao = mockk<MessageDao>(relaxed = true)
+    private val prefetchWatermarkDao = mockk<PrefetchWatermarkDao>(relaxed = true)
     private val roster = mockk<AccountRoster>(relaxed = true)
     private val json = Json { ignoreUnknownKeys = true }
     private val account = AccountId("srv:user-1")
     private val activeAccountProvider = InMemoryActiveAccountProvider(AccountState.Resolved(account))
+    private val shareChanges = ShareChangeSignal()
+    private val tagRepository = mockk<TagRepository>(relaxed = true)
+    private val tagChanges = TagChangeSignal()
 
     private lateinit var repository: ConversationRepositoryImpl
 
     @Before
     fun setup() {
+        coEvery { tagRepository.refreshTags() } returns Result.Success(Unit)
         repository = ConversationRepositoryImpl(
             conversationsApi = conversationsApi,
             conversationDao = conversationDao,
             messageDao = messageDao,
+            prefetchWatermarkDao = prefetchWatermarkDao,
             activeAccountProvider = activeAccountProvider,
             roster = roster,
             json = json,
             dispatcher = UnconfinedTestDispatcher(),
+            shareChanges = shareChanges,
+            tagRepository = tagRepository,
+            tagChanges = tagChanges,
         )
     }
 
@@ -88,6 +100,76 @@ class ConversationRepositoryImplTest {
     }
 
     @Test
+    fun `getConversationsForTag asks for that tag and returns the page as the server sent it`() = runTest {
+        val serverConvo = Conversation(conversationId = "convo-1", title = "Server Title")
+        coEvery {
+            conversationsApi.getConversations(cursor = "c1", limit = 40, tags = listOf("Work / Q3"))
+        } returns ConversationListResponse(conversations = listOf(serverConvo), nextCursor = "c2")
+        val captured = slot<List<ConversationEntity>>()
+        coEvery { conversationDao.upsertPreservingTags(account.value, capture(captured)) } answers {}
+
+        val result = repository.getConversationsForTag("Work / Q3", cursor = "c1", limit = 40)
+
+        assertThat(result).isInstanceOf(Result.Success::class.java)
+        val page = (result as Result.Success).data
+        assertThat(page.conversations.map { it.conversationId }).containsExactly("convo-1")
+        assertThat(page.nextCursor).isEqualTo("c2")
+        // The list omits tags, so the cache write must be the one that keeps them.
+        assertThat(captured.captured.single().conversationId).isEqualTo("convo-1")
+        coVerify(exactly = 0) { conversationDao.upsert(any()) }
+    }
+
+    @Test
+    fun `refreshConversation lets the server's tags replace the cached ones`() = runTest {
+        // The single-conversation GET is the full document: a tag set on the web must land, and one
+        // removed there must go, so the write must not be the tag-preserving upsert.
+        coEvery { conversationsApi.getConversation("convo-1") } returns
+            Conversation(conversationId = "convo-1", tags = listOf("web-only", SAVED_TAG, ""))
+        val captured = slot<ConversationEntity>()
+        coEvery { conversationDao.upsert(capture(captured)) } just Runs
+
+        val result = repository.refreshConversation("convo-1", originAccount = null)
+
+        assertThat(result).isInstanceOf(Result.Success::class.java)
+        assertThat(captured.captured.tags).isEqualTo("""["web-only","Saved"]""")
+        assertThat(captured.captured.accountId).isEqualTo(account.value)
+        coVerify(exactly = 0) { conversationDao.upsertPreservingTags(any(), any<ConversationEntity>()) }
+        coVerify(exactly = 0) { conversationDao.upsertPreservingTags(any(), any<List<ConversationEntity>>()) }
+    }
+
+    @Test
+    fun `a delete the server took refreshes tag counts and bumps the tag revision`() = runTest {
+        coEvery { conversationsApi.deleteConversation("convo-1") } just Runs
+        coEvery { conversationsApi.deleteAllConversations() } just Runs
+
+        repository.delete("convo-1")
+        coVerify(exactly = 1) { tagRepository.refreshTags() }
+        assertThat(tagChanges.revision.value).isEqualTo(1L)
+
+        repository.deleteAll()
+        coVerify(exactly = 2) { tagRepository.refreshTags() }
+        assertThat(tagChanges.revision.value).isEqualTo(2L)
+    }
+
+    @Test
+    fun `a failed tag refresh after a delete doesn't fail the delete`() = runTest {
+        coEvery { conversationsApi.deleteConversation("convo-1") } just Runs
+        coEvery { tagRepository.refreshTags() } returns Result.Error(message = "Access denied")
+
+        assertThat(repository.delete("convo-1")).isInstanceOf(Result.Success::class.java)
+    }
+
+    @Test
+    fun `a delete the server refused leaves tag counts alone`() = runTest {
+        coEvery { conversationsApi.deleteConversation("convo-1") } throws RuntimeException("offline")
+
+        repository.delete("convo-1")
+
+        coVerify(exactly = 0) { tagRepository.refreshTags() }
+        assertThat(tagChanges.revision.value).isEqualTo(0L)
+    }
+
+    @Test
     fun `delete cascades to the conversation's cached messages`() = runTest {
         coEvery { conversationsApi.deleteConversation("convo-1") } just Runs
 
@@ -122,6 +204,80 @@ class ConversationRepositoryImplTest {
         // Unresolved account: the by-PK local deletes can't be safely scoped, so neither runs.
         coVerify(exactly = 0) { conversationDao.deleteById(any(), any()) }
         coVerify(exactly = 0) { messageDao.deleteAllForConversation(any(), any()) }
+    }
+
+    @Test
+    fun `a delete the server took bumps the share revision, since its shared links went with it`() = runTest {
+        coEvery { conversationsApi.deleteConversation("convo-1") } just Runs
+        coEvery { conversationsApi.deleteAllConversations() } just Runs
+
+        repository.delete("convo-1")
+        assertThat(shareChanges.revision.value).isEqualTo(1L)
+
+        repository.deleteAll()
+        assertThat(shareChanges.revision.value).isEqualTo(2L)
+    }
+
+    @Test
+    fun `a delete the server refused leaves the share revision alone`() = runTest {
+        coEvery { conversationsApi.deleteConversation("convo-1") } throws RuntimeException("offline")
+        coEvery { conversationsApi.deleteAllConversations() } throws RuntimeException("offline")
+
+        assertThat(repository.delete("convo-1")).isInstanceOf(Result.Error::class.java)
+        assertThat(repository.deleteAll()).isInstanceOf(Result.Error::class.java)
+
+        assertThat(shareChanges.revision.value).isEqualTo(0L)
+    }
+
+    @Test
+    fun `deleteAll also clears the account's cached messages and prefetch watermarks`() = runTest {
+        coEvery { conversationsApi.deleteAllConversations() } just Runs
+
+        val result = repository.deleteAll()
+
+        assertThat(result).isInstanceOf(Result.Success::class.java)
+        coVerify(exactly = 1) { messageDao.deleteAllForAccount(account.value) }
+        coVerify(exactly = 1) { prefetchWatermarkDao.deleteAllForAccount(account.value) }
+        coVerify(exactly = 1) { conversationDao.deleteAllForAccount(account.value) }
+    }
+
+    @Test
+    fun `deleteAll purges messages through the search index when it has one`() = runTest {
+        val maintenance = mockk<SearchIndexMaintenance>()
+        coEvery { maintenance.purgeAccountMessages(account.value) } returns SearchIndexMaintenance.PurgePath.Rebuild
+        coEvery { conversationsApi.deleteAllConversations() } just Runs
+        val indexed = ConversationRepositoryImpl(
+            conversationsApi = conversationsApi,
+            conversationDao = conversationDao,
+            messageDao = messageDao,
+            prefetchWatermarkDao = prefetchWatermarkDao,
+            activeAccountProvider = activeAccountProvider,
+            roster = roster,
+            json = json,
+            dispatcher = UnconfinedTestDispatcher(),
+            searchIndexMaintenance = maintenance,
+            shareChanges = shareChanges,
+            tagRepository = tagRepository,
+            tagChanges = tagChanges,
+        )
+
+        indexed.deleteAll()
+
+        coVerify(exactly = 1) { maintenance.purgeAccountMessages(account.value) }
+        coVerify(exactly = 0) { messageDao.deleteAllForAccount(any()) }
+        coVerify(exactly = 1) { conversationDao.deleteAllForAccount(account.value) }
+    }
+
+    @Test
+    fun `deleteAll keeps local rows when no account is resolved`() = runTest {
+        activeAccountProvider.clear()
+        coEvery { conversationsApi.deleteAllConversations() } just Runs
+
+        repository.deleteAll()
+
+        coVerify(exactly = 0) { messageDao.deleteAllForAccount(any()) }
+        coVerify(exactly = 0) { prefetchWatermarkDao.deleteAllForAccount(any()) }
+        coVerify(exactly = 0) { conversationDao.deleteAllForAccount(any()) }
     }
 
     @Test
@@ -177,13 +333,10 @@ class ConversationRepositoryImplTest {
     fun `syncFavoritesFromServer adds SAVED_TAG to existing rows server reports as favorited`() = runTest {
         val serverConvo = Conversation(conversationId = "convo-1", title = "Cross-client fav")
         coEvery {
-            conversationsApi.getConversations(any(), any(), false, any(), any(), any(), any())
+            conversationsApi.getConversations(any(), any(), any(), any(), any(), any(), any())
         } returns ConversationListResponse(conversations = listOf(serverConvo), nextCursor = null)
-        coEvery {
-            conversationsApi.getConversations(any(), any(), true, any(), any(), any(), any())
-        } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         coEvery { conversationDao.getByIdForAccount("convo-1", account.value) } returns entity("convo-1", """["work"]""")
-        coEvery { conversationDao.getConversationsWithTagForAccount(account.value, any()) } returns emptyList()
+        coEvery { conversationDao.observeConversationsForAccount(account.value, false) } returns flowOf(emptyList())
         coEvery { conversationDao.updateTags(any(), any(), any(), any()) } just Runs
 
         repository.syncFavoritesFromServer()
@@ -202,9 +355,7 @@ class ConversationRepositoryImplTest {
             conversationsApi.getConversations(any(), any(), any(), any(), any(), any(), any())
         } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         val staleFav = entity("convo-stale", """["work","Saved"]""")
-        coEvery {
-            conversationDao.getConversationsWithTagForAccount(account.value, any())
-        } returns listOf(staleFav)
+        coEvery { conversationDao.observeConversationsForAccount(account.value, false) } returns flowOf(listOf(staleFav))
         coEvery { conversationDao.updateTags(any(), any(), any(), any()) } just Runs
 
         repository.syncFavoritesFromServer()
@@ -221,13 +372,10 @@ class ConversationRepositoryImplTest {
     fun `syncFavoritesFromServer upserts missing conversations with SAVED_TAG preset`() = runTest {
         val serverConvo = Conversation(conversationId = "convo-new", title = "From web")
         coEvery {
-            conversationsApi.getConversations(any(), any(), false, any(), any(), any(), any())
+            conversationsApi.getConversations(any(), any(), any(), any(), any(), any(), any())
         } returns ConversationListResponse(conversations = listOf(serverConvo), nextCursor = null)
-        coEvery {
-            conversationsApi.getConversations(any(), any(), true, any(), any(), any(), any())
-        } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         coEvery { conversationDao.getByIdForAccount("convo-new", account.value) } returns null
-        coEvery { conversationDao.getConversationsWithTagForAccount(account.value, any()) } returns emptyList()
+        coEvery { conversationDao.observeConversationsForAccount(account.value, false) } returns flowOf(emptyList())
 
         val upsertCaptor = slot<ConversationEntity>()
         coEvery { conversationDao.upsert(capture(upsertCaptor)) } answers {}
@@ -250,25 +398,22 @@ class ConversationRepositoryImplTest {
             nextCursor = null,
         )
         coEvery {
-            conversationsApi.getConversations(null, any(), false, any(), any(), any(), any())
+            conversationsApi.getConversations(null, any(), any(), any(), any(), any(), any())
         } returns page1
         coEvery {
-            conversationsApi.getConversations("cursor-2", any(), false, any(), any(), any(), any())
+            conversationsApi.getConversations("cursor-2", any(), any(), any(), any(), any(), any())
         } returns page2
-        coEvery {
-            conversationsApi.getConversations(any(), any(), true, any(), any(), any(), any())
-        } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         coEvery { conversationDao.getByIdForAccount(any(), any()) } returns null
-        coEvery { conversationDao.getConversationsWithTagForAccount(account.value, any()) } returns emptyList()
+        coEvery { conversationDao.observeConversationsForAccount(account.value, false) } returns flowOf(emptyList())
         coEvery { conversationDao.upsert(any()) } answers {}
 
         repository.syncFavoritesFromServer()
 
         coVerify(exactly = 1) {
-            conversationsApi.getConversations(null, any(), false, any(), any(), any(), any())
+            conversationsApi.getConversations(null, any(), any(), any(), any(), any(), any())
         }
         coVerify(exactly = 1) {
-            conversationsApi.getConversations("cursor-2", any(), false, any(), any(), any(), any())
+            conversationsApi.getConversations("cursor-2", any(), any(), any(), any(), any(), any())
         }
         coVerify(exactly = 2) { conversationDao.upsert(any()) }
     }
@@ -277,19 +422,38 @@ class ConversationRepositoryImplTest {
     fun `syncFavoritesFromServer no-op when local and server match`() = runTest {
         val serverConvo = Conversation(conversationId = "convo-1")
         coEvery {
-            conversationsApi.getConversations(any(), any(), false, any(), any(), any(), any())
+            conversationsApi.getConversations(any(), any(), any(), any(), any(), any(), any())
         } returns ConversationListResponse(conversations = listOf(serverConvo), nextCursor = null)
-        coEvery {
-            conversationsApi.getConversations(any(), any(), true, any(), any(), any(), any())
-        } returns ConversationListResponse(conversations = emptyList(), nextCursor = null)
         coEvery { conversationDao.getByIdForAccount("convo-1", account.value) } returns entity("convo-1", """["Saved"]""")
         coEvery {
-            conversationDao.getConversationsWithTagForAccount(account.value, any())
-        } returns listOf(entity("convo-1", """["Saved"]"""))
+            conversationDao.observeConversationsForAccount(account.value, false)
+        } returns flowOf(listOf(entity("convo-1", """["Saved"]""")))
 
         repository.syncFavoritesFromServer()
 
         coVerify(exactly = 0) { conversationDao.updateTags(any(), any(), any(), any()) }
         coVerify(exactly = 0) { conversationDao.upsert(any()) }
+    }
+
+    @Test
+    fun `an import holding tool-call previews is refused before it is sent`() = runTest {
+        val file = """{"conversation":{"conversationId":"c"},"messages":[{"messageId":"m","content":[
+            {"type":"tool_call","tool_call":{"id":"t","output":"head","outputTruncated":true,"outputLength":900}}]}]}"""
+
+        val result = repository.importConversation(file)
+
+        assertThat((result as Result.Error).exception).isInstanceOf(ToolCallPreviewImportException::class.java)
+        coVerify(exactly = 0) { conversationsApi.importConversations(any(), any(), any()) }
+    }
+
+    @Test
+    fun `an import without previews goes to the server`() = runTest {
+        coEvery { conversationsApi.importConversations(any(), any(), any()) } returns Conversation(conversationId = "c")
+        val file = """{"conversation":{"conversationId":"c"},"messages":[{"messageId":"m","content":[
+            {"type":"tool_call","tool_call":{"id":"t","output":"whole"}}]}]}"""
+
+        repository.importConversation(file)
+
+        coVerify(exactly = 1) { conversationsApi.importConversations(any(), any(), any()) }
     }
 }

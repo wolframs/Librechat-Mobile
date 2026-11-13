@@ -1,0 +1,950 @@
+package com.garfiec.librechat.feature.chat.components
+
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.model.PendingAction
+import com.garfiec.librechat.core.model.ToolApprovalDecisions
+import com.garfiec.librechat.core.model.ToolApprovalRememberScopes
+import com.garfiec.librechat.core.model.ToolApprovalRememberUnavailable
+import com.garfiec.librechat.core.model.ToolApprovalRequest
+import com.garfiec.librechat.core.model.ToolReviewConfig
+import com.garfiec.librechat.core.model.approval.ApprovalPreview
+import com.garfiec.librechat.core.model.approval.buildApprovalPreviews
+import com.garfiec.librechat.core.model.request.ToolApprovalResolution
+import com.garfiec.librechat.core.ui.components.AdaptiveButton
+import com.garfiec.librechat.core.ui.components.AdaptiveCard
+import com.garfiec.librechat.core.ui.components.AdaptiveCircularProgressIndicator
+import com.garfiec.librechat.core.ui.components.AdaptiveFilledTonalButton
+import com.garfiec.librechat.core.ui.components.AdaptiveFilterChip
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedButton
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
+import com.garfiec.librechat.core.ui.components.VerbatimKeyboardOptions
+import com.garfiec.librechat.core.ui.components.rememberDraftField
+import com.garfiec.librechat.feature.chat.resources.*
+import com.garfiec.librechat.feature.chat.resources.Res
+import com.garfiec.librechat.feature.chat.util.DEFAULT_ALLOWED_TOOL_DECISIONS
+import com.garfiec.librechat.feature.chat.util.ToolDecisionDraft
+import com.garfiec.librechat.feature.chat.util.allowedDecisionsByCallId
+import com.garfiec.librechat.feature.chat.util.nextUndecidedCallIndex
+import com.garfiec.librechat.feature.chat.util.parseToolArgumentsOrNull
+import com.garfiec.librechat.feature.chat.util.reviewConfigsByCallId
+import com.garfiec.librechat.feature.chat.util.toResolution
+import com.garfiec.librechat.feature.chat.util.toolBatchResolutions
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.stringResource
+
+/**
+ * A run paused on a tool batch awaiting approval (v0.8.8 HITL), docked above the composer until
+ * it resolves, one tool call at a time.
+ *
+ * Above the composer rather than in its place, unlike [AskUserQuestionPanel]: an approval is a
+ * decision, not an answer, so the composer has nothing to compete with — and it keeps its Stop,
+ * queue and drafts for the user who would rather redirect the run than approve it.
+ *
+ * Two layouts, split at the same width as the ask panel:
+ * - **Compact** (phones, a folded foldable): the call's tool name heads the card with a
+ *   `‹ ● ━ ○ ›` page-dot pager; an Approve on a call not yet decided moves straight on, and the
+ *   decision that completes the batch submits it. Reject opens its optional reason field and
+ *   waits for Next / Continue, as Edit and Respond do.
+ * - **Wide** (tablets, unfolded): one tab per call with explicit Back / Next / Continue, and the
+ *   call body pages on a horizontal swipe.
+ *
+ * Both collapse to a single line so the reply above can be read.
+ *
+ * The submit is all-or-nothing because the server's is: the resume route 400s a partial batch and
+ * an edit or respond with no payload, so nothing goes up until every call is decided and complete.
+ * Allowed decisions are per `tool_call_id`, and a bulk shortcut is offered only when every call in
+ * the batch permits it — a policy can restrict one call to reject/respond, and an "Approve all"
+ * there would build a batch the server rejects with a 403.
+ *
+ * Every piece of editor state is hoisted ([drafts], [activeCallId], [collapsed], owned by
+ * `PendingActionDelegate`), so it survives the layout switching on a fold or rotation.
+ */
+@Composable
+fun ToolApprovalPanel(
+    pendingAction: PendingAction,
+    isResolving: Boolean,
+    drafts: Map<String, ToolDecisionDraft>,
+    activeCallId: String?,
+    collapsed: Boolean,
+    onDraftChange: (String, ToolDecisionDraft) -> Unit,
+    /** A decision's tap, with the call's draft after it; whether it moves the panel on is the delegate's call. */
+    onPickDecision: (String, ToolDecisionDraft, PausePanelAutoAdvance) -> Unit,
+    onSelectCall: (String) -> Unit,
+    onCollapsedChange: (Boolean) -> Unit,
+    /** Drops a move a pick scheduled; called when the layout it was picked in leaves the screen. */
+    onCancelAutoAdvance: () -> Unit,
+    onSubmit: (List<ToolApprovalResolution>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (!pendingAction.isToolApproval) return
+    val payload = pendingAction.payload ?: return
+    val calls = payload.actionRequests
+    if (calls.isEmpty()) return
+    val allowed = remember(payload) { payload.allowedDecisionsByCallId() }
+    val reviewConfigs = remember(payload) { payload.reviewConfigsByCallId() }
+    // One budget across the batch (upstream `buildApprovalPreviews`), so built for all calls at once.
+    val previews = remember(calls) {
+        calls.zip(buildApprovalPreviews(calls)).associate { (call, preview) -> call.toolCallId to preview }
+    }
+    val activeIndex = pausePanelActiveIndex(calls.map { it.toolCallId }, activeCallId)
+
+    val submit: (Map<String, ToolDecisionDraft>) -> Unit = { latest ->
+        toolBatchResolutions(payload, latest)?.let(onSubmit)
+    }
+    val state = ToolPanelState(
+        calls = calls,
+        allowed = allowed,
+        reviewConfigs = reviewConfigs,
+        previews = previews,
+        drafts = drafts,
+        activeIndex = activeIndex,
+        isResolving = isResolving,
+        collapsed = collapsed,
+    )
+    val actions = ToolPanelActions(
+        onDraftChange = onDraftChange,
+        onPick = onPickDecision,
+        onSelect = { index -> onSelectCall(calls[index].toolCallId) },
+        onCollapsedChange = onCollapsedChange,
+        cancelAutoAdvance = onCancelAutoAdvance,
+        submit = submit,
+        decideAll = { decision ->
+            val all = calls.associate { it.toolCallId to ToolDecisionDraft(decision = decision) }
+            all.forEach { (id, draft) -> onDraftChange(id, draft) }
+            submit(all)
+        },
+        advanceOrSubmit = { fromIndex, latest ->
+            val next = nextUndecidedCallIndex(calls.map { it.toolCallId }, latest, fromIndex)
+            if (next == null) submit(latest) else onSelectCall(calls[next].toolCallId)
+        },
+    )
+
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        // The dock measures the composer first, so this is the height it leaves; the body gets a
+        // smaller share of it than the ask panel's, which stands in for the composer.
+        val bodyMaxHeight = if (maxHeight == Dp.Infinity) FALLBACK_BODY_MAX_HEIGHT else maxHeight * BODY_HEIGHT_FRACTION
+        val isWide = maxWidth >= PAUSE_PANEL_WIDE_MIN_WIDTH
+        val cancelAutoAdvance by rememberUpdatedState(onCancelAutoAdvance)
+        // A scheduled move belongs to the layout it was picked in: a fold or rotation inside the
+        // beat drops it rather than letting a compact pick submit under the wide layout.
+        DisposableEffect(isWide) { onDispose { cancelAutoAdvance() } }
+        AdaptiveCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+        ) {
+            if (isWide) {
+                WideToolLayout(state = state, actions = actions, bodyMaxHeight = bodyMaxHeight)
+            } else {
+                CompactToolLayout(state = state, actions = actions, bodyMaxHeight = bodyMaxHeight)
+            }
+        }
+    }
+}
+
+@Immutable
+private data class ToolPanelState(
+    val calls: List<ToolApprovalRequest>,
+    val allowed: Map<String, List<String>>,
+    val reviewConfigs: Map<String, ToolReviewConfig>,
+    val previews: Map<String, ApprovalPreview>,
+    val drafts: Map<String, ToolDecisionDraft>,
+    val activeIndex: Int,
+    val isResolving: Boolean,
+    val collapsed: Boolean,
+) {
+    val active: ToolApprovalRequest get() = calls[activeIndex]
+    val activeDraft: ToolDecisionDraft get() = drafts[active.toolCallId] ?: ToolDecisionDraft()
+    val isBatch: Boolean get() = calls.size > 1
+    val isLast: Boolean get() = activeIndex == calls.lastIndex
+    val decidedCount: Int get() = calls.count { isDecided(it.toolCallId) }
+    val allDecided: Boolean get() = decidedCount == calls.size
+
+    fun isDecided(toolCallId: String): Boolean = drafts[toolCallId]?.toResolution(toolCallId) != null
+
+    fun previewFor(call: ToolApprovalRequest): ApprovalPreview? = previews[call.toolCallId]
+
+    fun allowedFor(call: ToolApprovalRequest): List<String> =
+        allowed[call.toolCallId] ?: DEFAULT_ALLOWED_TOOL_DECISIONS
+
+    /** True when every call in the batch permits [decision], so a bulk shortcut can't 403. */
+    fun isBulkAllowed(decision: String): Boolean = isBatch && calls.all { decision in allowedFor(it) }
+
+    /** True when deciding the active call is all the batch still needs. */
+    val activeIsLastUndecided: Boolean
+        get() = calls.all { it.toolCallId == active.toolCallId || isDecided(it.toolCallId) }
+}
+
+private class ToolPanelActions(
+    val onDraftChange: (String, ToolDecisionDraft) -> Unit,
+    val onPick: (String, ToolDecisionDraft, PausePanelAutoAdvance) -> Unit,
+    val onSelect: (Int) -> Unit,
+    val onCollapsedChange: (Boolean) -> Unit,
+    val cancelAutoAdvance: () -> Unit,
+    val submit: (Map<String, ToolDecisionDraft>) -> Unit,
+    val decideAll: (String) -> Unit,
+    val advanceOrSubmit: (fromIndex: Int, drafts: Map<String, ToolDecisionDraft>) -> Unit,
+)
+
+// ── compact (phone) ───────────────────────────────────────────────────────
+
+@Composable
+private fun CompactToolLayout(
+    state: ToolPanelState,
+    actions: ToolPanelActions,
+    bodyMaxHeight: Dp,
+) {
+    val active = state.active
+
+    Box {
+        Column(
+            modifier = Modifier
+                .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 8.dp)
+                .animateContentSize(),
+        ) {
+            PausePanelCompactHeader(
+                title = approvalTitle(state.previewFor(active)).ifBlank { stringResource(Res.string.tool_approval_title) },
+                collapsed = state.collapsed,
+                expandedTitleMaxLines = TOOL_NAME_MAX_LINES,
+                leadingIcon = { ToolNameIcon(modifier = Modifier.padding(end = TOOL_NAME_ICON_GAP)) },
+                pager = if (state.isBatch) {
+                    {
+                        PausePanelPager(
+                            index = state.activeIndex,
+                            count = state.calls.size,
+                            done = state.calls.map { state.isDecided(it.toolCallId) },
+                            enabled = !state.collapsed,
+                            onSelect = actions.onSelect,
+                            previousLabel = stringResource(Res.string.cd_previous_tool_call),
+                            nextLabel = stringResource(Res.string.cd_next_tool_call),
+                        )
+                    }
+                } else {
+                    null
+                },
+                toggle = { CollapseToggle(collapsed = state.collapsed, onCollapsedChange = actions.onCollapsedChange) },
+            )
+
+            if (state.collapsed) return@Column
+
+            // Weighted down to the call body, so a card capped short of the composer shrinks the
+            // body, not the header or the action row.
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .padding(end = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                key(active.toolCallId) {
+                    ToolCallBody(
+                        modifier = Modifier.weight(1f, fill = false),
+                        call = active,
+                        preview = state.previewFor(active),
+                        showName = false,
+                        allowedDecisions = state.allowedFor(active),
+                        reviewConfig = state.reviewConfigs[active.toolCallId],
+                        draft = state.activeDraft,
+                        isResolving = state.isResolving,
+                        bodyMaxHeight = bodyMaxHeight,
+                        onDraftChange = { draft -> actions.onDraftChange(active.toolCallId, draft) },
+                        onPick = { draft ->
+                            actions.onPick(active.toolCallId, draft, PausePanelAutoAdvance.AdvanceOrSubmit)
+                        },
+                    )
+                }
+
+                // Approve moves on by itself, so the explicit action only appears once the call holds
+                // a decision that doesn't (an Edit, Respond or Reject, or a call revisited).
+                val canProceed = state.isDecided(active.toolCallId)
+                val hasBulk = state.isBulkAllowed(ToolApprovalDecisions.REJECT) ||
+                    state.isBulkAllowed(ToolApprovalDecisions.APPROVE)
+                if (canProceed || hasBulk || state.isResolving) {
+                    ToolActionRow(state = state, actions = actions, spacing = 4.dp) {
+                        if (state.isResolving) {
+                            AdaptiveCircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        }
+                        if (canProceed) {
+                            AdaptiveButton(
+                                onClick = { actions.advanceOrSubmit(state.activeIndex, state.drafts) },
+                                enabled = !state.isResolving,
+                            ) {
+                                Text(
+                                    stringResource(
+                                        if (state.activeIsLastUndecided) {
+                                            Res.string.tool_approval_submit
+                                        } else {
+                                            Res.string.ask_user_question_next
+                                        },
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (state.collapsed) ExpandCollapsedOverlay(onExpand = { actions.onCollapsedChange(false) })
+    }
+}
+
+// ── wide (tablet) ─────────────────────────────────────────────────────────
+
+@Composable
+private fun WideToolLayout(
+    state: ToolPanelState,
+    actions: ToolPanelActions,
+    bodyMaxHeight: Dp,
+) {
+    val active = state.active
+
+    Box {
+        Column(
+            modifier = Modifier
+                .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 8.dp)
+                .animateContentSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (state.isBatch) {
+                    PausePanelTabs(
+                        labels = state.calls.mapIndexed { index, call ->
+                            approvalTitle(state.previewFor(call))
+                                .ifBlank { stringResource(Res.string.tool_approval_tab_fallback, index + 1) }
+                        },
+                        done = state.calls.map { state.isDecided(it.toolCallId) },
+                        activeIndex = state.activeIndex,
+                        onSelect = actions.onSelect,
+                        doneLabel = stringResource(Res.string.cd_tool_call_decided),
+                        enabled = !state.collapsed,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    ToolNameTitle(
+                        name = approvalTitle(state.previewFor(active)),
+                        collapsed = state.collapsed,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                CollapseToggle(collapsed = state.collapsed, onCollapsedChange = actions.onCollapsedChange)
+            }
+
+            if (state.collapsed) return@Column
+
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .padding(end = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // A new pause is a new pager, opening on its own active item.
+                key(state.calls) {
+                    PausePanelSwipeArea(
+                        modifier = Modifier.weight(1f, fill = false),
+                        index = state.activeIndex,
+                        count = state.calls.size,
+                        enabled = state.isBatch && !state.isResolving,
+                        onSelect = actions.onSelect,
+                    ) { page, swipeHandle ->
+                        val call = state.calls[page]
+                        ToolCallBody(
+                            decisionsModifier = swipeHandle,
+                            call = call,
+                            preview = state.previewFor(call),
+                            showName = state.isBatch,
+                            allowedDecisions = state.allowedFor(call),
+                            reviewConfig = state.reviewConfigs[call.toolCallId],
+                            draft = state.drafts[call.toolCallId] ?: ToolDecisionDraft(),
+                            isResolving = state.isResolving,
+                            bodyMaxHeight = bodyMaxHeight,
+                            onDraftChange = { draft -> actions.onDraftChange(call.toolCallId, draft) },
+                            onPick = { draft -> actions.onPick(call.toolCallId, draft, PausePanelAutoAdvance.NextTab) },
+                        )
+                    }
+                }
+
+                ToolActionRow(state = state, actions = actions, spacing = 8.dp) {
+                    if (state.isResolving) {
+                        AdaptiveCircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+                    if (state.activeIndex > 0) {
+                        AdaptiveTextButton(
+                            onClick = { actions.onSelect(state.activeIndex - 1) },
+                            enabled = !state.isResolving,
+                        ) {
+                            Text(stringResource(Res.string.ask_user_question_back))
+                        }
+                    }
+                    if (!state.isLast) {
+                        AdaptiveButton(
+                            onClick = { actions.onSelect(state.activeIndex + 1) },
+                            enabled = !state.isResolving,
+                        ) {
+                            Text(stringResource(Res.string.ask_user_question_next))
+                        }
+                    } else {
+                        AdaptiveButton(
+                            onClick = { actions.submit(state.drafts) },
+                            enabled = !state.isResolving && state.allDecided,
+                        ) {
+                            Text(
+                                if (state.isBatch) {
+                                    stringResource(
+                                        Res.string.tool_approval_submit_progress,
+                                        state.decidedCount,
+                                        state.calls.size,
+                                    )
+                                } else {
+                                    stringResource(Res.string.tool_approval_submit)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        if (state.collapsed) ExpandCollapsedOverlay(onExpand = { actions.onCollapsedChange(false) })
+    }
+}
+
+// ── shared pieces ─────────────────────────────────────────────────────────
+
+@Composable
+private fun ToolNameTitle(name: String, collapsed: Boolean, modifier: Modifier = Modifier) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        ToolNameIcon()
+        Spacer(modifier = Modifier.width(TOOL_NAME_ICON_GAP))
+        Text(
+            text = name.ifBlank { stringResource(Res.string.tool_approval_title) },
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = if (collapsed) 1 else TOOL_NAME_MAX_LINES,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(vertical = 12.dp),
+        )
+    }
+}
+
+@Composable
+private fun ToolNameIcon(modifier: Modifier = Modifier) {
+    Icon(Icons.Default.Shield, contentDescription = null, modifier = modifier.size(TOOL_NAME_ICON_SIZE))
+}
+
+/**
+ * One call: its description, what approving it will remember, and its arguments (scrolling within
+ * [bodyMaxHeight], so a long payload can't push the decisions off screen), then the decisions its
+ * policy allows, then the field an Edit, Respond or Reject decision opens. While that field is open
+ * the whole body scrolls as one instead, within a larger share of the height, so the field adds to
+ * the panel only up to a cap.
+ */
+@Composable
+private fun ToolCallBody(
+    call: ToolApprovalRequest,
+    preview: ApprovalPreview?,
+    showName: Boolean,
+    allowedDecisions: List<String>,
+    reviewConfig: ToolReviewConfig?,
+    draft: ToolDecisionDraft,
+    isResolving: Boolean,
+    bodyMaxHeight: Dp,
+    onDraftChange: (ToolDecisionDraft) -> Unit,
+    /** A decision's tap, with the draft after it. */
+    onPick: (ToolDecisionDraft) -> Unit,
+    modifier: Modifier = Modifier,
+    decisionsModifier: Modifier = Modifier,
+) {
+    val arguments = remember(call.arguments) { call.arguments.asDisplayText() }
+    val fieldOpen = draft.decision == ToolApprovalDecisions.EDIT ||
+        draft.decision == ToolApprovalDecisions.RESPOND ||
+        draft.decision == ToolApprovalDecisions.REJECT
+    val canAllowAlways = reviewConfig?.canAllowAlways == true
+    val bodyScroll = rememberScrollState()
+    val detailsScroll = rememberScrollState()
+    // The field opens below the arguments and decisions, so scroll the body down to it. A frame
+    // first, so the field it asks about has been laid out.
+    val fieldRequester = remember { BringIntoViewRequester() }
+    LaunchedEffect(draft.decision) {
+        if (fieldOpen) {
+            withFrameNanos { }
+            fieldRequester.bringIntoView()
+        }
+    }
+    Column(
+        modifier = modifier.then(
+            if (fieldOpen) {
+                Modifier.heightIn(max = bodyMaxHeight * OPEN_FIELD_HEIGHT_RATIO).verticalScroll(bodyScroll)
+            } else {
+                Modifier
+            },
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(
+            modifier = if (fieldOpen) {
+                Modifier
+            } else {
+                Modifier.heightIn(max = bodyMaxHeight).verticalScroll(detailsScroll)
+            },
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val title = approvalTitle(preview)
+            if (showName && title.isNotBlank()) {
+                Text(text = title, style = MaterialTheme.typography.titleSmall)
+            }
+            (preview?.description ?: call.description)?.takeIf { it.isNotBlank() }?.let { description ->
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            reviewConfig?.let { RememberNotice(it) }
+            if (preview != null && preview.kind != ApprovalPreview.Kind.GENERIC) {
+                CodeActionPreview(preview)
+            } else if (arguments.isNotBlank()) {
+                Text(
+                    text = stringResource(Res.string.tool_approval_arguments),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Text(
+                    text = arguments,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    // Tool args are frequently one long JSON line; scroll rather than wrap it into a
+                    // wall that pushes the decision controls off screen.
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                )
+            }
+        }
+
+        DecisionRow(
+            modifier = decisionsModifier,
+            allowedDecisions = allowedDecisions,
+            selected = draft.decision,
+            allowAlwaysSelected = canAllowAlways && draft.allowAlways && draft.decision == ToolApprovalDecisions.APPROVE,
+            canAllowAlways = canAllowAlways,
+            enabled = !isResolving,
+            onPick = { decision ->
+                onPick(
+                    if (decision == ToolApprovalDecisions.EDIT && draft.editedArguments.isBlank()) {
+                        draft.copy(decision = decision, editedArguments = arguments, allowAlways = false)
+                    } else {
+                        draft.copy(decision = decision, allowAlways = false)
+                    },
+                )
+            },
+            onPickAllowAlways = { onPick(draft.copy(decision = ToolApprovalDecisions.APPROVE, allowAlways = true)) },
+        )
+
+        // Shown whenever Always allow is offered, not only once picked: the pick is final and the
+        // beat moves on, so a hint that appeared on selection would flash past unread.
+        if (canAllowAlways) {
+            Text(
+                text = stringResource(Res.string.tool_approval_always_allow_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        if (draft.decision == ToolApprovalDecisions.REJECT) {
+            val reason = rememberDraftField(draft.reason, resetKey = call.toolCallId)
+            AdaptiveOutlinedTextField(
+                value = reason.value,
+                onValueChange = { reason.onValueChange(it) { text -> onDraftChange(draft.copy(reason = text)) } },
+                enabled = !isResolving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(fieldRequester),
+                label = { Text(stringResource(Res.string.tool_approval_reject_reason)) },
+                minLines = 1,
+                maxLines = 4,
+            )
+        }
+
+        if (draft.decision == ToolApprovalDecisions.EDIT) {
+            val invalid = draft.editedArguments.isNotBlank() && draft.editedArguments.parseToolArgumentsOrNull() == null
+            val editedArguments = rememberDraftField(draft.editedArguments, resetKey = call.toolCallId)
+            AdaptiveOutlinedTextField(
+                value = editedArguments.value,
+                onValueChange = {
+                    editedArguments.onValueChange(it) { text -> onDraftChange(draft.copy(editedArguments = text)) }
+                },
+                enabled = !isResolving,
+                modifier = Modifier.fillMaxWidth().bringIntoViewRequester(fieldRequester),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                label = { Text(stringResource(Res.string.tool_approval_edited_arguments)) },
+                keyboardOptions = VerbatimKeyboardOptions,
+                isError = invalid,
+                supportingText = if (invalid) {
+                    { Text(stringResource(Res.string.tool_approval_invalid_json)) }
+                } else {
+                    null
+                },
+                minLines = 2,
+                maxLines = 6,
+            )
+        }
+
+        if (draft.decision == ToolApprovalDecisions.RESPOND) {
+            val responseText = rememberDraftField(draft.responseText, resetKey = call.toolCallId)
+            AdaptiveOutlinedTextField(
+                value = responseText.value,
+                onValueChange = { responseText.onValueChange(it) { text -> onDraftChange(draft.copy(responseText = text)) } },
+                enabled = !isResolving,
+                modifier = Modifier.fillMaxWidth().bringIntoViewRequester(fieldRequester),
+                label = { Text(stringResource(Res.string.tool_approval_response_text)) },
+                minLines = 2,
+                maxLines = 4,
+            )
+        }
+    }
+}
+
+/**
+ * The decisions one call's policy allows: Edit and Respond as chips, since they open a field
+ * rather than finish the call, then Reject and Approve as the buttons that do, with Always allow
+ * between them when the call offers it (an approve remembered for the chat, so the two approve
+ * variants sit together and Approve stays last). The recorded decision carries a check, so a call
+ * revisited from the pager or tabs shows what was chosen.
+ */
+@Composable
+private fun DecisionRow(
+    allowedDecisions: List<String>,
+    selected: String?,
+    allowAlwaysSelected: Boolean,
+    canAllowAlways: Boolean,
+    enabled: Boolean,
+    onPick: (String) -> Unit,
+    onPickAllowAlways: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ordered = DECISION_ORDER.filter { it in allowedDecisions }
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        val check: @Composable () -> Unit = {
+            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
+        }
+        ordered.forEach { decision ->
+            val label = stringResource(decision.decisionLabel())
+            val isSelected = selected == decision && !(decision == ToolApprovalDecisions.APPROVE && allowAlwaysSelected)
+            if (decision == ToolApprovalDecisions.APPROVE && canAllowAlways) {
+                AdaptiveFilledTonalButton(
+                    onClick = onPickAllowAlways,
+                    enabled = enabled,
+                    contentPadding = DECISION_BUTTON_PADDING,
+                    modifier = Modifier.semantics {
+                        role = Role.Button
+                        this.selected = allowAlwaysSelected
+                    },
+                ) {
+                    if (allowAlwaysSelected) {
+                        check()
+                    } else {
+                        Icon(Icons.Default.DoneAll, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
+                    }
+                    Text(stringResource(Res.string.tool_approval_always_allow))
+                }
+            }
+            when (decision) {
+                ToolApprovalDecisions.APPROVE -> AdaptiveButton(
+                    onClick = { onPick(decision) },
+                    enabled = enabled,
+                    contentPadding = DECISION_BUTTON_PADDING,
+                ) {
+                    if (isSelected) check()
+                    Text(label)
+                }
+                ToolApprovalDecisions.REJECT -> AdaptiveOutlinedButton(
+                    onClick = { onPick(decision) },
+                    enabled = enabled,
+                    contentPadding = DECISION_BUTTON_PADDING,
+                ) {
+                    if (isSelected) check()
+                    Text(label)
+                }
+                else -> AdaptiveFilterChip(
+                    selected = isSelected,
+                    enabled = enabled,
+                    onClick = { onPick(decision) },
+                    label = { Text(label) },
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What a plain Approve on this call will remember (the agent's `chat` / `always` mode), or, in the
+ * error colour, why it can't. Read before the decisions, so the consequence is heard first.
+ */
+@Composable
+private fun RememberNotice(config: ToolReviewConfig) {
+    val unavailable = when (config.rememberUnavailable) {
+        ToolApprovalRememberUnavailable.CONNECTION -> Res.string.tool_approval_remember_unavailable_connection
+        ToolApprovalRememberUnavailable.DISABLED -> Res.string.tool_approval_remember_unavailable_disabled
+        ToolApprovalRememberUnavailable.STORAGE -> Res.string.tool_approval_remember_unavailable_storage
+        ToolApprovalRememberUnavailable.BACKGROUND -> Res.string.tool_approval_remember_unavailable_background
+        else -> null
+    }
+    if (unavailable != null) {
+        NoticeLine(icon = Icons.Default.Warning, text = stringResource(unavailable), color = MaterialTheme.colorScheme.error)
+        return
+    }
+    val remember = when (config.rememberScope) {
+        ToolApprovalRememberScopes.CHAT -> Res.string.tool_approval_remember_chat
+        ToolApprovalRememberScopes.ALWAYS -> Res.string.tool_approval_remember_always
+        else -> return
+    }
+    NoticeLine(
+        icon = Icons.Default.History,
+        text = stringResource(remember),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun NoticeLine(icon: ImageVector, text: String, color: Color) {
+    Row(modifier = Modifier.padding(top = 4.dp), verticalAlignment = Alignment.Top) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.padding(top = 2.dp).size(NOTICE_ICON_SIZE))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(text = text, style = MaterialTheme.typography.bodySmall, color = color)
+    }
+}
+
+/**
+ * The bulk shortcuts at the start, [endActions] at the end. When both don't fit one line the end
+ * group drops whole onto a line of its own rather than squeezing its button.
+ */
+@Composable
+private fun ToolActionRow(
+    state: ToolPanelState,
+    actions: ToolPanelActions,
+    spacing: Dp,
+    endActions: @Composable RowScope.() -> Unit,
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        BulkButtons(state = state, actions = actions, modifier = Modifier.align(Alignment.CenterVertically))
+        // A weighted flow item breaks on its minimum width; IntrinsicSize.Max makes that the
+        // group's natural width, and the weight then fills the rest of its line.
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .width(IntrinsicSize.Max)
+                .align(Alignment.CenterVertically),
+            horizontalArrangement = Arrangement.spacedBy(spacing, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+            content = endActions,
+        )
+    }
+}
+
+@Composable
+private fun BulkButtons(state: ToolPanelState, actions: ToolPanelActions, modifier: Modifier = Modifier) {
+    FlowRow(modifier = modifier) {
+        if (state.isBulkAllowed(ToolApprovalDecisions.REJECT)) {
+            AdaptiveTextButton(onClick = { actions.decideAll(ToolApprovalDecisions.REJECT) }, enabled = !state.isResolving) {
+                Text(stringResource(Res.string.tool_approval_reject_all))
+            }
+        }
+        if (state.isBulkAllowed(ToolApprovalDecisions.APPROVE)) {
+            AdaptiveTextButton(onClick = { actions.decideAll(ToolApprovalDecisions.APPROVE) }, enabled = !state.isResolving) {
+                Text(stringResource(Res.string.tool_approval_approve_all))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapseToggle(collapsed: Boolean, onCollapsedChange: (Boolean) -> Unit) {
+    PausePanelCollapseToggle(
+        collapsed = collapsed,
+        onCollapsedChange = onCollapsedChange,
+        minimizeLabel = stringResource(Res.string.cd_minimize_tool_approval),
+        restoreLabel = stringResource(Res.string.cd_restore_tool_approval),
+    )
+}
+
+@Composable
+private fun BoxScope.ExpandCollapsedOverlay(onExpand: () -> Unit) {
+    PausePanelExpandOverlay(restoreLabel = stringResource(Res.string.cd_restore_tool_approval), onExpand = onExpand)
+}
+
+/**
+ * The one-line stand-in the thread keeps for a docked tool-approval pause, so the reply still
+ * reads as waiting on the user.
+ */
+@Composable
+fun ToolApprovalWaitingMarker(modifier: Modifier = Modifier) {
+    PausePanelWaitingMarker(
+        text = stringResource(Res.string.tool_approval_waiting_marker),
+        icon = Icons.Default.Shield,
+        modifier = modifier,
+    )
+}
+
+/**
+ * What the review heads a call with (upstream `previewTitle`): the action a server code tool takes,
+ * else the tool's name, with its hidden controls spelled out. Blank when the call has no name.
+ */
+@Composable
+private fun approvalTitle(preview: ApprovalPreview?): String = when (preview?.kind) {
+    null -> ""
+    ApprovalPreview.Kind.COMMAND -> stringResource(Res.string.tool_approval_review_run_command)
+    ApprovalPreview.Kind.CREATE -> preview.target?.let { stringResource(Res.string.tool_approval_review_create_file, it) }
+        ?: stringResource(Res.string.tool_approval_review_create_file_generic)
+    ApprovalPreview.Kind.EDIT -> preview.target?.let { stringResource(Res.string.tool_approval_review_edit_file, it) }
+        ?: stringResource(Res.string.tool_approval_review_edit_file_generic)
+    ApprovalPreview.Kind.GENERIC -> preview.toolName
+}
+
+/**
+ * A server code tool's proposal as the action it takes: the command, the new file's contents or
+ * the edit's replacements, bounded and with hidden controls revealed ([ApprovalPreview]). Wrapped,
+ * as web's `pre-wrap`: a command scrolled sideways can hide its tail past the edge.
+ */
+@Composable
+private fun CodeActionPreview(preview: ApprovalPreview, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(
+                when (preview.kind) {
+                    ApprovalPreview.Kind.COMMAND -> Res.string.tool_approval_proposed_command
+                    ApprovalPreview.Kind.CREATE -> Res.string.tool_approval_proposed_contents
+                    else -> Res.string.tool_approval_proposed_replacements
+                },
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.onSurfaceVariant,
+        )
+        Text(
+            text = preview.body.ifEmpty { stringResource(Res.string.tool_approval_no_arguments) },
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.surfaceContainerHighest, PREVIEW_SHAPE)
+                .padding(8.dp),
+        )
+        if (preview.truncated) {
+            Text(
+                text = stringResource(Res.string.tool_approval_preview_truncated),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private val PREVIEW_SHAPE = RoundedCornerShape(8.dp)
+
+/** Renders `string | object` tool arguments without assuming either shape. */
+private fun JsonElement?.asDisplayText(): String = when (this) {
+    null -> ""
+    is JsonPrimitive -> if (isString) content else toString()
+    else -> toString()
+}
+
+/**
+ * Display order. A decision kind this build doesn't render is dropped rather than shown unlabeled;
+ * the remaining ones still resolve the call.
+ */
+private val DECISION_ORDER = listOf(
+    ToolApprovalDecisions.EDIT,
+    ToolApprovalDecisions.RESPOND,
+    ToolApprovalDecisions.REJECT,
+    ToolApprovalDecisions.APPROVE,
+)
+
+private fun String.decisionLabel(): StringResource = when (this) {
+    ToolApprovalDecisions.APPROVE -> Res.string.tool_approval_approve
+    ToolApprovalDecisions.REJECT -> Res.string.tool_approval_reject
+    ToolApprovalDecisions.EDIT -> Res.string.tool_approval_edit
+    else -> Res.string.tool_approval_respond
+}
+
+/** Narrower than the default padding so all four decisions fit one row at phone width. */
+private val DECISION_BUTTON_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+private const val BODY_HEIGHT_FRACTION = 0.35f
+
+/** How much more height the body gets while it also holds the decisions and an open field. */
+private const val OPEN_FIELD_HEIGHT_RATIO = 1.6f
+
+private val TOOL_NAME_ICON_SIZE = 20.dp
+private val NOTICE_ICON_SIZE = 12.dp
+private val TOOL_NAME_ICON_GAP = 8.dp
+private const val TOOL_NAME_MAX_LINES = 2
+private val FALLBACK_BODY_MAX_HEIGHT = 240.dp

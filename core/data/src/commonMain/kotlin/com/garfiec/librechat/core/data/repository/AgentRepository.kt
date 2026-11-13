@@ -13,6 +13,7 @@ import com.garfiec.librechat.core.model.request.UpdateAgentRequest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonElement
 
+@Suppress("TooManyFunctions") // debt: 20 functions
 interface AgentRepository {
 
     /**
@@ -27,11 +28,22 @@ interface AgentRepository {
 
     // Agent CRUD
     suspend fun getAgents(category: String? = null): Result<List<Agent>>
+
+    /**
+     * One page of the agent list. [cursor] is the previous page's [PaginatedAgents.nextCursor]
+     * (null for the first page); [promoted] narrows to Top picks; [sort] and [mine] are v0.8.9-rc1.
+     * See `AgentsApi.getAgentsPaginated`, and [isCursorOrderingMismatch] for the 409 a stale
+     * cursor gets under a changed order.
+     */
     suspend fun getAgentsPaginated(
-        page: Int,
         limit: Int,
+        cursor: String? = null,
         search: String? = null,
         category: String? = null,
+        promoted: Boolean = false,
+        requiredPermission: Int? = null,
+        sort: String? = null,
+        mine: Boolean = false,
     ): Result<PaginatedAgents>
     suspend fun getAgent(id: String): Result<Agent>
 
@@ -49,21 +61,20 @@ interface AgentRepository {
     suspend fun listedEditVerdict(id: String): Boolean?
 
     /**
-     * The agent's LLM `provider`, straight from `GET /api/agents/:id` (returned at VIEW permission).
+     * The agent from `GET /api/agents/:id` (VIEW permission), never from the list cache.
      *
-     * Deliberately not expressed as `getAgent(id).provider`: the agent *list* projection omits
-     * `provider` entirely (`getListAgentsByAccess` upstream), and [getAgent] serves from that list's
-     * cache whenever it's warm — so it answers `null` for an agent whose provider the server knows
-     * perfectly well. Callers that route on the provider need the single-agent read, uncached.
+     * Unlike [getAgent], whose warm cache serves the list projection, this carries the agent's own
+     * `model`, `provider`, `isPublic`, `updatedAt` and contacts. The route sends no `category` or
+     * `is_promoted`, so those are the ones the last LIST row for [id] carried: null category and
+     * not promoted when this account has listed no such agent, never the decoded defaults. It has
+     * no `tools` either.
      */
-    suspend fun getAgentProvider(id: String): Result<String?>
+    suspend fun getAgentForViewing(id: String): Result<Agent>
 
     /**
-     * Fetches complete agent data for editing via the /expanded endpoint.
-     * Unlike [getAgent] which returns limited view-only fields, this method
-     * returns the full agent document including instructions, tools, category,
-     * conversation_starters, model_parameters, and all other configuration.
-     * Never served from cache -- always fetches fresh from the server.
+     * The full agent from `GET /api/agents/:id/expanded`, which requires EDIT permission: everything
+     * [getAgentForViewing] carries plus instructions, tools, category and the full
+     * model_parameters. Fails for a user who can only view the agent. Never served from cache.
      */
     suspend fun getAgentForEditing(id: String): Result<Agent>
     suspend fun createAgent(request: CreateAgentRequest): Result<Agent>
@@ -98,4 +109,10 @@ interface AgentRepository {
 
     // Tools
     suspend fun getAvailableTools(): Result<List<AgentTool>>
+
+    /**
+     * Forgets the caller's remembered tool approvals for [agentId], or only for [toolName] (the
+     * full MCP id) when given (v0.8.9-rc1). Touches no agent data, so no cache is invalidated.
+     */
+    suspend fun resetToolApprovals(agentId: String, toolName: String? = null): Result<Unit>
 }

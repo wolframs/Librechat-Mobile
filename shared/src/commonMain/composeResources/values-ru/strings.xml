@@ -1,14 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Drawer -->
-    <string name="settings">Настройки</string>
 
     <!-- Content descriptions -->
-    <string name="cd_back_to_conversations">Назад к беседам</string>
 
     <!-- Version mismatch dialog -->
     <string name="version_mismatch_title">Несоответствие версии бэкенда</string>
     <string name="version_mismatch_message">Это приложение собрано для LibreChat v%1$s, но ваш сервер работает на v%2$s. Некоторые функции могут работать некорректно.</string>
     <string name="dismiss">Закрыть</string>
     <string name="dont_warn_again">Больше не предупреждать</string>
+    <string name="session_expired_title">Выполнен выход</string>
+    <string name="session_expired_message">Ваш сеанс истёк. Войдите снова, чтобы продолжить.</string>
+    <string name="session_expired_message_named">Ваш сеанс для %1$s истёк. Войдите снова, чтобы продолжить.</string>
+    <string name="session_expired_switched_named">Сеанс для %1$s истёк, поэтому вы переключены на %2$s. Снова войдите в %1$s через переключатель аккаунтов.</string>
+    <string name="session_expired_switched">Сеанс истёк, поэтому вы переключены на %1$s. Снова войдите через переключатель аккаунтов.</string>
+    <string name="session_banned_title">Аккаунт ограничен</string>
+    <string name="session_banned_message">Сервер временно ограничил этот аккаунт, например из-за слишком большого числа запросов или нарушения правил. Пока ограничение не снимут, вы не сможете отправлять сообщения, использовать агентов и загружать файлы, а также можете выйти из аккаунта автоматически. Если его не снимут, обратитесь к администратору сервера.</string>
+    <string name="session_banned_message_named">Сервер временно ограничил аккаунт %1$s, например из-за слишком большого числа запросов или нарушения правил. Пока ограничение не снимут, вы не сможете отправлять сообщения, использовать агентов и загружать файлы, а также можете выйти из аккаунта автоматически. Если его не снимут, обратитесь к администратору сервера.</string>
+    <string name="session_renewal_blocked_message">Не удалось продлить сеанс: сервер отклонил запрос на обновление.</string>
+    <string name="session_renewal_sign_in_again">Войти снова</string>
+    <string name="shared_link_switch_title">Сменить аккаунт?</string>
+    <string name="shared_link_switch_message">Этот общий чат находится на %1$s, где вы вошли как %2$s. Переключитесь на этот аккаунт, чтобы открыть его здесь.</string>
+    <string name="shared_link_switch_confirm">Переключить</string>
+    <string name="shared_link_open_in_browser">Открыть в браузере</string>
 </resources>

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -24,9 +25,11 @@ fun EmptyState(
     modifier: Modifier = Modifier,
     description: String? = null,
     icon: ImageVector? = null,
+    action: (@Composable () -> Unit)? = null,
 ) {
     Column(
-        modifier = modifier.fillMaxSize(),
+        // Centred in what the keyboard leaves, so a search's "no results" is not drawn under it.
+        modifier = modifier.fillMaxSize().imePadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -54,6 +57,10 @@ fun EmptyState(
                 color = MaterialTheme.colorScheme.outline,
                 textAlign = TextAlign.Center,
             )
+        }
+        if (action != null) {
+            Spacer(modifier = Modifier.height(24.dp))
+            action()
         }
     }
 }

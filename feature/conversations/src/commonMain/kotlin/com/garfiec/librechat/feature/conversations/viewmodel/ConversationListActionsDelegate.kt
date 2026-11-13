@@ -2,19 +2,26 @@ package com.garfiec.librechat.feature.conversations.viewmodel
 
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.repository.ConversationRepository
-import com.garfiec.librechat.core.data.repository.ShareRepository
+import com.garfiec.librechat.core.data.repository.RenameRefusal
 import com.garfiec.librechat.core.data.repository.TagRepository
+import com.garfiec.librechat.core.data.repository.renameRefusal
+import com.garfiec.librechat.core.data.share.ShareLinkController
+import com.garfiec.librechat.core.data.share.ShareLinkControllerFactory
 import com.garfiec.librechat.core.model.Conversation
 import com.garfiec.librechat.core.model.SAVED_TAG
 import com.garfiec.librechat.feature.conversations.export.ConversationExporter
 import com.garfiec.librechat.feature.conversations.export.ExportFormat
+import com.garfiec.librechat.feature.conversations.resources.Res
+import com.garfiec.librechat.feature.conversations.resources.favorite_update_failed
+import com.garfiec.librechat.feature.conversations.resources.rename_not_found
+import com.garfiec.librechat.feature.conversations.resources.rename_not_ready
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 
 /**
- * Shared conversation row-action logic (favorite/rename/archive/delete/share/duplicate/tags/export)
- * used by both [ConversationListViewModel] (Room-backed) and [ProjectChatsViewModel] (network-direct).
+ * Shared conversation row-action logic (favorite/rename/archive/delete/share/duplicate/export)
+ * used by the drawer (Room-backed) and [ProjectChatsViewModel] (network-direct).
  *
  * Actions emit one-shot UI signals through [events] and run on the host VM's [scope]. After a
  * mutation that the host must reflect, [onMutated] is invoked: the Room-backed list passes a no-op
@@ -25,18 +32,27 @@ class ConversationListActionsDelegate(
     private val events: MutableSharedFlow<ConversationListEvent>,
     private val conversationRepository: ConversationRepository,
     private val tagRepository: TagRepository,
-    private val shareRepository: ShareRepository,
+    shareLinkControllerFactory: ShareLinkControllerFactory,
     private val conversationExporter: ConversationExporter,
     private val onMutated: suspend () -> Unit,
 ) {
 
+    /**
+     * The share sheet. Share from a list shares the conversation's newest branch: there is no
+     * branch on screen to target.
+     */
+    val shareLink: ShareLinkController = shareLinkControllerFactory.create(scope)
+
+    /**
+     * Favorites [conversation], or un-favorites it if it showed the star. Worked out from what was
+     * shown, not flipped against the server, so a stale row or a repeat tap changes nothing.
+     */
     fun toggleFavorite(conversation: Conversation) {
         val id = conversation.conversationId ?: return
+        val favorite = SAVED_TAG !in conversation.tags
         scope.launch {
-            when (val result = tagRepository.toggleFavorite(id, conversation.tags)) {
-                is Result.Error -> events.emit(
-                    ConversationListEvent.ShowError(result.message ?: "Failed to update favorite"),
-                )
+            when (tagRepository.setConversationTag(id, SAVED_TAG, attached = favorite)) {
+                is Result.Error -> events.emit(ConversationListEvent.ShowErrorRes(Res.string.favorite_update_failed))
                 else -> onMutated()
             }
         }
@@ -44,8 +60,12 @@ class ConversationListActionsDelegate(
 
     fun renameConversation(id: String, newTitle: String) {
         scope.launch {
-            when (conversationRepository.updateTitle(id, newTitle)) {
-                is Result.Error -> events.emit(ConversationListEvent.ShowError("Failed to rename conversation"))
+            when (val result = conversationRepository.updateTitle(id, newTitle)) {
+                is Result.Error -> when (result.renameRefusal()) {
+                    RenameRefusal.TITLE_NOT_READY -> events.emit(ConversationListEvent.ShowErrorRes(Res.string.rename_not_ready))
+                    RenameRefusal.NOT_FOUND -> events.emit(ConversationListEvent.ShowErrorRes(Res.string.rename_not_found))
+                    null -> events.emit(ConversationListEvent.ShowError("Failed to rename conversation"))
+                }
                 else -> onMutated()
             }
         }
@@ -79,17 +99,10 @@ class ConversationListActionsDelegate(
         }
     }
 
-    fun shareConversation(conversationId: String) {
-        scope.launch {
-            when (val result = shareRepository.createShareLink(conversationId)) {
-                is Result.Success -> events.emit(ConversationListEvent.ShareLinkCopied(result.data))
-                is Result.Error -> events.emit(
-                    ConversationListEvent.ShowError(result.message ?: "Failed to create share link"),
-                )
-                is Result.Loading -> Unit
-            }
-        }
-    }
+    /** Opens the share sheet on [conversationId]. Nothing is created until the sheet's Create. */
+    fun shareConversation(conversationId: String) = shareLink.open(conversationId)
+
+    fun closeShareSheet() = shareLink.close()
 
     fun duplicateConversation(conversationId: String, title: String?) {
         scope.launch {
@@ -100,25 +113,6 @@ class ConversationListActionsDelegate(
                 is Result.Error -> events.emit(
                     ConversationListEvent.ShowError(result.message ?: "Failed to duplicate conversation"),
                 )
-                is Result.Loading -> Unit
-            }
-        }
-    }
-
-    fun updateConversationTags(conversation: Conversation, userTags: List<String>) {
-        val id = conversation.conversationId ?: return
-        val wasFavorited = SAVED_TAG in conversation.tags
-        val cleaned = userTags.filterNot { it == SAVED_TAG }
-        val finalTags = if (wasFavorited) cleaned + SAVED_TAG else cleaned
-        scope.launch {
-            when (tagRepository.setConversationTags(id, finalTags)) {
-                is Result.Success -> {
-                    tagRepository.refreshTags()
-                    // Refresh the host list too: the network-direct project view won't otherwise
-                    // re-fetch the edited row's tags (no-op for the Room-backed list).
-                    onMutated()
-                }
-                is Result.Error -> events.emit(ConversationListEvent.ShowError("Failed to update tags"))
                 is Result.Loading -> Unit
             }
         }

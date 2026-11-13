@@ -3,7 +3,7 @@ plugins {
     id("librechat.kmp.compose")
 }
 
-extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+android {
     namespace = "com.garfiec.librechat.core.ui"
 }
 
@@ -25,11 +25,25 @@ kotlin {
             implementation(libs.zoomimage.compose.coil3.core)
             implementation(libs.material.kolor)
             implementation(libs.compose.ui.backhandler)
+            implementation(libs.kyant.backdrop)
+            // LifecycleResumeEffect / currentStateAsState for the app-wide time ticker.
+            implementation(libs.lifecycle.runtime.compose.kmp)
+            // The share sheet's QR code.
+            implementation(libs.qrose)
+            // The admin's pinned search providers in the served `webSearch` config.
+            implementation(libs.kotlinx.serialization.json)
         }
         androidMain.dependencies {
-            // Runtime-permission launcher for saving images to the gallery (API < 29).
+            // Activity-result launchers: the gallery-save permission request (API < 29) and
+            // TextFileSaver's Storage Access Framework picker.
             implementation(libs.activity.compose)
             implementation(libs.kermit)
+        }
+        iosMain.dependencies {
+            implementation(libs.kermit)
+        }
+        iosTest.dependencies {
+            implementation(libs.compose.multiplatform.ui.test)
         }
         named("androidInstrumentedTest").dependencies {
             implementation(libs.junit)

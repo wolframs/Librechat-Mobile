@@ -9,7 +9,7 @@
 | Xcode | 15+ | Required for iOS SDK, simulators, and `xcodebuild` CLI. IDE not needed. |
 | Apple Silicon Mac | | Intel Macs not supported (no `iosSimulatorX64` target) |
 | iOS Deployment Target | 16.0+ | |
-| Gradle | 9.5.1 (via wrapper) | |
+| Gradle | 9.8.2 (via wrapper) | |
 | Kotlin | 2.4.10 | |
 
 ## IDE Setup
@@ -32,7 +32,7 @@ Build and install on a connected device or emulator:
 
 ```bash
 ./gradlew assembleDebug
-adb install app/build/outputs/apk/debug/app-debug.apk
+adb install app/build/outputs/apk/foss/debug/app-foss-debug.apk
 ```
 
 Or run directly via Android Studio's run configuration.
@@ -134,5 +134,7 @@ Source sets: `commonMain` = shared code, `androidMain` / `iosMain` = platform-sp
 - Unidirectional data flow: UI -> ViewModel -> Repository -> API/Room
 - Room is a read-through cache; server is source of truth
 - Custom SSE parser over raw `ByteReadChannel` (not Ktor SSE plugin)
+- Changes must keep the guarantees in [SECURITY.md](SECURITY.md): where requests go, where
+  credentials go, what is logged
 
 See `CLAUDE.md` for the full architecture overview and backend quirks.

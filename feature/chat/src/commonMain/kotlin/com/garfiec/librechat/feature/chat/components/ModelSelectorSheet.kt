@@ -1,16 +1,20 @@
 package com.garfiec.librechat.feature.chat.components
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
@@ -22,18 +26,15 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.outlined.Create
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,9 +46,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -55,43 +58,49 @@ import com.garfiec.librechat.core.common.EndpointConstants
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
 import com.garfiec.librechat.core.model.Agent
 import com.garfiec.librechat.core.model.EndpointConfig
+import com.garfiec.librechat.core.model.config.ModelSpec
+import com.garfiec.librechat.core.model.config.ModelSpecs
+import com.garfiec.librechat.core.model.config.displayLabel
 import com.garfiec.librechat.core.model.endpoint.KeyState
+import com.garfiec.librechat.core.model.media.IconSource
+import com.garfiec.librechat.core.model.media.ProviderId
+import com.garfiec.librechat.core.model.media.resolveAvatarUrl
+import com.garfiec.librechat.core.model.media.resolveIconSource
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveFilledTonalButton
+import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
 import com.garfiec.librechat.core.ui.components.EndpointIcon
 import com.garfiec.librechat.core.ui.components.ErrorBanner
+import com.garfiec.librechat.core.ui.components.ListDragSelection
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
+import com.garfiec.librechat.core.ui.components.dragSelectExclude
+import com.garfiec.librechat.core.ui.components.dragSelectRow
+import com.garfiec.librechat.core.ui.components.dragSelectRowIcon
+import com.garfiec.librechat.core.ui.components.listDragSelection
+import com.garfiec.librechat.core.ui.components.rememberListDragSelection
+import com.garfiec.librechat.core.ui.theme.statusColors
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
-import com.garfiec.librechat.feature.chat.util.FuzzyMatch
-import com.garfiec.librechat.feature.chat.viewmodel.delegate.FavoritesDelegate
-import com.garfiec.librechat.feature.chat.viewmodel.delegate.filterModelsByEndpoint
+import com.garfiec.librechat.feature.chat.util.HeaderIcon
+import com.garfiec.librechat.feature.chat.util.HeaderLabel
+import com.garfiec.librechat.feature.chat.util.KeyHint
+import com.garfiec.librechat.feature.chat.util.PickerInputs
+import com.garfiec.librechat.feature.chat.util.PickerRow
+import com.garfiec.librechat.feature.chat.util.blocksSelection
+import com.garfiec.librechat.feature.chat.util.menuIconSource
+import com.garfiec.librechat.feature.chat.util.pickerRows
 import org.jetbrains.compose.resources.stringResource
 
 private val IconSize = 20.dp
-private const val FUZZY_MATCH_THRESHOLD = 55
 
-/** Sentinel group key for the optional "Starred" section's expand/collapse state. */
+/** Sentinel endpoint name the optional "Starred" section's header passes to [EndpointGroupHeader]. */
 private const val STARRED_GROUP_KEY = "__starred__"
 
 /** Row vertical padding for grouped list items vs. the denser starred-at-top section. */
 private val ListItemVerticalPadding = 12.dp
 private val StarredItemVerticalPadding = 6.dp
-
-private fun fuzzyMatches(candidate: String, query: String): Boolean {
-    // Short queries (1-2 chars) use substring matching for better UX
-    if (query.length <= 2) return candidate.contains(query, ignoreCase = true)
-    return FuzzyMatch.partialRatio(query, candidate) >= FUZZY_MATCH_THRESHOLD
-}
-
-/**
- * Returns the fuzzy match score (0-100) for [candidate] against [query].
- * For short queries (1-2 chars), returns 100 if substring matches, 0 otherwise.
- */
-private fun fuzzyScore(candidate: String, query: String): Int {
-    if (query.length <= 2) {
-        return if (candidate.contains(query, ignoreCase = true)) 100 else 0
-    }
-    return FuzzyMatch.partialRatio(query, candidate)
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,41 +111,51 @@ fun ModelSelectorSheet(
     selectedEndpoint: String?,
     selectedModel: String?,
     onModelSelect: (endpoint: String, model: String) -> Unit,
+    /** `interface.modelSelect`; off lists only the server's specs, as web does. */
+    modelSelect: Boolean,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    modelSpecs: ModelSpecs? = null,
+    selectedSpec: String? = null,
+    onSpecSelect: (ModelSpec) -> Unit = {},
+    agentsLoaded: Boolean = false,
     serverUrl: String = "",
     errorMessage: String? = null,
     onErrorDismiss: () -> Unit = {},
     favoriteAgentIds: Set<String> = emptySet(),
     favoriteModelKeys: Set<String> = emptySet(),
+    favoriteSpecNames: Set<String> = emptySet(),
     onToggleAgentFavorite: ((agentId: String) -> Unit)? = null,
     onToggleModelFavorite: ((endpoint: String, model: String) -> Unit)? = null,
+    onToggleSpecFavorite: ((name: String) -> Unit)? = null,
     /**
      * Mobile-only preference controlling whether pinned items also appear in a
-     * dedicated section at the top of the sheet. [StarredModelsDisplay.OFF] keeps the
-     * historical behavior (favorites float to the top within their own group).
+     * dedicated section at the top of the sheet. [StarredModelsDisplay.OFF] skips it
+     * (favorites float to the top within their own group).
      */
-    starredDisplay: StarredModelsDisplay = StarredModelsDisplay.OFF,
+    starredDisplay: StarredModelsDisplay = StarredModelsDisplay.GROUPED,
     /**
      * Per-endpoint user-provided-key state. Endpoints whose key is [KeyState.Unset]
-     * or [KeyState.Expired] render a greyed group with a "Set API Key" CTA. Absent
-     * keys (built-in endpoints) and [KeyState.Loading] / [KeyState.Set] all
-     * fail-open to the normal selectable rendering.
+     * or [KeyState.Expired] render a greyed group with an "Add key" action, and spec
+     * rows on them say so. Absent keys (built-in endpoints) and [KeyState.Loading] /
+     * [KeyState.Set] all fail-open to the normal selectable rendering.
      */
     endpointKeyStates: Map<String, KeyState> = emptyMap(),
+    /** Above the list; the comparison A/B pair while comparing. */
+    header: (@Composable () -> Unit)? = null,
     /**
-     * Invoked with the endpoint name when the user taps the "Set API Key" CTA on
-     * a greyed group. Implementations should navigate to Settings → Provider API Keys.
+     * Invoked with the endpoint name when the user taps "Add key" on a greyed group, or a
+     * spec row that needs a key. Implementations should navigate to Settings → Provider API Keys.
      */
     onSetApiKey: (endpointName: String) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
-    ModalBottomSheet(
+    AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
         dragHandle = { LowProfileDragHandle() },
         sheetState = sheetState,
-        modifier = modifier,
+        modifier = modifier.clearFocusOnTap(),
     ) {
         ModelSelectorSheetContent(
             endpointConfigs = endpointConfigs,
@@ -145,6 +164,11 @@ fun ModelSelectorSheet(
             selectedEndpoint = selectedEndpoint,
             selectedModel = selectedModel,
             onModelSelect = onModelSelect,
+            modelSelect = modelSelect,
+            modelSpecs = modelSpecs,
+            selectedSpec = selectedSpec,
+            onSpecSelect = onSpecSelect,
+            agentsLoaded = agentsLoaded,
             onSetApiKey = onSetApiKey,
             modifier = Modifier.fillMaxSize(),
             serverUrl = serverUrl,
@@ -152,10 +176,13 @@ fun ModelSelectorSheet(
             onErrorDismiss = onErrorDismiss,
             favoriteAgentIds = favoriteAgentIds,
             favoriteModelKeys = favoriteModelKeys,
+            favoriteSpecNames = favoriteSpecNames,
             onToggleAgentFavorite = onToggleAgentFavorite,
             onToggleModelFavorite = onToggleModelFavorite,
+            onToggleSpecFavorite = onToggleSpecFavorite,
             starredDisplay = starredDisplay,
             endpointKeyStates = endpointKeyStates,
+            header = header,
         )
     }
 }
@@ -173,94 +200,77 @@ fun ModelSelectorSheetContent(
     selectedEndpoint: String?,
     selectedModel: String?,
     onModelSelect: (endpoint: String, model: String) -> Unit,
+    /** `interface.modelSelect`; off lists only the server's specs, as web does. */
+    modelSelect: Boolean,
     /**
-     * Invoked with the endpoint name when the user taps the "Set API Key" CTA on
-     * a greyed group. Implementations should navigate to Settings → Provider API Keys.
+     * Invoked with the endpoint name when the user taps "Add key" on a greyed group, or a
+     * spec row that needs a key. Implementations should navigate to Settings → Provider API Keys.
      */
     onSetApiKey: (endpointName: String) -> Unit,
     modifier: Modifier = Modifier,
+    modelSpecs: ModelSpecs? = null,
+    selectedSpec: String? = null,
+    onSpecSelect: (ModelSpec) -> Unit = {},
+    /** Whether [agents] is the fetched list; until it is, no agent spec is hidden for missing from it. */
+    agentsLoaded: Boolean = false,
     serverUrl: String = "",
     errorMessage: String? = null,
     onErrorDismiss: () -> Unit = {},
     favoriteAgentIds: Set<String> = emptySet(),
     favoriteModelKeys: Set<String> = emptySet(),
+    favoriteSpecNames: Set<String> = emptySet(),
     onToggleAgentFavorite: ((agentId: String) -> Unit)? = null,
     onToggleModelFavorite: ((endpoint: String, model: String) -> Unit)? = null,
+    onToggleSpecFavorite: ((name: String) -> Unit)? = null,
     /**
      * Mobile-only preference controlling whether pinned items also appear in a
-     * dedicated section at the top of the sheet. [StarredModelsDisplay.OFF] keeps the
-     * historical behavior (favorites float to the top within their own group).
+     * dedicated section at the top of the sheet. [StarredModelsDisplay.OFF] skips it
+     * (favorites float to the top within their own group).
      */
-    starredDisplay: StarredModelsDisplay = StarredModelsDisplay.OFF,
+    starredDisplay: StarredModelsDisplay = StarredModelsDisplay.GROUPED,
     /**
      * Per-endpoint user-provided-key state. Endpoints whose key is [KeyState.Unset]
-     * or [KeyState.Expired] render a greyed group with a "Set API Key" CTA. Absent
-     * keys (built-in endpoints) and [KeyState.Loading] / [KeyState.Set] all
-     * fail-open to the normal selectable rendering.
+     * or [KeyState.Expired] render a greyed group with an "Add key" action, and spec
+     * rows on them say so. Absent keys (built-in endpoints) and [KeyState.Loading] /
+     * [KeyState.Set] all fail-open to the normal selectable rendering.
      */
     endpointKeyStates: Map<String, KeyState> = emptyMap(),
     /** Rendered above the error banner and title; the paged host passes a back-arrow row. */
     header: (@Composable () -> Unit)? = null,
+    /** False when [header] already titles the list (Compare setup). */
+    showTitle: Boolean = true,
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    // Only user toggles land here; absent keys default collapsed via `== true` reads below. Not
-    // seeded — the sheet can mount before models/agents load, and a seed would miss late arrivals.
+    // Only user toggles land here; an absent key is collapsed unless it holds the selected spec.
+    // Not seeded — the sheet can mount before models/agents load, and a seed would miss late arrivals.
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
-    val isSearching = searchQuery.isNotBlank()
-
-    // Filter to only show models for endpoints the user's server has enabled
-    val filteredByEndpoint = remember(availableModels, endpointConfigs) {
-        filterModelsByEndpoint(availableModels, endpointConfigs)
+    val inputs = PickerInputs(
+        endpointConfigs = endpointConfigs,
+        availableModels = availableModels,
+        agents = agents,
+        agentsLoaded = agentsLoaded,
+        modelSpecs = modelSpecs,
+        modelSelect = modelSelect,
+        selectedEndpoint = selectedEndpoint,
+        selectedModel = selectedModel,
+        selectedSpec = selectedSpec,
+        searchQuery = searchQuery,
+        favoriteAgentIds = favoriteAgentIds,
+        favoriteModelKeys = favoriteModelKeys,
+        favoriteSpecNames = favoriteSpecNames,
+        starredDisplay = starredDisplay,
+        expandedGroups = expandedGroups.toMap(),
+        endpointKeyStates = endpointKeyStates,
+    )
+    val rows = remember(inputs) { pickerRows(inputs) }
+    val specIcons = remember(modelSpecs, agents, serverUrl, endpointConfigs) {
+        modelSpecs?.list.orEmpty().associate { it.name to it.menuIconSource(agents, serverUrl, endpointConfigs) }
     }
 
-    // Filter agents by search query (fuzzy matching), sorted by score when searching.
-    // When not searching, pinned agents (v0.8.5+) sort to the top of the list.
-    val filteredAgents = remember(agents, searchQuery, favoriteAgentIds) {
-        val base = if (!isSearching) {
-            agents
-        } else if (searchQuery.length <= 2) {
-            agents.filter { agent ->
-                val name = agent.name ?: agent.id
-                fuzzyMatches(name, searchQuery)
-            }
-        } else {
-            agents.map { agent ->
-                val name = agent.name ?: agent.id
-                agent to fuzzyScore(name, searchQuery)
-            }
-                .filter { (_, score) -> score >= FUZZY_MATCH_THRESHOLD }
-                .sortedByDescending { (_, score) -> score }
-                .map { (agent, _) -> agent }
-        }
-        if (isSearching) {
-            base
-        } else {
-            base.sortedByDescending { it.id in favoriteAgentIds }
-        }
+    // A spec on an endpoint without a usable key opens its key instead; its row says so first.
+    val onSpecClick: (ModelSpec, String?) -> Unit = { spec, endpoint ->
+        if (endpoint != null && endpointKeyStates[endpoint].blocksSelection()) onSetApiKey(endpoint) else onSpecSelect(spec)
     }
-
-    // Optional dedicated "Starred" section (mobile-only). Shown only when not searching
-    // (search already reorders by relevance) and the preference is not OFF. Starred items
-    // are also still rendered within their own groups below — nothing is removed.
-    val showStarred = !isSearching && starredDisplay != StarredModelsDisplay.OFF
-    // favoriteAgentIds / favoriteModelKeys are LinkedHashSets from FavoritesDelegate.publish,
-    // so iterating them preserves the server-side pin order.
-    val agentsById = remember(agents) { agents.associateBy { it.id } }
-    val starredAgents = remember(agentsById, favoriteAgentIds, showStarred) {
-        if (!showStarred) emptyList() else favoriteAgentIds.mapNotNull { agentsById[it] }
-    }
-    val starredModels = remember(filteredByEndpoint, favoriteModelKeys, showStarred) {
-        if (!showStarred) {
-            emptyList()
-        } else {
-            favoriteModelKeys.mapNotNull { key ->
-                val (endpoint, model) = FavoritesDelegate.parseFavoriteModelKey(key) ?: return@mapNotNull null
-                // Only surface favorites whose endpoint+model are actually available.
-                if (filteredByEndpoint[endpoint]?.contains(model) == true) endpoint to model else null
-            }
-        }
-    }
-    val hasStarred = starredAgents.isNotEmpty() || starredModels.isNotEmpty()
 
     Column(
         modifier = modifier
@@ -274,18 +284,20 @@ fun ModelSelectorSheetContent(
         if (errorMessage != null) {
             ErrorBanner(message = errorMessage, onDismiss = onErrorDismiss)
         }
-        Text(
-            text = stringResource(Res.string.select_a_model),
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 16.dp),
-        )
+        if (showTitle) {
+            Text(
+                text = stringResource(Res.string.select_a_model),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 16.dp),
+            )
+        }
 
-        OutlinedTextField(
+        AdaptiveOutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search models...") },
+            placeholder = { Text(stringResource(Res.string.model_selector_search)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
@@ -304,222 +316,203 @@ fun ModelSelectorSheetContent(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        // Drag-select reaches only the rows on screen: the list doesn't auto-scroll under it.
+        val dragSelection = rememberListDragSelection()
         LazyColumn(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .listDragSelection(dragSelection, holdOnly = true),
         ) {
-            // Optional "Starred" section at the very top (mobile-only). Starred items
-            // are duplicated here — they still render in their own groups below.
-            if (showStarred && hasStarred) {
-                // GROUPED renders a collapsible header and respects its toggle; TOP is a
-                // flat, always-shown list closed off with a divider. OFF never reaches here.
-                val starredItemsVisible = when (starredDisplay) {
-                    StarredModelsDisplay.GROUPED -> {
-                        val expanded = expandedGroups[STARRED_GROUP_KEY] == true
-                        item(key = "header_starred") {
-                            EndpointGroupHeader(
-                                endpointName = STARRED_GROUP_KEY,
-                                displayLabel = stringResource(Res.string.starred_group),
-                                modelCount = starredAgents.size + starredModels.size,
-                                isExpanded = expanded,
-                                iconUrl = null,
-                                leadingIcon = Icons.Default.Star,
-                                onToggle = { expandedGroups[STARRED_GROUP_KEY] = !expanded },
-                            )
-                        }
-                        expanded
-                    }
-                    StarredModelsDisplay.TOP -> true
-                    StarredModelsDisplay.OFF -> false
-                }
-                if (starredItemsVisible) {
-                    // The flat TOP list reads as a dense quick-access strip; GROUPED keeps
-                    // the standard row rhythm since it sits behind a collapsible header.
-                    val starredPadding = if (starredDisplay == StarredModelsDisplay.TOP) {
-                        StarredItemVerticalPadding
-                    } else {
-                        ListItemVerticalPadding
-                    }
-                    items(starredAgents, key = { "starred_agent_${it.id}" }, contentType = { "agent" }) { agent ->
-                        AgentListItem(
-                            agent = agent,
-                            isSelected = selectedEndpoint == EndpointConstants.AGENTS && agent.id == selectedModel,
-                            serverUrl = serverUrl,
-                            onClick = { onModelSelect(EndpointConstants.AGENTS, agent.id) },
-                            isFavorite = true,
-                            onToggleFavorite = onToggleAgentFavorite?.let { toggle -> { toggle(agent.id) } },
-                            verticalPadding = starredPadding,
-                        )
-                    }
-                    items(
-                        starredModels,
-                        key = { (endpoint, model) -> "starred_model_$endpoint::$model" },
-                        contentType = { "model" },
-                    ) { (endpoint, model) ->
-                        ModelListItem(
-                            model = model,
-                            isSelected = endpoint == selectedEndpoint && model == selectedModel,
-                            isFavorite = true,
-                            onClick = { onModelSelect(endpoint, model) },
-                            onToggleFavorite = onToggleModelFavorite?.let { toggle -> { toggle(endpoint, model) } },
-                            verticalPadding = starredPadding,
-                        )
-                    }
-                }
-                if (starredDisplay == StarredModelsDisplay.TOP) {
-                    item(key = "starred_divider") {
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                    }
-                }
-            }
-
-            // "My Agents" group (shown first, like the web frontend)
-            if (filteredAgents.isNotEmpty()) {
-                val agentsExpanded = isSearching || expandedGroups[EndpointConstants.AGENTS] == true
-                item(key = "header_agents") {
-                    EndpointGroupHeader(
-                        endpointName = EndpointConstants.AGENTS,
-                        displayLabel = "My Agents",
-                        modelCount = filteredAgents.size,
-                        isExpanded = agentsExpanded,
-                        iconUrl = null,
-                        onToggle = { if (!isSearching) expandedGroups[EndpointConstants.AGENTS] = !agentsExpanded },
+            items(rows, key = { it.key }, contentType = { it.contentType }) { row ->
+                when (row) {
+                    is PickerRow.Header -> PickerHeader(
+                        row = row,
+                        endpointConfigs = endpointConfigs,
+                        serverUrl = serverUrl,
+                        onToggle = { row.expandKey?.let { expandedGroups[it] = !row.expanded } },
+                        onSetApiKey = onSetApiKey,
+                        dragSelection = dragSelection,
                     )
-                }
-                if (agentsExpanded) {
-                    items(filteredAgents, key = { "agents_${it.id}" }, contentType = { "agent" }) { agent ->
-                        AgentListItem(
-                            agent = agent,
-                            isSelected = selectedEndpoint == EndpointConstants.AGENTS && agent.id == selectedModel,
-                            serverUrl = serverUrl,
-                            onClick = { onModelSelect(EndpointConstants.AGENTS, agent.id) },
-                            isFavorite = agent.id in favoriteAgentIds,
-                            onToggleFavorite = onToggleAgentFavorite?.let { toggle -> { toggle(agent.id) } },
-                        )
-                    }
-                }
-            }
-
-            // Endpoint model groups
-            filteredByEndpoint.forEach { (endpointName, models) ->
-                val baseFiltered = if (!isSearching) {
-                    models
-                } else if (searchQuery.length <= 2) {
-                    models.filter { fuzzyMatches(it, searchQuery) }
-                } else {
-                    models.map { model -> model to fuzzyScore(model, searchQuery) }
-                        .filter { (_, score) -> score >= FUZZY_MATCH_THRESHOLD }
-                        .sortedByDescending { (_, score) -> score }
-                        .map { (model, _) -> model }
-                }
-                // Pinned models (v0.8.5+) sort to the top when not searching.
-                val filteredModels = if (isSearching) {
-                    baseFiltered
-                } else {
-                    baseFiltered.sortedByDescending { "$endpointName::$it" in favoriteModelKeys }
-                }
-                if (filteredModels.isNotEmpty()) {
-                    val config = endpointConfigs[endpointName]
-                    val displayLabel = config?.modelDisplayLabel ?: endpointName
-                    // Auto-expand while searching so matches in collapsed groups are visible;
-                    // otherwise use manual toggle state.
-                    val isExpanded = isSearching || expandedGroups[endpointName] == true
-                    // Endpoints with userProvide=true and Unset/Expired key render disabled
-                    // with a "Set API Key" CTA. Loading and absent states fail-open.
-                    val keyState = endpointKeyStates[endpointName]
-                    val needsKey = keyState is KeyState.Unset || keyState is KeyState.Expired
-                    val effectiveExpanded = isExpanded && !needsKey
-                    item(key = "header_$endpointName") {
-                        EndpointGroupHeader(
-                            endpointName = endpointName,
-                            displayLabel = displayLabel,
-                            modelCount = filteredModels.size,
-                            isExpanded = effectiveExpanded,
-                            iconUrl = config?.iconURL,
-                            onToggle = { if (!isSearching) expandedGroups[endpointName] = !isExpanded },
-                            needsKey = needsKey,
-                            onSetApiKey = { onSetApiKey(endpointName) },
-                        )
-                    }
-                    if (effectiveExpanded) {
-                        items(filteredModels, key = { "${endpointName}_$it" }, contentType = { "model" }) { model ->
-                            ModelListItem(
-                                model = model,
-                                isSelected = endpointName == selectedEndpoint && model == selectedModel,
-                                isFavorite = "$endpointName::$model" in favoriteModelKeys,
-                                onClick = { onModelSelect(endpointName, model) },
-                                onToggleFavorite = onToggleModelFavorite?.let { toggle -> { toggle(endpointName, model) } },
-                            )
-                        }
-                    }
+                    is PickerRow.Spec -> SpecListItem(
+                        spec = row.spec,
+                        icon = specIcons[row.spec.name],
+                        isSelected = row.isSelected,
+                        onClick = { onSpecClick(row.spec, row.endpoint) },
+                        dragSelection = dragSelection,
+                        keyHint = row.keyHint,
+                        isFavorite = row.isFavorite,
+                        onToggleFavorite = onToggleSpecFavorite?.let { toggle -> { toggle(row.spec.name) } },
+                        verticalPadding = rowPadding(row.dense),
+                    )
+                    is PickerRow.AgentRow -> AgentListItem(
+                        agent = row.agent,
+                        isSelected = row.isSelected,
+                        enabled = row.enabled,
+                        serverUrl = serverUrl,
+                        onClick = { onModelSelect(EndpointConstants.AGENTS, row.agent.id) },
+                        isFavorite = row.isFavorite,
+                        onToggleFavorite = onToggleAgentFavorite?.let { toggle -> { toggle(row.agent.id) } },
+                        verticalPadding = rowPadding(row.dense),
+                        dragSelection = dragSelection,
+                    )
+                    is PickerRow.Model -> ModelListItem(
+                        model = row.model,
+                        isSelected = row.isSelected,
+                        enabled = row.enabled,
+                        isFavorite = row.isFavorite,
+                        onClick = { onModelSelect(row.endpoint, row.model) },
+                        onToggleFavorite = onToggleModelFavorite?.let { toggle -> { toggle(row.endpoint, row.model) } },
+                        verticalPadding = rowPadding(row.dense),
+                        dragSelection = dragSelection,
+                    )
+                    PickerRow.SpecOnlyNote -> SpecOnlyNote()
+                    PickerRow.StarredDivider ->
+                        AdaptiveDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 }
             }
         }
     }
 }
 
+/** The flat Starred TOP list is a dense quick-access strip; every other row keeps the standard rhythm. */
+private fun rowPadding(dense: Boolean): Dp = if (dense) StarredItemVerticalPadding else ListItemVerticalPadding
+
 @Composable
-private fun EndpointGroupHeader(
+private fun PickerHeader(
+    row: PickerRow.Header,
+    endpointConfigs: Map<String, EndpointConfig>,
+    serverUrl: String,
+    onToggle: () -> Unit,
+    onSetApiKey: (endpointName: String) -> Unit,
+    dragSelection: ListDragSelection,
+) {
+    val label = when (val label = row.label) {
+        HeaderLabel.Starred -> stringResource(Res.string.starred_group)
+        HeaderLabel.MyAgents -> stringResource(Res.string.model_selector_my_agents)
+        is HeaderLabel.Text -> label.text
+    }
+    var iconName = label
+    var iconUrl: String? = null
+    var provider: ProviderId? = null
+    var leadingIcon: ImageVector? = null
+    when (val icon = row.icon) {
+        HeaderIcon.Star -> {
+            iconName = STARRED_GROUP_KEY
+            leadingIcon = Icons.Default.Star
+        }
+        HeaderIcon.Agents -> iconName = EndpointConstants.AGENTS
+        is HeaderIcon.Endpoint -> {
+            val source =
+                resolveIconSource(endpointConfigs[icon.endpoint]?.iconURL, icon.endpoint, serverUrl, endpointConfigs)
+            iconName = source.endpointName ?: icon.endpoint
+            iconUrl = source.imageUrl
+            provider = source.provider
+        }
+        is HeaderIcon.Group -> {
+            // A group icon naming an endpoint key draws that endpoint's served brand.
+            val endpoint = icon.icon.takeIf { it in endpointConfigs }
+            val source = resolveIconSource(icon.icon, endpoint, serverUrl, endpointConfigs)
+            iconName = source.endpointName ?: label
+            iconUrl = source.imageUrl
+            provider = source.provider
+        }
+        HeaderIcon.Folder -> leadingIcon = Icons.Outlined.Folder
+    }
+    EndpointGroupHeader(
+        endpointName = iconName,
+        displayLabel = label,
+        modelCount = row.count,
+        isExpanded = row.expanded,
+        iconUrl = iconUrl,
+        onToggle = onToggle,
+        dragSelection = dragSelection,
+        keyHint = row.keyHint,
+        onSetApiKey = { row.keyEndpoint?.let(onSetApiKey) },
+        leadingIcon = leadingIcon,
+        provider = provider,
+    )
+}
+
+@Composable
+internal fun EndpointGroupHeader(
     endpointName: String,
     displayLabel: String,
     modelCount: Int,
     isExpanded: Boolean,
     iconUrl: String?,
     onToggle: () -> Unit,
-    needsKey: Boolean = false,
+    dragSelection: ListDragSelection,
+    /** Non-null when the endpoint has no usable key: the group is greyed behind "Add key". */
+    keyHint: KeyHint? = null,
     onSetApiKey: () -> Unit = {},
     /** When set, renders this vector instead of an [EndpointIcon] (used by the Starred group). */
     leadingIcon: ImageVector? = null,
+    provider: ProviderId? = null,
 ) {
-    Row(
+    val needsKey = keyHint != null
+    // Add key drops under the label rather than squeeze it narrower than MinGroupLabelWidth.
+    FlowRow(
         modifier = Modifier
             .fillMaxWidth()
             // Drop the clickable modifier entirely when needsKey — Compose's
             // `clickable(enabled = false)` still consumes touch events and
             // announces "disabled" to TalkBack/VoiceOver. Only the inner
-            // SetApiKeyChip remains interactive in that branch.
+            // AddKeyButton remains interactive in that branch.
             .then(
                 if (needsKey) {
                     Modifier.padding(horizontal = 4.dp)
                 } else {
-                    Modifier.sheetRowRipple().clickable(onClick = onToggle)
+                    Modifier
+                        .dragSelectRow(dragSelection, onClick = onToggle)
+                        .padding(horizontal = 4.dp)
                 },
             )
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End,
+        itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         // Disabled icon + label use Material's standard 0.38 disabled alpha. The
         // CTA chip below stays full-opacity so the action remains discoverable.
         val labelAlpha = if (needsKey) 0.38f else 1f
-        if (leadingIcon != null) {
-            Icon(
-                imageVector = leadingIcon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .size(IconSize)
-                    .alpha(labelAlpha),
-            )
-        } else {
-            EndpointIcon(
-                endpointName = endpointName,
-                iconUrl = iconUrl,
-                size = IconSize,
-                contentDescription = "$endpointName icon",
-                glyphTint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.alpha(labelAlpha),
-            )
+        Row(
+            modifier = Modifier.weight(1f).widthIn(min = MinGroupLabelWidth),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .size(IconSize)
+                        .alpha(labelAlpha)
+                        .dragSelectRowIcon(),
+                )
+            } else {
+                EndpointIcon(
+                    endpointName = endpointName,
+                    iconUrl = iconUrl,
+                    provider = provider,
+                    size = IconSize,
+                    contentDescription = null,
+                    glyphTint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.alpha(labelAlpha).dragSelectRowIcon(),
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(
+                    text = "$displayLabel ($modelCount)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.alpha(labelAlpha),
+                )
+                // Full opacity: the reason the group is greyed is not itself disabled.
+                if (keyHint != null) KeyHintLine(keyHint)
+            }
         }
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = "$displayLabel ($modelCount)",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier
-                .weight(1f)
-                .alpha(labelAlpha),
-        )
         if (needsKey) {
-            SetApiKeyChip(
+            AddKeyButton(
                 endpointLabel = displayLabel,
                 onClick = onSetApiKey,
             )
@@ -536,31 +529,58 @@ private fun EndpointGroupHeader(
     }
 }
 
+private val MinGroupLabelWidth = 120.dp
+
 /**
- * Mirrors LibreChat web's "Set API Key" pill on greyed endpoint rows. Tapping
- * navigates to Settings → Provider API Keys with the endpoint pre-targeted.
+ * The "Add key" action on a greyed endpoint group, web's "Set API Key" pill. Tapping navigates to
+ * Settings → Provider API Keys with the endpoint pre-targeted. The key icon is the one the
+ * Provider Keys row in Settings uses.
  */
 @Composable
-private fun SetApiKeyChip(
+private fun AddKeyButton(
     endpointLabel: String,
     onClick: () -> Unit,
 ) {
-    val label = stringResource(Res.string.set_api_key_action)
     val cd = stringResource(Res.string.cd_set_api_key, endpointLabel)
-    TextButton(onClick = onClick) {
+    AdaptiveFilledTonalButton(
+        onClick = onClick,
+        // Small: a 32dp button in a 20dp-icon header row. The touch target stays 48dp.
+        modifier = Modifier.heightIn(min = AddKeyButtonHeight),
+        contentPadding = PaddingValues(start = 12.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
+    ) {
         Icon(
-            imageVector = Icons.Outlined.Settings,
-            contentDescription = cd,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(IconSize),
+            imageVector = Icons.Default.VpnKey,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
         )
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        // Read as "Add a key for <endpoint>": the visible label alone doesn't say which.
         Text(
-            text = label,
+            text = stringResource(Res.string.set_api_key_action),
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            modifier = Modifier.semantics { contentDescription = cd },
         )
     }
+}
+
+private val AddKeyButtonHeight = 32.dp
+
+/** "Needs your key" or "Key expired", under an endpoint group's or a spec row's name. */
+@Composable
+private fun KeyHintLine(hint: KeyHint) {
+    Text(
+        text = stringResource(
+            when (hint) {
+                KeyHint.NEEDS_KEY -> Res.string.model_selector_needs_key
+                KeyHint.EXPIRED -> Res.string.model_selector_key_expired
+            },
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -570,14 +590,15 @@ private fun LazyItemScope.ModelListItem(
     isFavorite: Boolean,
     onClick: () -> Unit,
     onToggleFavorite: (() -> Unit)?,
+    dragSelection: ListDragSelection,
     verticalPadding: Dp = ListItemVerticalPadding,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .sheetRowRipple()
-            .clickable(onClick = onClick)
-            .padding(vertical = verticalPadding, horizontal = 12.dp)
+            .then(if (enabled) Modifier.dragSelectRow(dragSelection, onClick = onClick) else Modifier.alpha(DisabledAlpha))
+            .padding(vertical = verticalPadding, horizontal = 16.dp)
             .animateItem(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -594,11 +615,12 @@ private fun LazyItemScope.ModelListItem(
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
-        if (onToggleFavorite != null) {
+        if (onToggleFavorite != null && enabled) {
             Spacer(modifier = Modifier.width(4.dp))
             FavoriteStarButton(
                 isFavorite = isFavorite,
                 onToggle = onToggleFavorite,
+                modifier = Modifier.dragSelectExclude(dragSelection),
             )
         }
     }
@@ -610,21 +632,20 @@ private fun LazyItemScope.AgentListItem(
     isSelected: Boolean,
     serverUrl: String,
     onClick: () -> Unit,
+    dragSelection: ListDragSelection,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
     verticalPadding: Dp = ListItemVerticalPadding,
+    enabled: Boolean = true,
 ) {
     val agentName = agent.name ?: agent.id
-    val resolvedAvatarUrl = agent.avatarUrl?.let { url ->
-        if (url.startsWith("http")) url else "$serverUrl$url"
-    }
+    val resolvedAvatarUrl = resolveAvatarUrl(agent.avatarUrl, serverUrl)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .sheetRowRipple()
-            .clickable(onClick = onClick)
-            .padding(vertical = verticalPadding, horizontal = 12.dp)
+            .then(if (enabled) Modifier.dragSelectRow(dragSelection, onClick = onClick) else Modifier.alpha(DisabledAlpha))
+            .padding(vertical = verticalPadding, horizontal = 16.dp)
             .animateItem(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -632,17 +653,18 @@ private fun LazyItemScope.AgentListItem(
         if (resolvedAvatarUrl != null) {
             AsyncImage(
                 model = resolvedAvatarUrl,
-                contentDescription = "$agentName avatar",
+                contentDescription = null,
                 modifier = Modifier
                     .size(IconSize)
-                    .clip(CircleShape),
+                    .clip(CircleShape)
+                    .dragSelectRowIcon(),
                 contentScale = ContentScale.Crop,
             )
         } else {
             Icon(
                 imageVector = Icons.Outlined.Create,
-                contentDescription = "$agentName icon",
-                modifier = Modifier.size(IconSize),
+                contentDescription = null,
+                modifier = Modifier.size(IconSize).dragSelectRowIcon(),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -658,8 +680,82 @@ private fun LazyItemScope.AgentListItem(
                 imageVector = Icons.Outlined.Public,
                 contentDescription = stringResource(Res.string.cd_public_agent),
                 modifier = Modifier.size(16.dp),
-                tint = Color(0xFF4CAF50),
+                tint = statusColors().success,
             )
+        }
+        if (isSelected) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                Icons.Default.Check,
+                contentDescription = stringResource(Res.string.cd_selected),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (onToggleFavorite != null && enabled) {
+            Spacer(modifier = Modifier.width(4.dp))
+            FavoriteStarButton(
+                isFavorite = isFavorite,
+                onToggle = onToggleFavorite,
+                modifier = Modifier.dragSelectExclude(dragSelection),
+            )
+        }
+    }
+}
+
+/**
+ * A named model spec: its own icon, label and description, apart from the raw model it runs on.
+ * [keyHint] is set when the spec's endpoint has no usable key, so the row says a tap opens its key.
+ */
+@Composable
+internal fun LazyItemScope.SpecListItem(
+    spec: ModelSpec,
+    /** Null when the spec hides its icon (`showIconInMenu: false`); the label keeps its column. */
+    icon: IconSource?,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    dragSelection: ListDragSelection,
+    keyHint: KeyHint? = null,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
+    verticalPadding: Dp = ListItemVerticalPadding,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .dragSelectRow(dragSelection, onClick = onClick)
+            .padding(vertical = verticalPadding, horizontal = 16.dp)
+            .animateItem(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            EndpointIcon(
+                endpointName = icon.endpointName,
+                iconUrl = icon.imageUrl,
+                provider = icon.provider,
+                size = IconSize,
+                contentDescription = null,
+                glyphTint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.dragSelectRowIcon(),
+            )
+        } else {
+            Spacer(modifier = Modifier.width(IconSize))
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = spec.displayLabel,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (keyHint != null) KeyHintLine(keyHint)
+            spec.description?.takeIf { it.isNotBlank() }?.let { description ->
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (isSelected) {
             Spacer(modifier = Modifier.width(8.dp))
@@ -671,17 +767,35 @@ private fun LazyItemScope.AgentListItem(
         }
         if (onToggleFavorite != null) {
             Spacer(modifier = Modifier.width(4.dp))
-            FavoriteStarButton(isFavorite = isFavorite, onToggle = onToggleFavorite)
+            FavoriteStarButton(
+                isFavorite = isFavorite,
+                onToggle = onToggleFavorite,
+                modifier = Modifier.dragSelectExclude(dragSelection),
+            )
         }
     }
 }
+
+/** Under `enforce`, atop the list: the greyed raw rows are listed but can't be sent. */
+@Composable
+private fun SpecOnlyNote() {
+    Text(
+        text = stringResource(Res.string.model_selector_spec_only_top_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+private const val DisabledAlpha = 0.38f
 
 @Composable
 private fun FavoriteStarButton(
     isFavorite: Boolean,
     onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    IconButton(onClick = onToggle, modifier = Modifier.size(32.dp)) {
+    IconButton(onClick = onToggle, modifier = modifier.size(32.dp)) {
         Icon(
             imageVector = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
             contentDescription = stringResource(

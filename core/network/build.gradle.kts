@@ -4,7 +4,7 @@ plugins {
     id("librechat.kotlin.serialization")
 }
 
-extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+android {
     namespace = "com.garfiec.librechat.core.network"
 }
 
@@ -34,6 +34,9 @@ kotlin {
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
+        }
+        commonTest.dependencies {
+            implementation(libs.coroutines.test)
         }
         named("androidUnitTest").dependencies {
             implementation(libs.koin.test)

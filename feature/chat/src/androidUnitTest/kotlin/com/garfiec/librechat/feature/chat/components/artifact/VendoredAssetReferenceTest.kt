@@ -1,5 +1,6 @@
 package com.garfiec.librechat.feature.chat.components.artifact
 
+import com.garfiec.librechat.core.data.datastore.FlaggedArtifactLibraries
 import com.garfiec.librechat.feature.chat.components.buildKatexHtml
 import com.garfiec.librechat.feature.chat.components.buildMermaidHtml
 import com.garfiec.librechat.feature.chat.components.web.VendoredWebAssets
@@ -24,16 +25,52 @@ class VendoredAssetReferenceTest {
         // inline mermaid block is a separate document from the mermaid artifact.
         put("katex-block", buildKatexHtml("x^2", displayMode = true, textColorCss = "#000"))
         put("katex-inline", buildKatexHtml("x^2", displayMode = false, textColorCss = "#000"))
-        put("mermaid-message", buildMermaidHtml("graph TD; A-->B;", theme = "default"))
+        put("mermaid-message", buildMermaidHtml("graph TD; A-->B;", theme = "default", errorPrefix = "Diagram error:"))
         put("mermaid", MermaidWebContent.buildHtml("graph TD; A-->B;", isDarkTheme = false))
         put("mermaid-dark", MermaidWebContent.buildHtml("graph TD; A-->B;", isDarkTheme = true))
         put("markdown", MarkdownWebContent.buildHtml("# Title\n\n```kotlin\nval x = 1\n```", isDarkTheme = false))
         put("markdown-dark", MarkdownWebContent.buildHtml("# Title", isDarkTheme = true))
         put("react", ArtifactWebContent.buildHtml("export default () => <div/>;", "application/vnd.react", false))
+        // One artifact importing every bundled module, so every bundle's <script src> is checked.
+        put(
+            "react-modules",
+            ArtifactWebContent.buildHtml(
+                VendoredWebAssets.MODULES.keys.joinToString("\n") { "import * as m from '$it';" } +
+                    "\nexport default () => <div/>;",
+                "application/vnd.react",
+                false,
+            ),
+        )
         put("html", ArtifactWebContent.buildHtml("<h1>hi</h1>", "text/html", false))
         put("html-full", ArtifactWebContent.buildHtml("<!DOCTYPE html><html><head></head><body/></html>", "text/html", false))
         put("svg", ArtifactWebContent.buildHtml("<svg/>", "image/svg+xml", false))
         put("plain", ArtifactWebContent.buildHtml("hello", "text/plain", false))
+        // Server-built office previews, after the client points their CDN renderers at the
+        // vendored copies. The server's own shape: a CSP naming jsDelivr, renderer tags with SRI.
+        val officeHead = "<!DOCTYPE html><html><head>" +
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; " +
+            "script-src https://cdn.jsdelivr.net 'unsafe-inline'; connect-src 'self' https://cdn.jsdelivr.net\">"
+        val officeTail = "</head><body><div id=\"lc-fallback\" hidden></div></body></html>"
+        val cdn = "https://cdn.jsdelivr.net/npm"
+        put(
+            "office-docx",
+            ArtifactWebContent.buildOfficePreviewHtml(
+                officeHead +
+                    "<script src=\"$cdn/jszip@3.10.1/dist/jszip.min.js\" crossorigin=\"anonymous\"></script>" +
+                    "<script src=\"$cdn/docx-preview@0.3.7/dist/docx-preview.min.js\"></script>" +
+                    officeTail,
+                "html",
+                isDarkTheme = false,
+            ),
+        )
+        put(
+            "office-pptx",
+            ArtifactWebContent.buildOfficePreviewHtml(
+                officeHead + "<script src=\"$cdn/pptx-preview@1.0.7/dist/pptx-preview.umd.js\"></script>" + officeTail,
+                "html",
+                isDarkTheme = false,
+            ),
+        )
     }
 
     /** Every `src="…"` / `href="…"` in a document, excluding data and blob URIs. */
@@ -89,6 +126,26 @@ class VendoredAssetReferenceTest {
                     )
                 }
         }
+    }
+
+    @Test
+    fun `every module bundle the runner can load is in the manifest`() {
+        VendoredWebAssets.MODULES.forEach { (spec, script) ->
+            assertTrue(script in VendoredWebAssets.FILES, "'$spec' maps to '$script', which is not vendored")
+        }
+        VendoredWebAssets.ADVISORIES.keys.forEach { spec ->
+            assertTrue(spec in VendoredWebAssets.MODULES, "advisory for '$spec', which no bundle registers")
+        }
+    }
+
+    @Test
+    fun `the gate asks about exactly the libraries Settings lists`() {
+        // Settings writes answers for FlaggedArtifactLibraries; the gate reads them by the subject
+        // it derives here. A mismatch is a Settings choice that silently never applies.
+        assertEquals(
+            FlaggedArtifactLibraries.SUBJECTS.toSet(),
+            VendoredWebAssets.ADVISORIES.values.map { it.subject() }.toSet(),
+        )
     }
 
     @Test

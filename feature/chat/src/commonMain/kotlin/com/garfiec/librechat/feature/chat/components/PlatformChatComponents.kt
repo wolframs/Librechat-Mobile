@@ -10,6 +10,7 @@ import com.garfiec.librechat.core.model.FeedbackRating
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.MinimalFeedback
 import com.garfiec.librechat.core.model.content.MessageContentPart
+import com.garfiec.librechat.core.model.media.IconSource
 
 /** Platform-specific message bubble. */
 @Composable
@@ -23,22 +24,15 @@ expect fun MessageBubble(
     onRegenerate: (() -> Unit)? = null,
     onCopy: (() -> Unit)? = null,
     onFeedback: ((MinimalFeedback?) -> Unit)? = null,
-    onContinue: (() -> Unit)? = null,
     onReadAloud: (() -> Unit)? = null,
     onFork: (() -> Unit)? = null,
     baseUrl: String = "",
     fontSizeMultiplier: Float = 1.0f,
     isReading: Boolean = false,
     currentFeedback: FeedbackRating? = null,
-    isEditing: Boolean = false,
-    editText: String = "",
-    onEditTextChange: ((String) -> Unit)? = null,
-    onEditSaveAndSubmit: (() -> Unit)? = null,
-    onEditSaveOnly: (() -> Unit)? = null,
-    onEditCancel: (() -> Unit)? = null,
+    editSession: MessageEditSession? = null,
     userAvatarUrl: String? = null,
     userName: String? = null,
-    selectedEndpoint: String? = null,
     showImageDescriptions: Boolean = true,
     showActionsInitially: Boolean = false,
     searchQuery: String? = null,
@@ -50,6 +44,7 @@ expect fun MessageBubble(
     chatLayoutStyle: String = ChatLayoutConstants.THREAD,
     showAvatars: Boolean = true,
     showBubbles: Boolean = false,
+    avatar: IconSource? = null,
 )
 
 /** Platform-specific content part rendering. */

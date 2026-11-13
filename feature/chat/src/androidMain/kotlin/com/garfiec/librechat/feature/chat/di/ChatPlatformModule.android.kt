@@ -16,6 +16,7 @@ actual val chatPlatformModule: Module = module {
             fileRepository = get(),
             speechRepository = get(),
             settingsDataStore = get(),
+            preferenceStore = get(),
             ioDispatcher = get(KoinQualifiers.IO),
         )
     }
@@ -31,6 +32,15 @@ actual val chatPlatformModule: Module = module {
             // [3] initialEndpoint, [4] initialModel — model-shortcut pre-select; absent otherwise.
             initialEndpoint = params.values.getOrNull(3) as String?,
             initialModel = params.values.getOrNull(4) as String?,
+            // [5] targetMessageId, [6] highlightQuery — open at a search hit; absent otherwise.
+            initialTargetMessageId = params.values.getOrNull(5) as String?,
+            initialHighlightQuery = params.values.getOrNull(6) as String?,
+            // [7] the hit matched in the target's reasoning; absent otherwise.
+            initialTargetInReasoning = params.values.getOrNull(7) as? Boolean ?: false,
+            // [8] project a new chat is filed into; absent otherwise.
+            initialChatProjectId = params.values.getOrNull(8) as String?,
+            // [9] the spec a model shortcut was recorded from; absent otherwise.
+            initialSpec = params.values.getOrNull(9) as String?,
             agentRepository = get(),
             chatRepository = get(),
             messageRepository = get(),
@@ -38,15 +48,29 @@ actual val chatPlatformModule: Module = module {
             configRepository = get(),
             conversationRepository = get(),
             endpointTokenRepository = get(),
+            reasoningCapabilitiesRepository = get(),
             draftRepository = get(),
+            localQueueStash = get(),
             favoritesRepository = get(),
             keyRepository = get(),
             presetRepository = get(),
             promptRepository = get(),
+            queuedTurnRepository = get(),
             shareRepository = get(),
+            shareLinkControllerFactory = get(),
+            tagRepository = get(),
+            traceRepository = get(),
             mcpRepository = get(),
+            skillsRepository = get(),
             userRepository = get(),
             roleRepository = get(),
+            memoryRepository = get(),
+            webSearchReadiness = get(),
+            conversationWebSearchStore = get(),
+            codeEnvironmentRepository = get(),
+            codeWorkspacePreferenceStore = get(),
+            pullRequestRepository = get(),
+            codeRunRepository = get(),
             permissionGate = get(),
             connectivityObserver = get(),
             activeAccountProvider = get(),
@@ -58,7 +82,10 @@ actual val chatPlatformModule: Module = module {
             selectionHandoff = get(),
             serverFileSelectionHandoff = get(),
             promptInsertionHandoff = get(),
+            siteIconPromptSession = get(),
+            preferenceStore = get(),
             resumePinStore = get(),
+            replyWatchScheduler = get(),
         )
     }
 }

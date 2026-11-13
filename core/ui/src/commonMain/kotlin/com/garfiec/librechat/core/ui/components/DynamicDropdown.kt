@@ -7,10 +7,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,10 +16,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.resources.Res
+import com.garfiec.librechat.core.ui.resources.param_unset
+import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/** Labeled dropdown selector using ExposedDropdownMenuBox with read-only text field anchor.
+/** Labeled dropdown selector using AdaptiveExposedDropdownMenuBox with a read-only text field anchor.
  *  Pass [optionLabels] to override display text per option (e.g. "" → "Unset"). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,8 +36,9 @@ fun DynamicDropdown(
     optionLabels: Map<String, String>? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val unsetLabel = stringResource(Res.string.param_unset)
     val labelFor: (String) -> String = { option ->
-        optionLabels?.get(option) ?: option.ifEmpty { "Unset" }
+        optionLabels?.get(option) ?: option.ifEmpty { unsetLabel }
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -52,11 +54,11 @@ fun DynamicDropdown(
             )
         }
         Spacer(modifier = Modifier.height(8.dp))
-        ExposedDropdownMenuBox(
+        AdaptiveExposedDropdownMenuBox(
             expanded = expanded,
             onExpandedChange = { expanded = it },
         ) {
-            OutlinedTextField(
+            AdaptiveOutlinedTextField(
                 value = labelFor(selectedValue),
                 onValueChange = {},
                 readOnly = true,
@@ -67,7 +69,7 @@ fun DynamicDropdown(
                     .fillMaxWidth()
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
             )
-            ExposedDropdownMenu(
+            AdaptiveExposedDropdownMenu(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
             ) {

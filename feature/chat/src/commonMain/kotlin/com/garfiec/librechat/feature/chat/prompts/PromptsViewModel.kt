@@ -8,6 +8,7 @@ import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.repository.PromptRepository
 import com.garfiec.librechat.core.data.repository.RoleRepository
 import com.garfiec.librechat.core.data.util.PermissionGate
+import com.garfiec.librechat.core.model.PROMPT_SOURCE_LANGFUSE
 import com.garfiec.librechat.core.model.PromptGroup
 import com.garfiec.librechat.core.model.permissions.Permission
 import com.garfiec.librechat.core.model.permissions.PermissionType
@@ -26,8 +27,6 @@ data class PromptsUiState(
     val isRefreshing: Boolean = false,
     val error: String? = null,
     val selectedGroup: PromptGroupDetailDisplayData? = null,
-    val totalPages: Int = 0,
-    val currentPage: Int = 1,
     // Filter and sort state
     val selectedCategory: String? = null,
     val sortOrder: PromptSortOrder = PromptSortOrder.RECENT,
@@ -41,6 +40,8 @@ data class PromptsUiState(
     val showVariableDialog: Boolean = false,
     val variablePromptTemplate: String = "",
     val variableNames: List<String> = emptyList(),
+    val pendingDeleteGroupId: String? = null,
+    val isDeleting: Boolean = false,
     // Role-permission gates — default permissive.
     val promptsCreateEnabled: Boolean = true,
     val promptsShareEnabled: Boolean = true,
@@ -63,6 +64,9 @@ class PromptsViewModel(
     private var loadedRevision: Long? = null
     private var requestedRevision: Long? = null
     private var reloadJob: Job? = null
+
+    /** The open detail's load. Replaced by a newer one and cancelled on back, so a late result can't reopen it. */
+    private var selectJob: Job? = null
 
     init {
         observePermissionFlags()
@@ -102,7 +106,7 @@ class PromptsViewModel(
         }
     }
 
-    /** Fetches the first page of prompt groups once the role confirms PROMPTS.USE. Permissive on timeout. */
+    /** Fetches every prompt group once the role confirms PROMPTS.USE. Permissive on timeout. */
     private fun loadInitialGroups() {
         viewModelScope.launch {
             if (permissionGate.awaitRole()?.hasAccess(PermissionType.PROMPTS, Permission.USE) != false) {
@@ -135,10 +139,11 @@ class PromptsViewModel(
             isRefreshing = !fullSpinner,
             error = if (surfaceErrors) null else _uiState.value.error,
         )
-        when (val result = promptRepository.getGroups()) {
+        // Every group, not a page: sorting, the category filter and the category chips all run
+        // here over the whole list, and the server's paged route orders by popularity, then recency.
+        when (val result = promptRepository.getAllGroups()) {
             is Result.Success -> {
-                val response = result.data
-                val groups = response.promptGroups
+                val groups = result.data
                 rawGroups = groups
                 loadedRevision = revision
                 val categories = groups
@@ -149,8 +154,6 @@ class PromptsViewModel(
 
                 _uiState.value = _uiState.value.copy(
                     groups = groups.map { it.toDisplayData() },
-                    totalPages = if (response.hasMore) 9999 else 1,
-                    currentPage = 1,
                     isLoading = false,
                     isRefreshing = false,
                     availableCategories = categories,
@@ -172,7 +175,8 @@ class PromptsViewModel(
     }
 
     fun selectGroup(groupId: String) {
-        viewModelScope.launch {
+        selectJob?.cancel()
+        selectJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             val groupResult = promptRepository.getGroup(groupId)
             val promptsResult = promptRepository.getPromptsByGroupId(groupId)
@@ -180,16 +184,35 @@ class PromptsViewModel(
             when (groupResult) {
                 is Result.Success -> {
                     val group = groupResult.data
+                    if (group == null) {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            selectedGroup = _uiState.value.selectedGroup?.copy(isRetryingText = false),
+                            error = "This prompt is not available.",
+                        )
+                        return@launch
+                    }
                     val prompts = (promptsResult as? Result.Success)?.data ?: emptyList()
-                    val mergedGroup = group.copy(prompts = prompts)
+                    val merged = group.copy(prompts = prompts)
+                    // An external group stores no text: it is read live, and a failed read is
+                    // shown as such rather than as a prompt with no body.
+                    val detail = when (val resolved = promptRepository.withResolvedText(merged)) {
+                        is Result.Success -> resolved.data.toDetailDisplayData()
+                        is Result.Error -> {
+                            Logger.d(resolved.exception) { "Failed to resolve prompt text: ${resolved.message}" }
+                            merged.toDetailDisplayData().copy(productionPromptText = null, textUnavailable = true)
+                        }
+                        is Result.Loading -> merged.toDetailDisplayData()
+                    }
                     _uiState.value = _uiState.value.copy(
-                        selectedGroup = mergedGroup.toDetailDisplayData(),
+                        selectedGroup = detail,
                         isLoading = false,
                     )
                 }
                 is Result.Error -> {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
+                        selectedGroup = _uiState.value.selectedGroup?.copy(isRetryingText = false),
                         error = groupResult.message ?: "Failed to load prompt details",
                     )
                 }
@@ -198,8 +221,23 @@ class PromptsViewModel(
         }
     }
 
+    /** Reads an external group's live text again after a failed read, from the open detail. */
+    fun retryPromptText() {
+        val group = _uiState.value.selectedGroup ?: return
+        if (!group.textUnavailable || group.isRetryingText) return
+        _uiState.value = _uiState.value.copy(selectedGroup = group.copy(isRetryingText = true))
+        selectGroup(group.id)
+    }
+
     fun clearSelectedGroup() {
-        _uiState.value = _uiState.value.copy(selectedGroup = null)
+        val loading = selectJob?.isActive == true
+        selectJob?.cancel()
+        selectJob = null
+        _uiState.value = _uiState.value.copy(
+            selectedGroup = null,
+            pendingDeleteGroupId = null,
+            isLoading = if (loading) false else _uiState.value.isLoading,
+        )
     }
 
     fun onCategorySelected(category: String?) {
@@ -240,20 +278,46 @@ class PromptsViewModel(
         _uiState.value = state.copy(filteredGroups = filtered.map { it.toDisplayData() })
     }
 
-    fun deleteGroup(groupId: String) {
+    /**
+     * Asks for confirmation before [confirmDeleteGroup] runs. The server's group delete is a hard
+     * cascade over every version with no restore, so the trash icon must never delete on its own.
+     */
+    fun requestDeleteGroup(groupId: String) {
+        if (_uiState.value.isDeleting) return
+        // An externally managed group can't be deleted here; the server answers 403 read_only.
+        if (_uiState.value.selectedGroup?.takeIf { it.id == groupId }?.external != null) return
+        _uiState.value = _uiState.value.copy(pendingDeleteGroupId = groupId)
+    }
+
+    fun dismissDeleteGroup() {
+        _uiState.value = _uiState.value.copy(pendingDeleteGroupId = null)
+    }
+
+    fun confirmDeleteGroup() {
+        val groupId = _uiState.value.pendingDeleteGroupId ?: return
+        _uiState.value = _uiState.value.copy(pendingDeleteGroupId = null, isDeleting = true)
+        deleteGroup(groupId)
+    }
+
+    private fun deleteGroup(groupId: String) {
         viewModelScope.launch {
             // Close the detail view only on Success — doing it unconditionally reports a prompt as
             // gone while it is still on the server. `delete` is safeApiCall-wrapped, so failure
             // arrives as a returned Result.Error and a try/catch here would never see it.
             when (val result = promptRepository.delete(groupId)) {
-                is Result.Success -> _uiState.value = _uiState.value.copy(selectedGroup = null)
+                is Result.Success -> _uiState.value = _uiState.value.copy(
+                    // The user may have backed out and opened another prompt while this was in flight.
+                    selectedGroup = _uiState.value.selectedGroup?.takeIf { it.id != groupId },
+                    isDeleting = false,
+                )
                 is Result.Error -> {
                     Logger.e(result.exception) { "Failed to delete prompt" }
                     _uiState.value = _uiState.value.copy(
                         error = result.message ?: "Failed to delete prompt",
+                        isDeleting = false,
                     )
                 }
-                is Result.Loading -> { /* no-op */ }
+                is Result.Loading -> _uiState.value = _uiState.value.copy(isDeleting = false)
             }
         }
     }
@@ -344,5 +408,10 @@ private fun PromptGroup.toDetailDisplayData(): PromptGroupDetailDisplayData {
         productionId = productionId,
         productionPromptText = promptText,
         promptCount = prompts.size,
+        external = if (isExternal) {
+            ExternalPromptSource(isLangfuse = source == PROMPT_SOURCE_LANGFUSE, promptName = sourcePromptName)
+        } else {
+            null
+        },
     )
 }

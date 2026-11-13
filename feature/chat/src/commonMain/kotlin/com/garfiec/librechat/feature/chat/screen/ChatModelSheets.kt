@@ -2,15 +2,20 @@ package com.garfiec.librechat.feature.chat.screen
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import com.garfiec.librechat.feature.chat.components.ComparisonLane
 import com.garfiec.librechat.feature.chat.components.ModelSelectorSheet
 import com.garfiec.librechat.feature.chat.components.localizedStreamError
 import com.garfiec.librechat.feature.chat.viewmodel.ChatUiState
 import com.garfiec.librechat.feature.chat.viewmodel.ChatViewModel
+import com.garfiec.librechat.feature.chat.viewmodel.SendBlockReason
 
 /*
  * The standalone model-selector sheets, shared by the Android and iOS chat screens. Unlike the
  * selector page in `ChatOptionsBottomSheet`, these open straight to the list and dismiss back to
- * the chat on selection. Both surfaces share the list body, ModelSelectorSheetContent.
+ * the chat on selection. Both surfaces share the list body, ModelSelectorSheetContent. While
+ * comparing, both show the A/B pair and edit whichever lane is picked there, and during Compare
+ * setup the primary one stages instead (see [rememberComparisonSelectorRouting]).
  */
 
 /**
@@ -23,17 +28,43 @@ internal fun PrimaryModelSelectorSheet(
     viewModel: ChatViewModel,
     sendBlockMessage: String?,
     onNavigateToProviderKeys: (endpointName: String?) -> Unit,
+    /** Compare setup's staged picks: during setup the list stages into them (see the routing). */
+    setupPick: CompareSetupPick? = null,
 ) {
     val error = uiState.error?.let { localizedStreamError(it) }
+    // A send refused for lane B opens on lane B. Read once: dismissing the reason inline must not
+    // move the sheet back to lane A.
+    val initialTarget = remember {
+        if (uiState.sendBlockReason == SendBlockReason.SelectSecondaryModel) ComparisonLane.B else ComparisonLane.A
+    }
+    val comparison = rememberComparisonSelectorRouting(
+        uiState = uiState,
+        initialTarget = initialTarget,
+        onSelectPrimary = viewModel::onModelSelected,
+        onSelectSecondary = viewModel::setSecondaryModel,
+        setupPick = setupPick,
+        onSelectPrimarySpec = viewModel::onSpecSelected,
+        onSelectSecondarySpec = viewModel::setSecondarySpec,
+    )
     ModelSelectorSheet(
         endpointConfigs = uiState.endpointConfigs,
         availableModels = uiState.availableModels,
         agents = uiState.agents,
-        selectedEndpoint = uiState.selectedEndpoint,
-        selectedModel = uiState.selectedModel,
+        selectedEndpoint = comparison.selectedEndpoint,
+        selectedModel = comparison.selectedModel,
+        modelSelect = uiState.modelSelectEnabled,
+        modelSpecs = uiState.modelSpecs,
+        agentsLoaded = uiState.agentsLoaded,
+        selectedSpec = comparison.selectedSpec,
         onModelSelect = { endpoint, model ->
-            viewModel.onModelSelected(endpoint, model)
+            comparison.onModelSelect(endpoint, model)
             // Clear a pending snackbar for the same error so it doesn't flash behind the close.
+            viewModel.dismissError()
+            viewModel.dismissSendBlockReason()
+            viewModel.dismissModelSheet()
+        },
+        onSpecSelect = { spec ->
+            comparison.onSpecSelect(spec)
             viewModel.dismissError()
             viewModel.dismissSendBlockReason()
             viewModel.dismissModelSheet()
@@ -53,17 +84,20 @@ internal fun PrimaryModelSelectorSheet(
         },
         favoriteAgentIds = uiState.favoriteAgentIds,
         favoriteModelKeys = uiState.favoriteModelKeys,
+        favoriteSpecNames = uiState.favoriteSpecNames,
         onToggleAgentFavorite = viewModel::toggleAgentFavorite,
         onToggleModelFavorite = viewModel::toggleModelFavorite,
+        onToggleSpecFavorite = viewModel::toggleSpecFavorite,
         starredDisplay = uiState.starredModelsDisplay,
         endpointKeyStates = uiState.endpointKeyStates,
         onSetApiKey = { name -> onNavigateToProviderKeys(name) },
+        header = comparison.header,
     )
 }
 
 /**
- * The secondary selector for comparison mode's second model (dual-pane button only; the composer's
- * "+" edits it through the options sheet). Renders unconditionally.
+ * The selector opened for comparison mode's second model (pane B's header, the phone chip on the A
+ * tab). Opens on lane B. Renders unconditionally.
  */
 @Composable
 internal fun SecondaryModelSelectorSheet(
@@ -76,24 +110,43 @@ internal fun SecondaryModelSelectorSheet(
     // load can self-heal here too (see its KDoc).
     LaunchedEffect(Unit) { viewModel.prepareModelSelector() }
 
+    val comparison = rememberComparisonSelectorRouting(
+        uiState = uiState,
+        initialTarget = ComparisonLane.B,
+        onSelectPrimary = viewModel::onModelSelected,
+        onSelectSecondary = viewModel::setSecondaryModel,
+        onSelectPrimarySpec = viewModel::onSpecSelected,
+        onSelectSecondarySpec = viewModel::setSecondarySpec,
+    )
     ModelSelectorSheet(
         endpointConfigs = uiState.endpointConfigs,
         availableModels = uiState.availableModels,
         agents = uiState.agents,
-        selectedEndpoint = uiState.comparisonState.secondaryEndpoint,
-        selectedModel = uiState.comparisonState.secondaryModel,
+        selectedEndpoint = comparison.selectedEndpoint,
+        selectedModel = comparison.selectedModel,
+        modelSelect = uiState.modelSelectEnabled,
+        modelSpecs = uiState.modelSpecs,
+        agentsLoaded = uiState.agentsLoaded,
+        selectedSpec = comparison.selectedSpec,
         onModelSelect = { endpoint, model ->
-            viewModel.setSecondaryModel(endpoint, model)
+            comparison.onModelSelect(endpoint, model)
+            onDismiss()
+        },
+        onSpecSelect = { spec ->
+            comparison.onSpecSelect(spec)
             onDismiss()
         },
         onDismiss = onDismiss,
         serverUrl = uiState.serverUrl,
         favoriteAgentIds = uiState.favoriteAgentIds,
         favoriteModelKeys = uiState.favoriteModelKeys,
+        favoriteSpecNames = uiState.favoriteSpecNames,
         onToggleAgentFavorite = viewModel::toggleAgentFavorite,
         onToggleModelFavorite = viewModel::toggleModelFavorite,
+        onToggleSpecFavorite = viewModel::toggleSpecFavorite,
         starredDisplay = uiState.starredModelsDisplay,
         endpointKeyStates = uiState.endpointKeyStates,
         onSetApiKey = { name -> onNavigateToProviderKeys(name) },
+        header = comparison.header,
     )
 }

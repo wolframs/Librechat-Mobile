@@ -1,30 +1,31 @@
 package com.garfiec.librechat.feature.auth.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,25 +34,41 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.garfiec.librechat.core.data.repository.HeaderWriteFailure
 import com.garfiec.librechat.core.network.client.HeaderRejection
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveButton
+import com.garfiec.librechat.core.ui.components.AdaptiveCard
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.AdaptiveSectionHeader
 import com.garfiec.librechat.core.ui.components.CustomHeaderRow
 import com.garfiec.librechat.core.ui.components.CustomHeaderRowError
 import com.garfiec.librechat.core.ui.components.CustomHeadersEditor
+import com.garfiec.librechat.core.ui.components.InitialTile
+import com.garfiec.librechat.core.ui.components.UrlKeyboardOptions
 import com.garfiec.librechat.core.ui.components.testTagsAsResourceIdSubtree
 import com.garfiec.librechat.core.ui.resources.server_headers_load_error
 import com.garfiec.librechat.core.ui.resources.server_headers_no_server
 import com.garfiec.librechat.core.ui.resources.server_headers_save_error
 import com.garfiec.librechat.core.ui.resources.server_headers_unverified_delete
+import com.garfiec.librechat.feature.auth.diagnostics.DiagnosticLogLink
 import com.garfiec.librechat.feature.auth.resources.*
 import com.garfiec.librechat.feature.auth.resources.Res
 import com.garfiec.librechat.feature.auth.viewmodel.HeaderFieldError
+import com.garfiec.librechat.feature.auth.viewmodel.KnownServer
 import com.garfiec.librechat.feature.auth.viewmodel.ServerUrlViewModel
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 import com.garfiec.librechat.core.ui.resources.Res as UiRes
@@ -61,6 +78,8 @@ fun ServerUrlScreen(
     onServerValidate: () -> Unit,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
+    /** Opens the switcher on the other signed-in accounts; null hides it. */
+    onUseAnotherAccount: (() -> Unit)? = null,
     viewModel: ServerUrlViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -77,8 +96,6 @@ fun ServerUrlScreen(
 
     if (uiState.showHttpWarning) {
         HttpWarningDialog(
-            suppressForServer = uiState.suppressHttpWarning,
-            onSuppressForServerChange = viewModel::setSuppressHttpWarning,
             onConfirm = viewModel::confirmHttpConnection,
             onDismiss = viewModel::dismissHttpWarning,
         )
@@ -92,7 +109,9 @@ fun ServerUrlScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
+                // No scaffold here: the screen keeps itself clear of the system bars and the keyboard.
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .then(if (onBack != null) Modifier.padding(top = BackAffordanceClearance) else Modifier)
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -102,6 +121,7 @@ fun ServerUrlScreen(
                 text = stringResource(Res.string.connect_to_librechat),
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
                 modifier = Modifier.semantics { heading() },
             )
 
@@ -111,11 +131,12 @@ fun ServerUrlScreen(
                 text = stringResource(Res.string.enter_server_url_hint),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            OutlinedTextField(
+            AdaptiveOutlinedTextField(
                 value = uiState.url,
                 onValueChange = viewModel::onUrlChanged,
                 label = { Text(stringResource(Res.string.server_url_label)) },
@@ -126,52 +147,11 @@ fun ServerUrlScreen(
                 supportingText = uiState.error?.let { error ->
                     { Text(text = error, color = MaterialTheme.colorScheme.error) }
                 },
+                keyboardOptions = UrlKeyboardOptions.copy(imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { if (uiState.url.isNotBlank()) viewModel.validateAndConnect() }),
                 enabled = !uiState.isLoading,
             )
 
-            if (uiState.rememberedServers.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = stringResource(Res.string.remembered_servers),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                uiState.rememberedServers.forEach { server ->
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(
-                            onClick = { viewModel.selectServer(server) },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !uiState.isLoading,
-                        ) {
-                            Text(server)
-                        }
-                        if (uiState.canForgetServers) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (server in uiState.httpWarningSuppressedServers) {
-                                    TextButton(
-                                        onClick = { viewModel.restoreHttpWarning(server) },
-                                        enabled = !uiState.isLoading,
-                                    ) {
-                                        Text(stringResource(Res.string.restore_http_warning))
-                                    }
-                                }
-                                TextButton(
-                                    onClick = { viewModel.forgetServer(server) },
-                                    enabled = !uiState.isLoading,
-                                ) {
-                                    Text(stringResource(Res.string.forget_server))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
             Spacer(modifier = Modifier.height(8.dp))
 
             CustomHeadersSection(
@@ -204,24 +184,101 @@ fun ServerUrlScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Button(
+            AdaptiveButton(
                 onClick = viewModel::validateAndConnect,
                 modifier = Modifier.fillMaxWidth().testTag("server_url_connect"),
-                enabled = !uiState.isLoading && uiState.url.isNotBlank(),
+                enabled = uiState.url.isNotBlank(),
+                loading = uiState.isLoading,
             ) {
-                if (uiState.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.height(20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Text(stringResource(Res.string.server_url_connect))
-                }
+                Text(stringResource(if (uiState.isLoading) Res.string.progress_connecting else Res.string.server_url_connect))
             }
+
+            if (uiState.error != null && !uiState.isLoading) {
+                Spacer(modifier = Modifier.height(8.dp))
+                DiagnosticLogLink()
+            }
+
+            KnownServersSection(
+                servers = uiState.knownServers,
+                enabled = !uiState.isLoading,
+                onSelect = viewModel::connectTo,
+            )
+
+            UseAnotherAccountButton(onUseAnotherAccount, modifier = Modifier.padding(top = 8.dp))
         }
 
         BackAffordanceOverlay(onBack)
+    }
+}
+
+/** One tap to a server an account on this device already uses. */
+@Composable
+internal fun KnownServersSection(
+    servers: List<KnownServer>,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (servers.isEmpty()) return
+    Column(modifier = modifier.fillMaxWidth().testTag("server_url_known_servers")) {
+        AdaptiveSectionHeader(
+            title = stringResource(Res.string.server_url_known_servers),
+            horizontalInset = 12.dp,
+        )
+        AdaptiveCard(modifier = Modifier.fillMaxWidth().alpha(if (enabled) 1f else DisabledAlpha)) {
+            servers.forEachIndexed { index, server ->
+                if (index > 0) AdaptiveDivider()
+                KnownServerRow(server, enabled, onClick = { onSelect(server.url) })
+            }
+        }
+    }
+}
+
+private const val DisabledAlpha = 0.38f
+
+@Composable
+private fun KnownServerRow(server: KnownServer, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(
+                enabled = enabled,
+                onClickLabel = stringResource(Res.string.server_url_known_server_cd, server.label),
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
+            .testTag("server_url_known_server"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        InitialTile(seed = server.url, label = server.host, size = 36.dp)
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = server.label,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = pluralStringResource(
+                    Res.plurals.server_url_known_server_accounts,
+                    server.accountCount,
+                    server.accountCount,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 
@@ -297,29 +354,15 @@ private fun HeaderRejection.toRowError(): CustomHeaderRowError = when (this) {
 }
 
 @Composable
-private fun HttpWarningDialog(
-    suppressForServer: Boolean,
-    onSuppressForServerChange: (Boolean) -> Unit,
+internal fun HttpWarningDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    AdaptiveAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.insecure_connection_title)) },
         text = {
-            Column {
-                Text(stringResource(Res.string.insecure_connection_message))
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(
-                        checked = suppressForServer,
-                        onCheckedChange = onSuppressForServerChange,
-                    )
-                    Text(stringResource(Res.string.dont_warn_for_server))
-                }
-            }
+            Text(stringResource(Res.string.insecure_connection_message))
         },
         confirmButton = {
             TextButton(

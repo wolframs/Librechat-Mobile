@@ -3,12 +3,15 @@ package com.garfiec.librechat.core.network.api
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.model.request.ChatAbortRequest
 import com.garfiec.librechat.core.model.request.ChatResumeRequest
+import com.garfiec.librechat.core.model.request.SteerArmRequest
 import com.garfiec.librechat.core.model.request.SteerCancelRequest
 import com.garfiec.librechat.core.model.request.SteerRequest
+import com.garfiec.librechat.core.model.response.ActiveJobsResponse
 import com.garfiec.librechat.core.model.response.ChatAbortResponse
 import com.garfiec.librechat.core.model.response.ChatResumeResponse
 import com.garfiec.librechat.core.model.response.ChatStartResponse
 import com.garfiec.librechat.core.model.response.ChatStatusResponse
+import com.garfiec.librechat.core.model.response.SteerArmResponse
 import com.garfiec.librechat.core.model.response.SteerCancelResponse
 import com.garfiec.librechat.core.model.response.SteerResponse
 import io.ktor.client.HttpClient
@@ -17,8 +20,6 @@ import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
 import io.ktor.http.path
 import kotlinx.serialization.json.JsonObject
 
@@ -28,12 +29,12 @@ class ChatApi constructor(
     /**
      * POST /api/agents/chat/{endpoint} — phase-1 of the two-phase SSE protocol.
      *
-     * On v0.8.5-rc1 with `summarization: enabled: true`, the backend has been observed
-     * returning 200 OK with no `Content-Type` header on this endpoint, which makes Ktor's
-     * content-negotiation throw `NoTransformationFoundException` — surfacing a Ktor-internal
-     * stack trace to the user. We catch and translate to [ApiException] so the chat surface
-     * shows an actionable message instead of "Expected response body of the type 'class
-     * com.garfiec.librechat.core.model.response.ChatStartResponse...'".
+     * A 200 that is not JSON is usually the server's middleware refusing the send (rate limit,
+     * ban, moderation, someone else's conversation), thrown as [ChatRefusal] describes. Anything
+     * else non-JSON is a body this client cannot read: v0.8.5-rc1 with `summarization: enabled:
+     * true` was observed answering 200 with no `Content-Type` and no refusal, which makes Ktor's
+     * content-negotiation throw `NoTransformationFoundException` — a Ktor-internal stack trace on
+     * screen. That case is translated to an [ApiException] naming a version mismatch.
      */
     @Throws(Exception::class)
     suspend fun startChat(endpoint: String, body: JsonObject): ChatStartResponse {
@@ -41,8 +42,8 @@ class ChatApi constructor(
             url { path("api/agents/chat/$endpoint") }
             setBody(body)
         }
-        val contentType = response.headers[HttpHeaders.ContentType]
-        if (contentType == null || ContentType.parse(contentType).match(ContentType.Application.Json).not()) {
+        if (!response.isJson()) {
+            ChatRefusal.from(response)?.let { throw it }
             throw ApiException(
                 statusCode = response.status.value,
                 message = "Server returned an unexpected response when starting the chat. " +
@@ -102,12 +103,14 @@ class ChatApi constructor(
      * endpoint option and compares it against the fingerprint pinned at pause time — see
      * [ChatResumeRequest]. Failure modes worth distinguishing upstream: 409 (stale actionId or the
      * pause already resolved/expired), 403 (a different agent/config than the one that paused).
+     * The route also runs the message limiters and moderation (an answer is user text), which
+     * refuse the way [startChat]'s do — see [ChatRefusal].
      */
     suspend fun resumeChat(request: ChatResumeRequest): ChatResumeResponse =
         client.post {
             url { path("api/agents/chat/resume") }
             setBody(request)
-        }.body()
+        }.bodyUnlessRefused()
 
     /**
      * POST /api/agents/chat/steer — queues instruction text for injection into the live run
@@ -119,24 +122,41 @@ class ChatApi constructor(
      * Every rejection carries a `code` (404 `NO_ACTIVE_RUN`, 409/429/501 for a run that is alive
      * but unreachable). The caller re-homes the text into the follow-up queue regardless of which
      * one it is, so the codes are diagnostic rather than a branch point. All surface as an
-     * `ApiException` whose `body` carries the code; nothing here interprets them.
+     * `ApiException` whose `body` carries the code; nothing here interprets them. So does a
+     * refusal by the route's message limiters or moderation, which arrives as a 200 — see
+     * [ChatRefusal].
      */
     suspend fun steerChat(request: SteerRequest): SteerResponse =
         client.post {
             url { path("api/agents/chat/steer") }
             setBody(request)
-        }.body()
+        }.bodyUnlessRefused()
 
     /**
      * POST /api/agents/chat/steer/cancel — withdraws a steer that has not been injected yet.
      *
-     * `{removed:false}` is a success, not a failure: the cancel simply lost its race.
+     * `{removed:false}` is a success, not a failure: the cancel simply lost its race. The route
+     * sits behind the steer route's message limiters, whose refusal arrives as a 200 — see
+     * [ChatRefusal].
      */
     suspend fun cancelSteer(request: SteerCancelRequest): SteerCancelResponse =
         client.post {
             url { path("api/agents/chat/steer/cancel") }
             setBody(request)
-        }.body()
+        }.bodyUnlessRefused()
+
+    /**
+     * POST /api/agents/chat/steer/arm — upgrades a still-queued steer to an interrupt in place.
+     *
+     * `{armed:false}` is a success: the steer already went in, was cancelled, or the run ended;
+     * `code: PREEMPT_UNSUPPORTED` says the run can't be interrupted. Behind the same limiters as
+     * cancel, so a refusal can arrive as a 200 — see [ChatRefusal].
+     */
+    suspend fun armSteer(request: SteerArmRequest): SteerArmResponse =
+        client.post {
+            url { path("api/agents/chat/steer/arm") }
+            setBody(request)
+        }.bodyUnlessRefused()
 
     /**
      * GET /api/agents/chat/status/:conversationId — is a run still alive for this conversation?
@@ -151,6 +171,12 @@ class ChatApi constructor(
     suspend fun getChatStatus(conversationId: String): ChatStatusResponse =
         client.get {
             url { path("api/agents/chat/status/$conversationId") }
+        }.body()
+
+    /** GET /api/agents/chat/active — ids of the caller's conversations with a live generation job. */
+    suspend fun getActiveJobs(): ActiveJobsResponse =
+        client.get {
+            url { path("api/agents/chat/active") }
         }.body()
 
     companion object {

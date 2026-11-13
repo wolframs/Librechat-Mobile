@@ -1,5 +1,7 @@
 package com.garfiec.librechat.core.network.client
 
+import com.garfiec.librechat.core.common.result.CleartextBlockedException
+import com.garfiec.librechat.core.network.api.CodeEnvironmentsApi
 import com.google.common.truth.Truth.assertThat
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -12,6 +14,8 @@ import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import java.io.IOException
+import java.security.cert.CertificateException
+import javax.net.ssl.SSLHandshakeException
 
 /**
  * Locks the retry-scoping invariant: the shared [configureRetryPolicy] must replay only
@@ -65,5 +69,142 @@ class HttpRetryScopingTest {
         assertThat(attempts["GET"]).isEqualTo(SAFE_ATTEMPTS)
         assertThat(attempts["POST"]).isEqualTo(UNSAFE_ATTEMPTS)
         assertThat(attempts["DELETE"]).isEqualTo(UNSAFE_ATTEMPTS)
+    }
+
+    @Test
+    fun `does not retry a GET answered 501 Not Implemented`() = runTest {
+        var attempts = 0
+        val engine = MockEngine {
+            attempts++
+            respond("Not Implemented", HttpStatusCode.NotImplemented)
+        }
+        val client = countingClient(engine)
+
+        client.get("https://example.com/api/files/download-url/u1/f1")
+
+        assertThat(attempts).isEqualTo(1)
+    }
+
+    @Test
+    fun `does not retry a GET whose 501 or 4xx is thrown as an ApiException`() = runTest {
+        for (status in listOf(501, 400, 404, 405)) {
+            var attempts = 0
+            val engine = MockEngine {
+                attempts++
+                throw ApiException(statusCode = status, message = "HTTP $status")
+            }
+            val client = countingClient(engine)
+
+            runCatching { client.get("https://example.com/api/files/download-url/u1/f1") }
+
+            assertThat(attempts).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `still retries a GET on 503 whether it arrives as a response or as an ApiException`() = runTest {
+        var responseAttempts = 0
+        val responding = countingClient(
+            MockEngine {
+                responseAttempts++
+                respond("busy", HttpStatusCode.ServiceUnavailable)
+            },
+        )
+        var thrownAttempts = 0
+        val throwing = countingClient(
+            MockEngine {
+                thrownAttempts++
+                throw ApiException(statusCode = 503, message = "busy")
+            },
+        )
+
+        responding.get("https://example.com/api/files/download-url/u1/f1")
+        runCatching { throwing.get("https://example.com/api/files/download-url/u1/f1") }
+
+        assertThat(responseAttempts).isEqualTo(SAFE_ATTEMPTS)
+        assertThat(thrownAttempts).isEqualTo(SAFE_ATTEMPTS)
+    }
+
+    @Test
+    fun `sends a machine status read once on 503, as a response or as an ApiException`() = runTest {
+        var responseAttempts = 0
+        val responding = countingClient(
+            MockEngine {
+                responseAttempts++
+                respond("busy", HttpStatusCode.ServiceUnavailable)
+            },
+        )
+        var thrownAttempts = 0
+        val throwing = countingClient(
+            MockEngine {
+                thrownAttempts++
+                throw ApiException(statusCode = 503, message = "busy")
+            },
+        )
+
+        runCatching { CodeEnvironmentsApi(responding).status("env-1") }
+        runCatching { CodeEnvironmentsApi(throwing).status("env-1") }
+
+        assertThat(responseAttempts).isEqualTo(1)
+        assertThat(thrownAttempts).isEqualTo(1)
+    }
+
+    @Test
+    fun `still retries a machine status read that failed in transport`() = runTest {
+        var attempts = 0
+        val client = countingClient(
+            MockEngine {
+                attempts++
+                throw IOException("connection reset")
+            },
+        )
+
+        runCatching { CodeEnvironmentsApi(client).status("env-1") }
+
+        assertThat(attempts).isEqualTo(SAFE_ATTEMPTS)
+    }
+
+    @Test
+    fun `does not retry a GET whose certificate is untrusted`() = runTest {
+        var attempts = 0
+        val engine = MockEngine {
+            attempts++
+            throw SSLHandshakeException("Trust anchor for certification path not found.").apply {
+                initCause(CertificateException("Trust anchor for certification path not found."))
+            }
+        }
+        val client = countingClient(engine)
+
+        runCatching { client.get("https://example.com/api/config") }
+
+        assertThat(attempts).isEqualTo(1)
+    }
+
+    @Test
+    fun `does not retry a GET the platform refused as cleartext`() = runTest {
+        var attempts = 0
+        val engine = MockEngine {
+            attempts++
+            throw CleartextBlockedException()
+        }
+        val client = countingClient(engine)
+
+        runCatching { client.get("http://chat.example.com/api/config") }
+
+        assertThat(attempts).isEqualTo(1)
+    }
+
+    @Test
+    fun `retries a GET whose handshake failed for a reason other than the certificate`() = runTest {
+        var attempts = 0
+        val engine = MockEngine {
+            attempts++
+            throw SSLHandshakeException("SSL handshake aborted: I/O error during system call, Connection reset by peer")
+        }
+        val client = countingClient(engine)
+
+        runCatching { client.get("https://example.com/api/config") }
+
+        assertThat(attempts).isEqualTo(SAFE_ATTEMPTS)
     }
 }

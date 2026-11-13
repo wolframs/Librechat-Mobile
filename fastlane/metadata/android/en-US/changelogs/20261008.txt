@@ -1,0 +1,9 @@
+- Render search citations as source pills, with web-parity search sources
+- Drop the overflow menu from server cards
+- Scroll grid screens under the status bar and top bar
+- Mark temporary chats on the composer and landing, not a banner
+- Show conversation starters on the new-chat screen
+- Drag project folders into a custom order in the sidebar
+- Close the model-spec seeding seams
+- Size skill markdown to the page and strip its frontmatter
+- And 7 more; see the release notes on GitHub.

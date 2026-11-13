@@ -1,10 +1,9 @@
-@file:OptIn(org.koin.core.annotation.KoinExperimentalAPI::class)
-
 package com.garfiec.librechat.core.data.di
 
 import android.app.Application
 import android.content.Context
 import androidx.datastore.core.DataStore
+import com.garfiec.librechat.core.common.ChannelPolicy
 import com.garfiec.librechat.core.common.conversation.OpenConversationRegistry
 import com.garfiec.librechat.core.common.lifecycle.DeferredWorkWindow
 import com.garfiec.librechat.core.common.lifecycle.ForegroundSignal
@@ -19,6 +18,7 @@ import com.garfiec.librechat.core.network.api.AuthApi
 import com.garfiec.librechat.core.network.api.BalanceApi
 import com.garfiec.librechat.core.network.api.BannerApi
 import com.garfiec.librechat.core.network.api.ChatApi
+import com.garfiec.librechat.core.network.api.CodeEnvironmentsApi
 import com.garfiec.librechat.core.network.api.ConfigApi
 import com.garfiec.librechat.core.network.api.ConversationsApi
 import com.garfiec.librechat.core.network.api.EndpointTokenApi
@@ -27,17 +27,25 @@ import com.garfiec.librechat.core.network.api.FilesApi
 import com.garfiec.librechat.core.network.api.FilesExtApi
 import com.garfiec.librechat.core.network.api.KeysApi
 import com.garfiec.librechat.core.network.api.McpApi
+import com.garfiec.librechat.core.network.api.McpAppsApi
 import com.garfiec.librechat.core.network.api.MemoriesApi
 import com.garfiec.librechat.core.network.api.MessagesApi
+import com.garfiec.librechat.core.network.api.PasskeyApi
 import com.garfiec.librechat.core.network.api.PermissionsApi
 import com.garfiec.librechat.core.network.api.PresetsApi
 import com.garfiec.librechat.core.network.api.ProjectsApi
 import com.garfiec.librechat.core.network.api.PromptsApi
+import com.garfiec.librechat.core.network.api.PullRequestsApi
+import com.garfiec.librechat.core.network.api.QueuedTurnsApi
 import com.garfiec.librechat.core.network.api.RolesApi
+import com.garfiec.librechat.core.network.api.SchedulesApi
+import com.garfiec.librechat.core.network.api.SearchApi
 import com.garfiec.librechat.core.network.api.ShareApi
 import com.garfiec.librechat.core.network.api.SkillsApi
 import com.garfiec.librechat.core.network.api.SpeechApi
+import com.garfiec.librechat.core.network.api.SubagentsApi
 import com.garfiec.librechat.core.network.api.TagsApi
+import com.garfiec.librechat.core.network.api.TracesApi
 import com.garfiec.librechat.core.network.api.UserApi
 import com.garfiec.librechat.core.network.client.SwitchGate
 import com.garfiec.librechat.core.network.sse.SseClient
@@ -67,12 +75,16 @@ class DataModuleVerificationTest {
                 ForegroundSignal::class,
                 DeferredWorkWindow::class,
                 OpenConversationRegistry::class,
+                ChannelPolicy::class,
                 RequestActivityTracker::class,
                 SseClient::class,
                 AuthApi::class,
                 UserApi::class,
+                PasskeyApi::class,
+                PullRequestsApi::class,
                 ChatApi::class,
                 ConversationsApi::class,
+                SearchApi::class,
                 EndpointTokenApi::class,
                 ProjectsApi::class,
                 MessagesApi::class,
@@ -84,8 +96,12 @@ class DataModuleVerificationTest {
                 PermissionsApi::class,
                 PresetsApi::class,
                 PromptsApi::class,
+                QueuedTurnsApi::class,
                 RolesApi::class,
+                SubagentsApi::class,
                 TagsApi::class,
+                TracesApi::class,
+                SchedulesApi::class,
                 ShareApi::class,
                 ConfigApi::class,
                 BalanceApi::class,
@@ -93,10 +109,11 @@ class DataModuleVerificationTest {
                 KeysApi::class,
                 ApiKeysApi::class,
                 McpApi::class,
-                com.garfiec.librechat.core.network.api.MarketApi::class,
+                McpAppsApi::class,
                 MemoriesApi::class,
                 SpeechApi::class,
                 BannerApi::class,
+                CodeEnvironmentsApi::class,
                 DataStore::class,
                 // AccountSwitcher pulls the switch barrier from :core:network (cross-module).
                 SwitchGate::class,

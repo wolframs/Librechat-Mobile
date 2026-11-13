@@ -1,79 +1,87 @@
 package com.garfiec.librechat.feature.chat.viewmodel.delegate
 
 import co.touchlab.kermit.Logger
-import com.garfiec.librechat.core.common.ToolConstants
 import com.garfiec.librechat.core.common.identity.AccountId
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.identity.currentAccountId
 import com.garfiec.librechat.core.common.network.ConnectivityObserver
+import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.FailureKind
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.common.result.suspendRunCatching
 import com.garfiec.librechat.core.common.result.toSafeError
 import com.garfiec.librechat.core.data.repository.ChatRepository
-import com.garfiec.librechat.core.model.Attachment
+import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.StreamErrorCodes
 import com.garfiec.librechat.core.model.StreamEvent
 import com.garfiec.librechat.core.model.error.StreamErrorType
-import com.garfiec.librechat.core.model.error.UserKeyError
 import com.garfiec.librechat.core.model.error.parseUserKeyError
 import com.garfiec.librechat.core.model.response.ChatStatusResponse
-import com.garfiec.librechat.feature.chat.components.artifact.ArtifactType
+import com.garfiec.librechat.core.network.api.chatRefusalText
+import com.garfiec.librechat.feature.chat.util.AttachedRun
 import com.garfiec.librechat.feature.chat.util.applyAbortContract
-import com.garfiec.librechat.feature.chat.viewmodel.ActiveToolCall
+import com.garfiec.librechat.feature.chat.util.buildActiveMessagePath
+import com.garfiec.librechat.feature.chat.util.changesPath
+import com.garfiec.librechat.feature.chat.util.displayPath
+import com.garfiec.librechat.feature.chat.util.isSpecRefusal
+import com.garfiec.librechat.feature.chat.util.keyEndpointOf
+import com.garfiec.librechat.feature.chat.util.resolvedResponseMessage
 import com.garfiec.librechat.feature.chat.viewmodel.ChatScreenState
+import com.garfiec.librechat.feature.chat.viewmodel.MessagesState
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
-import com.garfiec.librechat.feature.chat.viewmodel.RetryInfo
 import com.garfiec.librechat.feature.chat.viewmodel.StreamingHandle
-import kotlinx.coroutines.CancellationException
+import com.garfiec.librechat.feature.chat.viewmodel.contentFilterNotice
+import com.garfiec.librechat.feature.chat.viewmodel.refusalErrorMarker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Owns the streaming session lifecycle: the SSE collection job, the text buffer and its
- * throttled flush to UI state, the per-event dispatch ([handleStreamEvent]), stream
- * resume on app foreground, and network-error auto-reconnect.
+ * Owns the streaming session lifecycle: the SSE collection job, the per-event dispatch
+ * ([handleStreamEvent]), stream termination ([endStream]), stream resume on app foreground, and
+ * network-error auto-reconnect.
  *
- * Collaborators are injected: comparison routing, subagent traces, office-doc previews,
- * and send completion (the `created`/`final` milestones) are owned by their own delegates;
- * this one is the hub that drives them as events arrive. The send paths in `ChatViewModel`
- * build a request flow and hand it to [launchStream]; everything downstream lives here.
+ * Collaborators are injected: comparison routing, the live reply's tool calls and attachments
+ * ([LiveReplyDelegate]), and send completion (the `created`/`final` milestones) are owned by their
+ * own delegates; this one is the hub that drives them as events arrive. The send paths in
+ * `ChatViewModel` build a request flow and hand it to [launchStream]; everything downstream lives
+ * here.
  */
 class StreamingManagerDelegate(
     private val handle: StreamingHandle,
     private val chatRepository: ChatRepository,
     private val activeAccountProvider: ActiveAccountProvider,
-    private val connectivityObserver: ConnectivityObserver,
+    connectivityObserver: ConnectivityObserver,
     private val comparisonDelegate: ComparisonModeDelegate,
-    private val subagentTraceDelegate: SubagentTraceDelegate,
-    private val officePreviewDelegate: OfficePreviewDelegate,
+    private val liveReply: LiveReplyDelegate,
     private val completionDelegate: SendCompletionDelegate,
     private val queueDelegate: MessageQueueDelegate,
-    private val treeDelegate: MessageTreeDelegate,
     private val pendingActionDelegate: PendingActionDelegate,
     private val steeringDelegate: SteeringDelegate,
-    /** Emits a typed user-provided-key error for one-shot UI surfacing (snackbar + CTA). */
-    private val emitUserKeyError: (UserKeyError) -> Unit,
-    /** Reloads the conversation from the server (VM-owned Room observer). */
-    private val reloadConversation: (String) -> Unit,
-    /**
-     * Puts an early-aborted (never-persisted) turn's text back into the composer. Lives on the
-     * ViewModel because streaming writes are scoped away from the composer slice.
-     */
-    private val restoreUnsentInput: (String, List<String>) -> Unit,
-    private val isNewConversation: () -> Boolean,
-    private val isHandedOffNewChat: () -> Boolean,
+    private val host: StreamingHost,
 ) {
 
     private val scope get() = handle.scope
 
     private var streamJob: Job? = null
-    private var streamingUpdateJob: Job? = null
-    private val streamingBuffer = StringBuilder()
-    private var streamingBufferDirty = false
+    private val buffer = StreamTextBuffer(handle)
     private var wasStreaming = false
+
+    private val networkRecovery = NetworkRecoveryTrigger(connectivityObserver, handle.scope, ::attemptNetworkRecovery)
+
+    /**
+     * Re-asks the run status an open's check failed to get. A stalled server times that check out
+     * while the run sits there, so an answer attaches to it; a run that ended meanwhile left its
+     * reply on the server, so the conversation is reloaded.
+     */
+    private val statusRetry = RunStatusRetry(connectivityObserver, handle.scope) {
+        val state = handle.state
+        val conversationId = state.conversationId
+        if (!state.runStatusSettled && !state.isStreaming && conversationId != null) {
+            resumeActiveStreamIfNeeded(conversationId, onInactive = { host.reloadConversation(conversationId) })
+        }
+    }
 
     /**
      * The account active when the current stream started (origin-capture provenance): its finalize —
@@ -84,8 +92,26 @@ class StreamingManagerDelegate(
      */
     private var streamOriginAccountId: AccountId? = null
 
-    /** Tracks whether the last stream failure was a network error, to enable auto-reconnect. */
-    private var lastErrorWasNetwork = false
+    /**
+     * A retry-ceiling report (`RETRY_EXHAUSTED` / `STATUS_RETRY_EXHAUSTED`) on the current session,
+     * adjudicated when its flow completes (see [StreamEndReason]). Per session.
+     */
+    private var retryCeiling: RetryCeiling? = null
+
+    /**
+     * What an exhausted retry ladder reported. [networkWhenUnreachable]: whether, if the status read
+     * fails too, the end is a network error (the transport ladder — the connectivity observer can
+     * recover it) or [message] as it stands (a persistent HTTP status — something answered).
+     */
+    private class RetryCeiling(val message: String, val networkWhenUnreachable: Boolean)
+
+    /**
+     * Whether the current run already re-attached after a retry ceiling. Per run, not per session —
+     * the re-attach starts a new session — so a run the server calls active but that no connection
+     * can reach ends with an error rather than looping status check, resume, ceiling forever. Reset
+     * wherever an attach begins: [beginStreaming] for a local send, [attachToRun] for the rest.
+     */
+    private var reattachedAfterCeiling = false
 
     /**
      * A Stop has been asked for and the aborted `final` frame has not arrived yet. The stream is
@@ -98,11 +124,23 @@ class StreamingManagerDelegate(
     private var abortRequested = false
 
     /**
-     * Why a stream session ended. Every termination — a Final or Error frame, flow failure,
-     * unexpected clean EOF, failed abort, watchdog, or a resume that found the job gone —
-     * funnels through [endStream] with one of these; the reason decides teardown (job cancel,
-     * state write, queue policy, reload) in ONE place instead of each exit path hand-copying
-     * its own subset.
+     * Why a stream session ended. Every *event-driven* termination — a Final or Error frame, a
+     * failed abort, the watchdog, a resume that found the job gone — funnels through [endStream]
+     * with one of these; the reason decides teardown (job cancel, state write, queue policy,
+     * reload) in ONE place instead of each exit path hand-copying its own subset.
+     *
+     * A flow that completes with neither Final nor Error is ended here too: [launchStream] as
+     * [Reconcile], [resumeStream] as [ResumeExpired]. `SseClient` completes a flow that way only
+     * when its resume got a 404 — the job is gone, so the reply, if any, is on the server — or when
+     * the account switched mid-stream, which ends nothing here: a reload then would read the
+     * conversation with the NEW account's credentials. A body that merely closes is not that:
+     * upstream sends no heartbeat, so an idle timeout closes a live run, and `SseClient` resumes it
+     * on its own retry ladder rather than ending the flow. Do not read "the flow completed" as "the
+     * run is over" anywhere else.
+     *
+     * When that ladder runs out it reports `RETRY_EXHAUSTED`, which is not an end either: the run's
+     * state is unknown, so [adjudicateRetryCeiling] asks `/chat/status` — resume if active, the
+     * same end as a 404 if not, a network error only if the server is unreachable too.
      */
     private sealed interface StreamEndReason {
         /**
@@ -111,8 +149,18 @@ class StreamingManagerDelegate(
          */
         data class Finalized(val aborted: Boolean) : StreamEndReason
 
-        /** Flow failure, in-band [StreamEvent.Error], or clean EOF without a terminal event. */
-        data class StreamError(val message: String, val isNetwork: Boolean) : StreamEndReason
+        /**
+         * Flow-level exception or in-band [StreamEvent.Error] — the two legacy paths, unified.
+         *
+         * [refusedByServer] marks a send the server's middleware refused before the run started
+         * (`ChatRefusal`). Unlike any other failure before `created`, the server persists that
+         * turn — the user message and an error reply — whenever it names an existing conversation.
+         */
+        data class StreamError(
+            val message: String,
+            val isNetwork: Boolean,
+            val refusedByServer: Boolean = false,
+        ) : StreamEndReason
 
         /**
          * The abort POST failed (offline, 404, legacy backend) or the aborted final never arrived
@@ -150,6 +198,10 @@ class StreamingManagerDelegate(
          * v1 client cannot tell "your turn finished, here it is" from "your turn was replaced by
          * a newer one" — and auto-firing the next queued message into the second case sends it
          * against a parent that is not what the user saw.
+         *
+         * Also how [launchStream] ends a send whose flow completed with neither Final nor Error
+         * (a clean EOF, or a reconnect's resume 404 after a network drop): the same situation
+         * without the frame saying so — the job is gone and the reply is on the server.
          */
         data object Reconcile : StreamEndReason
     }
@@ -174,10 +226,7 @@ class StreamingManagerDelegate(
      */
     private var abortWatchdogJob: Job? = null
 
-    private fun isSessionEnded() = endedSession == streamSession
-
-    /** Job for the connectivity observer; started lazily only when a network error occurs. */
-    private var connectivityJob: Job? = null
+    private val isSessionEnded get() = endedSession == streamSession
 
     /** True when the current stream is from an edit, regenerate, or continue operation. */
     var isEditOrRegenerate = false
@@ -192,8 +241,29 @@ class StreamingManagerDelegate(
     private var currentTurnOptimisticUserMessageId: String? = null
 
     /**
+     * Every optimistic user-message id this ViewModel minted, mapped to the server's id for that
+     * message once its SSE `created` frame names it (null until then). The server mints its own
+     * id and never adopts the optimistic one. Kept past the turn's session, not reset with it: a
+     * reconnect mid-run starts a new session while the optimistic bubble is still the tail.
+     */
+    private val serverUserMessageIds = mutableMapOf<String, String?>()
+
+    /**
+     * The id a queued turn may anchor to when [messageId] is the visible branch tail, or null
+     * when the server's id for it is not known yet. The tail of a run this client started is
+     * the optimistic user message, an id the server never stored: a queued turn anchored there is
+     * dead-lettered `PARENT_NOT_FOUND` when the run ends instead of being sent.
+     */
+    fun queueAnchorFor(messageId: String): String? =
+        if (messageId in serverUserMessageIds) serverUserMessageIds[messageId] else messageId
+
+    /**
      * Whether this turn reached the server's `created` milestone. Below that line nothing is
-     * persisted — not even the user message — which is what makes a failed send safe to un-send.
+     * persisted — not even the user message — which is what makes a failed send safe to un-send,
+     * with one exception: a send the server's middleware refused (see [isTurnProbablySaved]).
+     * Above it the user message is *probably* persisted, not certainly: the server emits `created`
+     * before building the prompt (memory, MCP config, attachments) and saves the user message only
+     * after, so a failure in between ends a created turn that the server never recorded.
      */
     private var currentTurnCreated = false
 
@@ -205,6 +275,16 @@ class StreamingManagerDelegate(
      * the live selection is the best available guess. Dropped when the run ends.
      */
     private var currentTurnSpec: QueuedMessage? = null
+
+    /** The skill names a spec-less turn (regenerate / edit) replayed; re-pinned with [currentTurnSpec]. */
+    private var currentTurnManualSkills: List<String>? = null
+
+    /**
+     * The endpoint whose key this turn was sent with (the agent's provider on the agents endpoint),
+     * captured at [beginStreaming]. Names the endpoint of a user-key error the server sent without
+     * one. Null for a run this client only reconnected to.
+     */
+    private var currentTurnKeyEndpoint: String? = null
 
     /**
      * Resets the streaming-internal session state (buffer, edit flag, traces) and starts the
@@ -222,6 +302,7 @@ class StreamingManagerDelegate(
         isEdit: Boolean,
         optimisticUserMessageId: String? = null,
         turnSpec: QueuedMessage? = null,
+        turnManualSkills: List<String>? = null,
     ) {
         isEditOrRegenerate = isEdit
         // A new turn: settle anything the previous one stranded before its records can render
@@ -230,39 +311,44 @@ class StreamingManagerDelegate(
         steeringDelegate.onTurnBoundary()
         startStreamSession()
         currentTurnSpec = turnSpec
+        currentTurnManualSkills = turnManualSkills
+        currentTurnKeyEndpoint = handle.state.let { state ->
+            val choice = turnSpec?.choice
+            keyEndpointOf(choice?.endpoint ?: state.selectedEndpoint, choice?.model ?: state.selectedModel, state.agents)
+        }
         // After startStreamSession: its pendingActionDelegate.clear() drops the pin.
-        pendingActionDelegate.onTurnStarted(turnSpec)
+        pendingActionDelegate.onTurnStarted(turnSpec, turnManualSkills)
         currentTurnOptimisticUserMessageId = optimisticUserMessageId
+        optimisticUserMessageId?.let { serverUserMessageIds[it] = null }
+        reattachedAfterCeiling = false
         // Capture the origin account at stream start so a post-switch finalize attributes to it.
         streamOriginAccountId = activeAccountProvider.currentAccountId()
-        streamingBuffer.clear()
-        streamingBufferDirty = false
-        subagentTraceDelegate.reset()
-        officePreviewDelegate.reset()
-        startStreamingUpdater()
+        buffer.clear()
+        liveReply.onTurnStarted()
+        buffer.startUpdater()
+        // A turn this client started leaves nothing paused behind it that the chip could misread.
+        settleRunStatus()
     }
 
     /**
      * Resets streaming-related UI state and the buffer in preparation for a new stream
      * (edit, regenerate, or continue).
      */
-    fun prepareForStreaming(isEdit: Boolean, optimisticUserMessageId: String? = null) {
+    fun prepareForStreaming(
+        isEdit: Boolean,
+        optimisticUserMessageId: String? = null,
+        manualSkills: List<String>? = null,
+    ) {
         handle.update {
-            content = content.copy(
-                isStreaming = true,
-                streamingContent = "",
-                activeToolCalls = emptyList(),
-                streamingAttachments = emptyList(),
-            )
+            content = content.resetLiveReply(isStreaming = true)
             error = null
         }
-        beginStreaming(isEdit, optimisticUserMessageId)
+        beginStreaming(isEdit, optimisticUserMessageId, turnManualSkills = manualSkills)
     }
 
     /**
-     * Cancels any in-flight stream and launches collection of [flow]. A flow that returns
-     * without a terminal event is treated as a recoverable stream error here, so every caller
-     * receives the same teardown contract.
+     * Cancels any in-flight stream and launches collection of [flow], and ends the session if the
+     * flow completes with neither Final nor Error (see [StreamEndReason]).
      *
      * Ordering contract: callers must have called [beginStreaming]/[prepareForStreaming] first
      * (all current callers do) — that is what bumps [streamSession], so a stale [endStream]
@@ -273,13 +359,15 @@ class StreamingManagerDelegate(
         val session = streamSession
         streamJob = scope.launch {
             collectStreamSafely(flow)
-            endStream(
-                StreamEndReason.StreamError(
-                    message = UNEXPECTED_STREAM_END_MESSAGE,
-                    isNetwork = false,
-                ),
-                session,
-            )
+            // Ended with neither Final nor Error: the SSE client's resume found the job gone (a 404 —
+            // the run finished while the connection was down). A body that merely closed never gets
+            // here: SseClient resumes it itself. The reply is on the server, so reconcile to it.
+            // Skipped while a Stop is pending — the abort watchdog owns that ending, and nothing
+            // reloads on an abort path. This is the only end for such a flow: a reload after the
+            // send would fire exactly when this is skipped (a new chat, with no Room observer yet),
+            // racing the save the aborted frame precedes.
+            if (isResumeStale(session) || abortRequested || originAccountChanged()) return@launch
+            endUnterminatedStream(session, whenGone = StreamEndReason.Reconcile)
         }
     }
 
@@ -288,13 +376,13 @@ class StreamingManagerDelegate(
         streamJob?.cancel()
         streamJob = null
         currentTurnSpec = null
+        currentTurnManualSkills = null
         // Hard reset (conversation switch): the previous turn's steer records must not follow the
         // ViewModel into an unrelated conversation.
         steeringDelegate.onTurnBoundary()
         startStreamSession()
-        stopStreamingUpdater()
-        streamingBuffer.clear()
-        streamingBufferDirty = false
+        buffer.stopUpdater()
+        buffer.clear()
     }
 
     /**
@@ -318,26 +406,38 @@ class StreamingManagerDelegate(
         // turn's optimistic id leak into it (the un-send would remove the wrong message).
         currentTurnOptimisticUserMessageId = null
         currentTurnCreated = false
+        currentTurnKeyEndpoint = null
+        retryCeiling = null
+        // The next resume's sync frame names its own reply.
+        if (handle.state.content.resumedReplyId != null) {
+            handle.update { content = content.copy(resumedReplyId = null) }
+        }
     }
 
     private suspend fun collectStreamSafely(stream: Flow<StreamEvent>) {
-        try {
+        suspendRunCatching {
             stream.collect { event -> handleStreamEvent(event) }
-        } catch (e: CancellationException) {
-            throw e // Never swallow cancellation
-        } catch (e: Exception) {
+        }.onFailure { e ->
             Logger.e(e) { "Stream collection failed" }
             // Classify rather than surfacing `e.message`: this stream is collected directly, not
             // through safeApiCall, and Ktor builds its messages out of the request URL — a gateway
             // redirect would put its `meta=` JWT in the error banner. The kind also drives
             // isNetwork, which is what arms the connectivity observer that resumes the stream.
             val safe = e.toSafeError()
+            // A start POST refused for MCP authentication says which of two different repairs
+            // applies; the prose under `error` does not. A project chat's start can fail the same
+            // way (files changed mid-start, or the project gone).
+            val mcpAuthMarker = (e as? ApiException)?.let { StreamErrorType.startFailureMarker(it.body, it.statusCode) }
+            val refusal = (e as? ApiException)?.chatRefusalText
             endStream(
                 StreamEndReason.StreamError(
-                    safe.message ?: "Chat request failed",
+                    refusalErrorMarker(e) ?: contentFilterNotice(e, safe.message) ?: mcpAuthMarker
+                        ?: safe.message ?: "Chat request failed",
                     isNetwork = safe.kind == FailureKind.Network,
+                    refusedByServer = refusal != null,
                 ),
             )
+            if (isSpecRefusal(refusal)) host.surfaceSpecRefusal()
         }
     }
 
@@ -347,18 +447,16 @@ class StreamingManagerDelegate(
         if (comparisonDelegate.routeEvent(event)) return
         when (event) {
             is StreamEvent.Created -> handleCreated(event)
-            is StreamEvent.ContentDelta -> {
-                streamingBuffer.append(event.chunk)
-                streamingBufferDirty = true
-            }
-            is StreamEvent.ThinkingDelta -> {
-                streamingBuffer.append(event.chunk)
-                streamingBufferDirty = true
-            }
+            is StreamEvent.ContentDelta -> buffer.appendText(event.chunk)
+            is StreamEvent.ThinkingDelta -> buffer.appendThinking(event.chunk)
             is StreamEvent.Final -> {
                 // Claim-on-read: the server dropped its copy writing this frame. Claimed here,
                 // outside handleFinal, so none of its early returns can skip it.
-                steeringDelegate.reclaim(event.pendingSteers)
+                if (event.aborted) {
+                    steeringDelegate.reclaimAborted(event.pendingSteers)
+                } else {
+                    steeringDelegate.reclaim(event.pendingSteers)
+                }
                 handleFinal(event)
             }
             is StreamEvent.Error -> {
@@ -366,122 +464,24 @@ class StreamingManagerDelegate(
                 // and the reload below fetches it — so it must not reach the user as an error.
                 if (event.code == StreamErrorCodes.GENERATION_RECONCILE) {
                     endStream(StreamEndReason.Reconcile)
+                } else if (event.code == StreamErrorCodes.RETRY_EXHAUSTED ||
+                    event.code == StreamErrorCodes.STATUS_RETRY_EXHAUSTED
+                ) {
+                    // Not an end: the flow completes right after, and its completion asks the
+                    // server what became of the run. See StreamEndReason.
+                    retryCeiling = RetryCeiling(
+                        message = event.message,
+                        networkWhenUnreachable = event.code == StreamErrorCodes.RETRY_EXHAUSTED,
+                    )
                 } else {
                     endStream(StreamEndReason.StreamError(event.message, event.isNetworkError))
                 }
             }
-            is StreamEvent.Retrying -> {
-                handle.update {
-                    content = content.copy(
-                        retryInfo = RetryInfo(
-                            attempt = event.attempt,
-                            maxAttempts = event.maxAttempts,
-                        ),
-                    )
-                }
-            }
-            is StreamEvent.ToolCallStart -> {
-                val newToolCall = ActiveToolCall(
-                    id = event.toolCallId,
-                    name = event.toolName,
-                    input = event.input,
-                )
-                handle.update {
-                    content = content.copy(activeToolCalls = content.activeToolCalls + newToolCall)
-                }
-            }
-            is StreamEvent.ToolCallComplete -> {
-                handle.update {
-                    val updated = content.activeToolCalls.map { tc ->
-                        if (tc.id == event.toolCallId) {
-                            tc.copy(isComplete = true, output = event.output)
-                        } else {
-                            tc
-                        }
-                    }
-                    content = content.copy(activeToolCalls = updated)
-                }
-                // If this was a `subagent` tool_call, freeze its live trace —
-                // the child run is done; stop accumulating for that key.
-                subagentTraceDelegate.onParentToolCallResolved(event.toolCallId)
-            }
-            is StreamEvent.AttachmentCreated -> {
-                val attachment = Attachment(
-                    fileId = event.fileId,
-                    filename = event.filename,
-                    filepath = event.filepath,
-                    type = event.type,
-                    toolCallId = event.toolCallId,
-                    width = event.width,
-                    height = event.height,
-                    status = event.status,
-                    text = event.text,
-                    textFormat = event.textFormat,
-                    previewError = event.previewError,
-                    webSearch = event.webSearch,
-                    fileSearch = event.fileSearch,
-                    memory = event.memory,
-                    uiResources = event.uiResources,
-                )
-                // Office-doc previews (v0.8.6) arrive twice per file_id (pending →
-                // ready/failed) — route through the delegate for upsert-by-file_id +
-                // poll-while-pending. Ordinary attachments keep the simple append path.
-                if (ArtifactType.isOfficePreviewMime(event.type)) {
-                    officePreviewDelegate.onAttachment(attachment)
-                } else if (attachment.webSearch != null && attachment.toolCallId != null) {
-                    // Web-search re-emits an accumulating superset per source processed —
-                    // upsert by toolCallId so we keep only the latest (fullest) one rather
-                    // than piling up near-duplicate copies for the stream's duration.
-                    handle.update {
-                        val kept = content.streamingAttachments.filterNot {
-                            it.type == ToolConstants.WEB_SEARCH && it.toolCallId == attachment.toolCallId
-                        }
-                        content = content.copy(streamingAttachments = kept + attachment)
-                    }
-                } else {
-                    handle.update {
-                        content = content.copy(streamingAttachments = content.streamingAttachments + attachment)
-                    }
-                }
-            }
             is StreamEvent.Sync -> {
-                // Resume snapshot: `aggregatedContent` is the authoritative state of
-                // the response so far, so we REPLACE (not append) the streaming
-                // pipeline's fields from it — both the text buffer and the tool-call
-                // list. Any pendingEvents in the same frame arrive as their own
-                // StreamEvents after this and fold on top via the normal handlers.
-                if (lastErrorWasNetwork) {
-                    lastErrorWasNetwork = false
-                    cancelConnectivityObserver()
-                }
-                handle.update {
-                    if (content.retryInfo != null) content = content.copy(retryInfo = null)
-                }
-                val textContent = event.aggregatedContent
-                    .mapNotNull { it.text }
-                    .joinToString("")
-                streamingBuffer.clear()
-                streamingBuffer.append(textContent)
-                streamingBufferDirty = true
-
-                // Rebuild active tool calls from the snapshot's tool_call parts so an
-                // in-progress image gen (or any tool call) started before we resumed
-                // still renders its live card. The same ActiveToolCall the live path
-                // produces, so the existing StreamingToolCallCard / ImageGenCard render
-                // it identically. A part with a non-blank output is already complete.
-                val syncedToolCalls = event.aggregatedContent
-                    .mapNotNull { part -> part.toolCall?.takeIf { !it.id.isNullOrBlank() } }
-                    .map { tc ->
-                        ActiveToolCall(
-                            id = tc.id.orEmpty(),
-                            name = tc.name.orEmpty(),
-                            input = tc.args?.toString(),
-                            isComplete = !tc.output.isNullOrBlank(),
-                            output = tc.output,
-                        )
-                    }
-                handle.update { content = content.copy(activeToolCalls = syncedToolCalls) }
-                flushStreamingBuffer()
+                networkRecovery.disarm()
+                buffer.replaceFrom(event.aggregatedContent)
+                liveReply.apply(event)
+                buffer.flush()
             }
             is StreamEvent.Step -> { /* no-op */ }
             is StreamEvent.ContextSummary -> {
@@ -502,58 +502,50 @@ class StreamingManagerDelegate(
                 // The steer is now a content part of the reply being streamed, so its chip has
                 // done its job. The text itself needs no handling here: it arrives through the
                 // normal content path like everything else the run writes.
-                steeringDelegate.onSteerApplied(event.steerId)
+                steeringDelegate.onSteerApplied(event.steerId, event.quotes, event.clientSteerId)
             }
             is StreamEvent.PendingSteersSynced -> {
                 steeringDelegate.onPendingSteersSynced(event.pendingSteers)
             }
-            is StreamEvent.SubagentUpdate -> subagentTraceDelegate.onUpdate(event)
-            is StreamEvent.TitleUpdate -> handleTitleUpdate(event)
-            is StreamEvent.ContextUsageUpdate -> {
-                // Latest context-window snapshot drives the gauge. In-memory only.
-                handle.update { content = content.copy(contextUsage = event.usage) }
-            }
-            is StreamEvent.TokenUsageUpdate -> {
-                // Per-call provider usage; the gauge denominator comes from the context
-                // snapshot, but the breakdown sheet shows Input/Output from this. In-memory only.
-                //
-                // A non-null `usageType` marks a non-primary bucket — a summary pass, an
-                // isolated subagent run, a hidden sequential-agent call, or an activity-label
-                // header. Those are separate model calls, so letting one through would overwrite
-                // the turn's own figures: this handler is last-write-wins. Activity labels make
-                // that acute, emitting one usage event per tool batch (default up to 20 per run)
-                // from a cheap fast model, so the sheet would end up showing the label model's
-                // counts rather than the turn's.
-                if (event.usage.usageType == null) {
-                    handle.update { content = content.copy(tokenUsage = event.usage) }
-                }
-            }
+            is StreamEvent.Retrying,
+            is StreamEvent.ToolCallStart,
+            is StreamEvent.ToolCallComplete,
+            is StreamEvent.ToolCallClosed,
+            is StreamEvent.ToolCallAuthRequired,
+            is StreamEvent.ToolCallPreparation,
+            is StreamEvent.SandboxStarting,
+            is StreamEvent.PtcToolCall,
+            is StreamEvent.AttachmentCreated,
+            is StreamEvent.SubagentUpdate,
+            is StreamEvent.TitleUpdate,
+            is StreamEvent.ContextUsageUpdate,
+            is StreamEvent.TokenUsageUpdate,
+            is StreamEvent.UsageBackfill,
+            -> liveReply.apply(event)
         }
-    }
-
-    /**
-     * Eager mid-stream title reveal (v0.8.7 `titleTiming: immediate`). Updates the
-     * in-memory title only — writing to Room mid-stream would re-emit the
-     * loadConversation observer and clobber the in-place streaming view (see the
-     * streaming-anchor invariant). The post-stream title refetch persists it.
-     */
-    private fun handleTitleUpdate(event: StreamEvent.TitleUpdate) {
-        val current = handle.state.conversationId
-        if (current != null && current != event.conversationId) return
-        handle.update { conversation = conversation.copy(conversationTitle = event.title) }
     }
 
     private fun handleCreated(event: StreamEvent.Created) {
-        // Past this milestone the server owns the turn, so a later failure must NOT un-send it.
+        // Past this milestone a later failure must NOT un-send the turn outright: the server has
+        // usually persisted it. See currentTurnCreated for the exception.
         currentTurnCreated = true
-        if (lastErrorWasNetwork) {
-            lastErrorWasNetwork = false
-            cancelConnectivityObserver()
-        }
+        // The start POST's synthetic frame carries no message; only the server's own frame does.
+        val optimisticId = currentTurnOptimisticUserMessageId
+        if (optimisticId != null && event.messageId.isNotEmpty()) serverUserMessageIds[optimisticId] = event.messageId
+        networkRecovery.disarm()
+        // Read before the id lands: a forced-temporary new chat is temporary only while it has no
+        // id (ChatUiState.isTemporaryChat), so the flag is latched into the slice here.
+        val temporary = handle.state.isTemporaryChat
+        val privateTurnId = currentTurnOptimisticUserMessageId.takeIf { event.privacyRevision != null }
         handle.update {
-            conversation = conversation.copy(conversationId = event.conversationId)
+            conversation = conversation.copy(conversationId = event.conversationId, isTemporaryChat = temporary)
             if (content.retryInfo != null) {
                 content = content.copy(retryInfo = null)
+            }
+            // The live turn says its private details were hidden from the model. In memory only,
+            // node for node: no Room write, no path rebuild, so the streaming anchor stands.
+            if (privateTurnId != null) {
+                content = content.withPrivacyRevision(privateTurnId, event.privacyRevision)
             }
         }
         // The conversation now has an id to key the resume pin by. A brand-new chat had none at
@@ -561,14 +553,14 @@ class StreamingManagerDelegate(
         // before its first human-review pause arrives.
         pendingActionDelegate.onConversationIdResolved(event.conversationId)
         pendingActionDelegate.onGenerationEpoch(event.generationCreatedAt)
-        completionDelegate.onConversationCreated(event.conversationId, isNewConversation(), streamOriginAccountId)
+        completionDelegate.onConversationCreated(event.conversationId, host.isNewConversation, streamOriginAccountId)
     }
 
     private fun handleFinal(rawEvent: StreamEvent.Final) {
         // The session already ended through another reason (e.g. a failed-abort AbortFallback
         // latched while this Final sat in the dispatcher queue) — a second finalize would
         // double-apply state and queue policy.
-        if (isSessionEnded()) return
+        if (isSessionEnded) return
         // A stopped turn arrives as an ordinary `final` frame flagged `aborted` — read it off
         // the event rather than off local stop state, so an abort issued from another client on
         // the same conversation is treated identically.
@@ -577,11 +569,8 @@ class StreamingManagerDelegate(
         // function, so the early returns below cannot skip the hand-over.
         // Flush the tail of the buffer before it is read below; endStream repeats this
         // idempotently at the end.
-        stopStreamingUpdater()
-        // The stream has ended: any office-doc attachment still `pending` (its
-        // `ready` SSE update may never arrive once the run closes) now falls back
-        // to polling GET /api/files/:id/preview. De-duped + bounded in the delegate.
-        officePreviewDelegate.onStreamEnded()
+        buffer.stopUpdater()
+        liveReply.onStreamEnded(rawEvent.resolvedResponseMessage()?.attachments.orEmpty())
         // Early abort: the Stop landed before the server's `created` milestone, so NOTHING was
         // persisted — not even the user message. Un-send the turn (remove the optimistic bubble,
         // hand its text back to the composer) instead of finalizing: any bubble kept here would
@@ -589,11 +578,8 @@ class StreamingManagerDelegate(
         // No completionDelegate.onFinal — there is no conversation save, cache, title, or TTS
         // for a turn that never existed.
         if (aborted && rawEvent.earlyAbort) {
-            val unsent = currentTurnOptimisticUserMessageId
-                ?.let { id -> handle.state.messages.firstOrNull { it.messageId == id } }
-            treeDelegate.unsendOptimisticTurn(currentTurnOptimisticUserMessageId)
-            unsent?.text?.takeIf { it.isNotBlank() }
-                ?.let { restoreUnsentInput(it, unsent.quotes.orEmpty()) }
+            liveReply.onFinal(responseId = null)
+            host.unsendTurn(currentTurnOptimisticUserMessageId)
             endStream(StreamEndReason.Finalized(aborted = true))
             return
         }
@@ -601,14 +587,13 @@ class StreamingManagerDelegate(
         // `text` for a persisted response, DROP a response the server never saved — once, here,
         // before anything renders or caches it. See applyAbortContract.
         val event = if (aborted) rawEvent.applyAbortContract() else rawEvent
+        // Before anything below clears isStreaming: the usage hand-over to the reply must land
+        // no later than the reply itself, or Totals counts the run twice for an emission.
+        liveReply.onFinal((event.responseMessage ?: event.message)?.messageId)
         val isComparison = handle.state.comparisonState.isEnabled
         val conversationId = handle.state.conversationId
             ?: event.conversation?.conversationId
-        val completedResponseText = if (isComparison) {
-            comparisonDelegate.primaryContent()
-        } else {
-            streamingBuffer.toString()
-        }
+        val completedResponseText = if (isComparison) comparisonDelegate.primaryAnswerText() else buffer.currentText
         // Never auto-read a reply the user just cut off.
         val shouldAutoRead = !isEditOrRegenerate && !aborted
         // Make sure the resolved conversation id is in state for the completion handlers.
@@ -618,15 +603,8 @@ class StreamingManagerDelegate(
         if (isComparison) {
             // Comparison reconciles via background reload (no in-memory finalize to fold the
             // streaming-clear into), so clear the single-stream UI fields now.
-            handle.update {
-                content = content.copy(
-                    isStreaming = false,
-                    streamingContent = "",
-                    activeToolCalls = emptyList(),
-                    streamingAttachments = emptyList(),
-                )
-            }
-            comparisonDelegate.onFinal((event.responseMessage ?: event.message)?.messageId)
+            handle.update { content = content.resetLiveReply(isStreaming = false) }
+            comparisonDelegate.onFinal(event.responseMessage ?: event.message)
         }
         // Non-comparison chats fold the streaming-clear into finalizeChatDisplay (atomic
         // bubble→message swap; see SendCompletionDelegate.onFinal).
@@ -635,65 +613,24 @@ class StreamingManagerDelegate(
             conversationId = conversationId,
             completedResponseText = completedResponseText,
             shouldAutoRead = shouldAutoRead,
-            isNewConversation = isNewConversation(),
-            isHandedOffNewChat = isHandedOffNewChat(),
+            isNewConversation = host.isNewConversation,
+            isHandedOffNewChat = host.isHandedOffNewChat,
             isComparison = isComparison,
             originAccount = streamOriginAccountId,
             aborted = aborted,
+            optimisticUserMessageId = currentTurnOptimisticUserMessageId,
         )
         // Fallback for degenerate finals: a non-comparison stream that ends with no
         // conversation id (and thus nothing to finalize) never reaches finalizeChatDisplay,
         // so its streaming fields would otherwise stay set. No-op once the in-memory
         // finalize (normal/temp) or the comparison branch above has already cleared them.
         if (handle.state.isStreaming) {
-            handle.update {
-                content = content.copy(
-                    isStreaming = false,
-                    streamingContent = "",
-                    activeToolCalls = emptyList(),
-                    streamingAttachments = emptyList(),
-                )
-            }
+            handle.update { content = content.resetLiveReply(isStreaming = false) }
         }
         // Must be the LAST statement: the drain inside endStream sends the next queued item,
         // and doSendWithSpec silently no-ops while isStreaming is still true — so the finalize
         // above has to have cleared it first.
         endStream(StreamEndReason.Finalized(aborted))
-    }
-
-    /**
-     * Launches a periodic coroutine that flushes the [streamingBuffer] to UI state
-     * at most every [STREAMING_UI_UPDATE_INTERVAL_MS] ms. This avoids recomposition spam
-     * from high-frequency SSE chunks (each chunk would otherwise trigger a full state copy).
-     */
-    private fun startStreamingUpdater() {
-        streamingUpdateJob?.cancel()
-        streamingUpdateJob = scope.launch {
-            while (isActive) {
-                delay(STREAMING_UI_UPDATE_INTERVAL_MS)
-                flushStreamingBuffer()
-            }
-        }
-    }
-
-    /**
-     * Flushes the streaming buffer to UI state if it has been modified since the last flush.
-     * Called both periodically (by the updater) and immediately on stream completion/error.
-     */
-    private fun flushStreamingBuffer() {
-        if (!streamingBufferDirty) return
-        streamingBufferDirty = false
-        handle.update { content = content.copy(streamingContent = streamingBuffer.toString()) }
-    }
-
-    /**
-     * Stops the periodic streaming updater and performs a final flush so the last
-     * chunk is never lost.
-     */
-    private fun stopStreamingUpdater() {
-        streamingUpdateJob?.cancel()
-        streamingUpdateJob = null
-        flushStreamingBuffer()
     }
 
     /**
@@ -747,7 +684,7 @@ class StreamingManagerDelegate(
                 isTemporary = handle.state.isTemporaryChat,
                 // The ack hands back the steers the stopped run never injected — the only report
                 // for this ending. Claimed inside the call so it cannot be skipped.
-                claimSteers = steeringDelegate::reclaim,
+                claimSteers = steeringDelegate::reclaimAborted,
             )
             if (abortResult is Result.Error) {
                 Logger.w(abortResult.exception) { "Failed to abort chat: ${abortResult.message}" }
@@ -781,9 +718,24 @@ class StreamingManagerDelegate(
     }
 
     /**
-     * The stream-termination chokepoint for every end — clean or aborted Final, error,
-     * unexpected clean EOF, failed abort, watchdog, resume-found-expired — so teardown steps
-     * cannot drift apart per exit path again.
+     * Whether the failed turn's user message may be on the server, so the reload — not an
+     * un-send — decides where its text goes.
+     *
+     * Past `created`, probably. Before it, only a refusal on an existing conversation: denyRequest
+     * saves the user message and the error reply whenever the request named a conversation and a
+     * real parent, so the thread keeps the refused message under its error, as the web does,
+     * instead of the text landing in the composer as well. Not a temporary chat: those never
+     * reload, so nothing would replace the un-sent bubble.
+     */
+    private fun isTurnProbablySaved(reason: StreamEndReason.StreamError): Boolean =
+        currentTurnCreated ||
+            (reason.refusedByServer && handle.state.conversationId != null && !handle.state.isTemporaryChat)
+
+    /**
+     * The stream-termination chokepoint for every *event-driven* end — clean or aborted Final,
+     * error, failed abort, watchdog, resume-found-expired — so teardown steps can't drift apart
+     * per exit path again. A flow that ends with neither Final nor Error comes here too, from
+     * [launchStream] and [resumeStream] (see [StreamEndReason]); keep new teardown here.
      *
      * Latched per session: runs at most once for [session], and never for a stale session
      * (see [streamSession]). [StreamEndReason.Finalized] deliberately writes no state — the
@@ -800,6 +752,7 @@ class StreamingManagerDelegate(
         // The run is over: its spec must not be re-pinned onto a later reconnect that finds some
         // other run (started elsewhere) still active on this conversation.
         currentTurnSpec = null
+        currentTurnManualSkills = null
         // Whatever ended the run usually made any human-review pause unresolvable (the job is
         // gone, so a resume can only 409) — with ONE exception: a network StreamError says
         // nothing about the server-side run, which stays parked on its pause until it expires.
@@ -807,16 +760,29 @@ class StreamingManagerDelegate(
         // whatever the user had typed into it, and attemptNetworkRecovery re-attaches moments
         // later to find the same pause waiting.
         val keepPause = reason is StreamEndReason.StreamError && reason.isNetwork
+        // Captured before the clear below wipes it: the drain needs the ENDING run's epoch to
+        // tell whether a server admission already claimed this boundary.
+        val endedGenerationCreatedAt = pendingActionDelegate.generationEpoch
         if (!keepPause) pendingActionDelegate.clear()
         // Steers the ended run never injected. A `Finalized` frame reports them authoritatively
         // and handleFinal has already re-homed them; every other ending carries no report at all,
         // so the text held locally is re-homed here or it is lost. Converting on Finalized too
         // would double-send any steer whose applied event this client happened to miss.
         if (reason !is StreamEndReason.Finalized) steeringDelegate.reclaimLocalChips()
+        // A Final attributed the run's usage to its reply. Any other ending leaves no reply to
+        // attribute it to, except a network error, after which the run re-attaches and goes on.
+        if (reason !is StreamEndReason.Finalized && !keepPause) liveReply.discardPendingUsage()
         steeringDelegate.clear()
+        // Before the branch, so every ending retires it: a compaction that errors, is stopped or
+        // has its resume expire would otherwise leave the action labelled "Compacting…" forever.
+        // The Finalized path also clears it inside finalizeChatDisplay's atomic update, which is
+        // what keeps the label and the settled message appearing in one emission.
+        if (handle.state.isCompacting) {
+            handle.update { content = content.copy(isCompacting = false) }
+        }
         when (reason) {
             is StreamEndReason.Finalized -> {
-                stopStreamingUpdater()
+                buffer.stopUpdater()
                 if (reason.aborted) {
                     // A stopped turn must not auto-drain. Re-assert the hold rather than merely
                     // skipping the drain: stopGeneration's pause() fired before the abort
@@ -828,76 +794,72 @@ class StreamingManagerDelegate(
                     // Reply finished cleanly: fire the next queued follow-up (if any, and not
                     // paused). isStreaming is already false here, so the next send respects the
                     // no-Room-write-while-streaming invariant.
-                    queueDelegate.drainNext()
+                    queueDelegate.drainNext(endedGenerationCreatedAt = endedGenerationCreatedAt)
                 }
             }
             is StreamEndReason.StreamError -> {
-                stopStreamingUpdater()
+                buffer.stopUpdater()
                 // Track network errors so auto-reconnect can kick in when connectivity returns.
-                lastErrorWasNetwork = reason.isNetwork
-                if (reason.isNetwork) {
-                    startConnectivityObserver()
-                }
+                if (reason.isNetwork) networkRecovery.arm() else networkRecovery.disarm()
                 // A typed user-provided-key error surfaces as a snackbar with a Settings CTA
                 // instead of the generic error banner (no double-surfacing).
-                val keyError = parseUserKeyError(reason.message)
-                // The turn died before `created`, so the server persisted nothing — not even the
-                // user message. Un-send it and hand the text back to the composer, exactly as an
-                // early abort does, rather than stranding it: the optimistic bubble is invisible on
-                // a new chat anyway (screenState stays LANDING until `created`) and on an existing
+                // Most key errors arrive without an endpoint; the turn's own names it.
+                val keyError = parseUserKeyError(reason.message, fallbackEndpoint = currentTurnKeyEndpoint)
+                val probablySaved = isTurnProbablySaved(reason)
+                // A turn that may be saved (see isTurnProbablySaved) may or may not have its user
+                // message on the server, and the reload below drops the optimistic bubble either
+                // way, so the reload decides: no server copy means the text goes back to the
+                // composer. Not on a network error — the run may still be alive server-side, and
+                // the connectivity observer re-attaches to it.
+                val unsavedTurn = currentTurnOptimisticUserMessageId
+                    ?.takeIf { probablySaved && !reason.isNetwork }
+                    ?.let { id -> handle.state.messages.firstOrNull { it.messageId == id } }
+                // Any other turn is un-sent and its text handed back to the composer, exactly as an
+                // early abort does, rather than stranded: the optimistic bubble is invisible on a
+                // new chat anyway (screenState stays LANDING until `created`) and on an existing
                 // conversation the reload below rebuilds the path without it. Either way the user's
                 // typed text simply disappeared, with nothing to retry from. Null id means the turn
                 // re-submitted a persisted message (regenerate / continue / edit-AI) — never remove
                 // those.
-                val unsentId = currentTurnOptimisticUserMessageId?.takeUnless { currentTurnCreated }
-                if (unsentId != null) {
-                    val unsent = handle.state.messages.firstOrNull { it.messageId == unsentId }
-                    treeDelegate.unsendOptimisticTurn(unsentId)
-                    unsent?.text?.takeIf { it.isNotBlank() }
-                        ?.let { restoreUnsentInput(it, unsent.quotes.orEmpty()) }
-                }
+                currentTurnOptimisticUserMessageId?.takeUnless { probablySaved }?.let(host::unsendTurn)
                 // Preserve partial content so users can read/copy what was received.
-                val partialContent = streamingBuffer.toString()
                 handle.update {
-                    content = content.copy(
-                        isStreaming = false,
-                        streamingContent = partialContent,
-                        retryInfo = null,
-                        activeToolCalls = emptyList(),
-                        streamingAttachments = emptyList(),
-                    )
+                    content = content.resetLiveReply(false, buffer.currentText, buffer.currentThinking)
+                        .copy(retryInfo = null)
                     // A typed server error becomes a marker the UI localizes; anything
                     // unrecognized keeps the server's own text, which is the existing behaviour.
                     // Without this the payload itself is what reaches the user — a raw
                     // `{"type":"resource_recovery_required", …}` where a sentence telling them to
                     // reattach their files belongs.
-                    error = when {
-                        keyError != null -> null
-                        else -> StreamErrorType.markerOrText(reason.message)
-                    }
+                    error = if (keyError != null) null else StreamErrorType.markerOrText(reason.message)
                 }
                 comparisonDelegate.endStreaming()
                 // Don't auto-drain into a failed turn — hold the queue for the user.
                 queueDelegate.pause()
-                if (keyError != null) {
-                    emitUserKeyError(keyError)
-                }
+                if (keyError != null) host.emitUserKeyError(keyError)
                 // If the server already created a conversation, fetch whatever it persisted.
-                handle.state.conversationId?.let(reloadConversation)
+                handle.state.conversationId?.let { conversationId ->
+                    if (unsavedTurn != null) {
+                        host.reloadRestoringUnsaved(conversationId, unsavedTurn)
+                    } else {
+                        host.reloadConversation(conversationId)
+                    }
+                }
             }
             is StreamEndReason.AbortFallback, is StreamEndReason.ResumeFailed -> {
                 streamJob?.cancel()
-                stopStreamingUpdater()
+                buffer.stopUpdater()
                 if (handle.state.isStreaming) {
-                    val partialContent = streamingBuffer.toString()
                     handle.update {
-                        content = content.copy(
-                            isStreaming = false,
-                            streamingContent = partialContent,
-                            retryInfo = null,
-                            activeToolCalls = emptyList(),
-                            streamingAttachments = emptyList(),
-                        )
+                        val stopped = content.resetLiveReply(false, buffer.currentText, buffer.currentThinking)
+                            .copy(retryInfo = null)
+                        // Nothing reloads here, so a resumed reply's saved partial, hidden while it
+                        // streamed, comes back now that the bubble is gone.
+                        content = if (stopped.resumedReplyId == null) {
+                            stopped
+                        } else {
+                            stopped.copy(displayMessages = buildActiveMessagePath(stopped.messages, stopped.activeBranches))
+                        }
                     }
                 }
                 // Keep the partial panes too — same intent as preserving streamingContent above.
@@ -908,30 +870,24 @@ class StreamingManagerDelegate(
             }
             is StreamEndReason.Reconcile -> {
                 streamJob?.cancel()
-                stopStreamingUpdater()
+                buffer.stopUpdater()
                 // Clear the partial rather than preserving it: unlike the abort paths, the
                 // authoritative reply IS on the server, and the reload below is about to render
                 // it. Keeping the partial would double it — once as stale streaming text, once
                 // as the fetched message.
                 handle.update {
-                    content = content.copy(
-                        isStreaming = false,
-                        streamingContent = "",
-                        retryInfo = null,
-                        activeToolCalls = emptyList(),
-                        streamingAttachments = emptyList(),
-                    )
                     // Deliberately does NOT set `error`. See StreamEndReason.Reconcile.
+                    content = content.resetLiveReply(isStreaming = false).copy(retryInfo = null)
                 }
                 comparisonDelegate.endStreaming(clearContent = true)
                 queueDelegate.pause()
-                handle.state.conversationId?.let(reloadConversation)
+                handle.state.conversationId?.let(host::reloadConversation)
             }
             is StreamEndReason.ResumeExpired -> {
                 streamJob?.cancel()
-                stopStreamingUpdater()
+                buffer.stopUpdater()
                 handle.update {
-                    content = content.copy(isStreaming = false, streamingContent = "")
+                    content = content.copy(isStreaming = false, streamingContent = "", streamingThinking = "")
                 }
                 comparisonDelegate.endStreaming(clearContent = true)
                 // Hold rather than drain: a resume gesture must never auto-fire a queued send.
@@ -939,23 +895,25 @@ class StreamingManagerDelegate(
                 // Safe here, unlike the abort paths: "expired" means the job completed and was
                 // cleaned up in the past — the resume gesture arrives at human latency, well
                 // clear of the emit-then-persist window.
-                handle.state.conversationId?.let(reloadConversation)
+                handle.state.conversationId?.let(host::reloadConversation)
             }
         }
     }
 
-    fun onPause() {
+    /** Returns whether a live reply was detached: the run goes on server-side with no one following it. */
+    fun onPause(): Boolean {
         wasStreaming = handle.state.isStreaming
-        if (!wasStreaming) return
+        if (!wasStreaming) return false
         // A Stop is in flight: the collector is carrying the aborted final that holds the
         // partial, the ViewModel scope survives backgrounding, and the watchdog is armed.
         // Cancelling here would discard the frame — the stopped reply would come back blank
         // (the exact bug this design exists to fix).
-        if (abortRequested) return
+        if (abortRequested) return false
         // Normal streaming: detach as before (SSE over a backgrounded socket is unreliable);
         // onResume reconciles via the server-side stream status.
         streamJob?.cancel()
-        stopStreamingUpdater()
+        buffer.stopUpdater()
+        return true
     }
 
     fun onResume() {
@@ -963,7 +921,7 @@ class StreamingManagerDelegate(
         wasStreaming = false
         // The session ended while backgrounded (the aborted final landed in the still-live
         // collector, or an error tore down): state is already finalized — touch nothing.
-        if (isSessionEnded()) return
+        if (isSessionEnded) return
         // A Stop is pending: defer to the abort machinery (watchdog → AbortFallback), which
         // preserves the partial. Never drive resume/expire here — ResumeExpired would wipe it.
         // (Broader than a live-collector check: after onPause the collector may be dead, but the
@@ -975,7 +933,7 @@ class StreamingManagerDelegate(
         // and a stale ResumeExpired must not wipe the newer stream's partial.
         val session = streamSession
         scope.launch {
-            try {
+            suspendRunCatching {
                 val status = chatRepository.checkStreamStatus(conversationId, steeringDelegate::reclaimParked)
                 // A concurrent resume advanced the session (or it ended) while we were suspended:
                 // bail rather than redundantly restart or wipe the now-current stream.
@@ -983,16 +941,19 @@ class StreamingManagerDelegate(
                 // A Stop landed during the check: hand off to the abort machinery as above.
                 if (abortRequested) return@launch
                 if (status.active) {
-                    handle.update { content = content.copy(isStreaming = true) }
-                    resumeStream(conversationId)
+                    // Same evidence as in resumeActiveStreamIfNeeded, and needed on every attach
+                    // path rather than one: a live server run proves each boundary before it is
+                    // closed, and this path is one of the two that recover a run which ended with
+                    // NO `Final` — exactly the ending the admission fence cannot retire itself.
+                    status.createdAt?.let(queueDelegate::retireAdmissionsBefore)
+                    handle.update { content = content.attachedTo(status) }
+                    attachToRun(conversationId)
                     applyStatusPendingAction(status)
                 } else {
                     // Server confirms the job is gone: safe to wipe and reload (past the persist race).
                     endStream(StreamEndReason.ResumeExpired, session)
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+            }.onFailure { e ->
                 Logger.e(e) { "Could not resume stream" }
                 if (isResumeStale(session) || abortRequested) return@launch
                 // A transient status-check failure is NOT proof the stream ended — preserve the
@@ -1003,7 +964,7 @@ class StreamingManagerDelegate(
     }
 
     /** A launched resume decision is stale once a newer stream started or this session ended. */
-    private fun isResumeStale(session: Int) = streamSession != session || isSessionEnded()
+    private fun isResumeStale(session: Int) = streamSession != session || isSessionEnded
 
     /**
      * Paints a human-review pause reported by `/chat/status` (v0.8.8: `active` is true while a
@@ -1036,71 +997,225 @@ class StreamingManagerDelegate(
         startStreamSession()
         // Same run, new session: restore the pin the session boundary just dropped, so a pause
         // that survives a reconnect still resumes against the config the run was started with.
-        pendingActionDelegate.onTurnStarted(currentTurnSpec)
-        streamingBuffer.clear()
-        streamingBufferDirty = false
-        startStreamingUpdater()
+        pendingActionDelegate.onTurnStarted(currentTurnSpec, currentTurnManualSkills)
+        buffer.clear()
+        buffer.startUpdater()
         streamJob?.cancel()
         val session = streamSession
         streamJob = scope.launch {
             collectStreamSafely(chatRepository.resumeStream(conversationId))
-            // A resumed stream can complete with NEITHER Final NOR Error — a clean SSE EOF, or a
-            // 404 on the stream GET when the job was cleaned up between the status read and the
-            // subscribe. endStream never runs on those, so without this the run's steer records
-            // and any pause stay live forever, and the cursor never stops.
-            if (!isResumeStale(session)) endStream(StreamEndReason.ResumeExpired, session)
+            // A resumed stream can complete with NEITHER Final NOR Error — a 404 on the stream GET
+            // when the job was cleaned up between the status read and the subscribe (a body that
+            // merely closes is resumed by SseClient instead). endStream never runs on those, so
+            // without this the run's steer records and any pause stay live forever, and the cursor
+            // never stops.
+            if (isResumeStale(session) || originAccountChanged()) return@launch
+            endUnterminatedStream(session, whenGone = StreamEndReason.ResumeExpired)
         }
     }
 
-    fun resumeActiveStreamIfNeeded(conversationId: String) {
-        // Sibling of onResume (runs on conversation open); apply the same hardening so the two
-        // can't race into two resumes, and a pending Stop is never overridden by a restart.
-        if (abortRequested) return
-        val session = streamSession
+    /**
+     * Attaches to a run this client did not just start or re-attach to at a ceiling: opening a
+     * conversation with a live run (including the handed-off new chat and a server-admitted queued
+     * turn), coming back to the foreground, or the network returning. Every such attach is a fresh
+     * start for the ceiling's single re-attach — the flag is otherwise reset only by
+     * [beginStreaming], so without this a run attached this way would inherit a previous turn's
+     * spent re-attach and its first ceiling would end in an error instead of resuming. Not used by the ceiling's own
+     * re-attach, which is what the flag bounds.
+     */
+    private fun attachToRun(conversationId: String) {
+        reattachedAfterCeiling = false
+        resumeStream(conversationId)
+    }
+
+    /**
+     * The account switched since this stream started. `SseClient` stops reconnecting on a switch
+     * and completes the flow, and nothing may end it with a reload: the outgoing account's
+     * conversation would be read with the incoming account's credentials.
+     */
+    private fun originAccountChanged(): Boolean {
+        val origin = streamOriginAccountId ?: return false
+        return activeAccountProvider.currentAccountId() != origin
+    }
+
+    /**
+     * Ends a flow that completed with neither Final nor Error: as [whenGone] when its resume found
+     * the job gone, or by the run's status when the retry ladder ran out first.
+     */
+    private fun endUnterminatedStream(session: Int, whenGone: StreamEndReason) {
+        val ceiling = retryCeiling
+        retryCeiling = null
+        if (ceiling == null) endStream(whenGone, session) else adjudicateRetryCeiling(ceiling, session, whenGone)
+    }
+
+    /**
+     * The retry ladder ran out, which says nothing about the run: with no heartbeat upstream, a live
+     * run behind an idle-timing proxy exhausts it while the device is online, and a "check your
+     * network" banner there is both wrong and a dead end — the connectivity observer never fires
+     * on a network that never went away. So ask, as upstream does at its ceiling: resume a run that
+     * is active, end one that is not as [whenGone] (the refetch, no banner), and report a network
+     * error only when the status read fails too.
+     */
+    private fun adjudicateRetryCeiling(ceiling: RetryCeiling, session: Int, whenGone: StreamEndReason) {
+        val message = ceiling.message
+        val unreachable = StreamEndReason.StreamError(message, isNetwork = ceiling.networkWhenUnreachable)
+        val conversationId = handle.state.conversationId
+        if (conversationId == null) {
+            endStream(unreachable, session)
+            return
+        }
         scope.launch {
-            try {
-                val status = chatRepository.checkStreamStatus(conversationId, steeringDelegate::reclaimParked)
-                if (isResumeStale(session) || abortRequested) return@launch
-                if (status.active) {
-                    handle.update {
-                        content = content.copy(
-                            isStreaming = true,
-                            screenState = ChatScreenState.ACTIVE,
-                        )
-                    }
+            val status = suspendRunCatching {
+                chatRepository.checkStreamStatus(conversationId, steeringDelegate::reclaimParked)
+            }.getOrElse { e ->
+                Logger.w(e) { "Retry ceiling: could not check stream status" }
+                null
+            }
+            // The read can take seconds: an account switch in that window must not reload or resume
+            // the outgoing account's conversation with the incoming account's credentials.
+            if (isResumeStale(session) || abortRequested || originAccountChanged()) return@launch
+            when {
+                // The status read failed too. After the transport ladder that is a real connectivity
+                // failure, which the observer recovers once the network returns; after a persistent
+                // HTTP status it is that status error, shown as is.
+                status == null -> endStream(unreachable, session)
+                !status.active -> endStream(whenGone, session)
+                // Already re-attached once this turn and still no connection reaches it.
+                reattachedAfterCeiling -> endStream(StreamEndReason.StreamError(message, isNetwork = false), session)
+                else -> {
+                    reattachedAfterCeiling = true
+                    status.createdAt?.let(queueDelegate::retireAdmissionsBefore)
+                    handle.update { content = content.attachedTo(status) }
                     resumeStream(conversationId)
                     applyStatusPendingAction(status)
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Logger.d(e) { "No active stream to resume for $conversationId" }
             }
         }
     }
 
     /**
-     * Starts observing connectivity for auto-reconnect after a network error.
-     * Cancels any existing observer first. The observer self-cancels after recovery fires.
+     * Attaches to a run the SERVER started — it admitted a queued turn while this client sat idle.
+     *
+     * [onResume] cannot serve this: it is gated on `wasStreaming`, and by definition this client
+     * was not. Queued turns have no push channel either, so without this the user's follow-up runs
+     * to completion with nothing on screen until the conversation is reopened.
+     *
+     * Returns whether the attach was taken up. A refusal has to be reported, not swallowed: the
+     * caller announces each owed turn exactly once and the admitted row leaves the queue as soon
+     * as the poll sees it, so an announcement made into a refusal is the last one that turn will
+     * ever get.
      */
-    private fun startConnectivityObserver() {
-        connectivityJob?.cancel()
-        connectivityJob = scope.launch {
-            var wasConnected = true
-            connectivityObserver.isConnected.collect { connected ->
-                val recovered = !wasConnected && connected
-                wasConnected = connected
-                if (recovered) {
-                    attemptNetworkRecovery()
+    fun attachToServerStartedRun(): Boolean {
+        if (handle.state.isStreaming) return false
+        val conversationId = handle.state.conversationId ?: return false
+        // A turn the server admitted can finish inside one poll interval, and then there is no run
+        // left to attach to. Its messages are on the server either way, so load them.
+        attachWithRetry(conversationId, onInactive = { host.reloadConversation(conversationId) })
+        return true
+    }
+
+    /**
+     * The attach when a conversation opens. A status check that fails is asked again on
+     * [statusRetry]'s backoff, unless the server answered it (a 4xx, such as a server without the
+     * status route): asking again would get the same answer.
+     */
+    fun resumeOnOpen(conversationId: String, onAttached: () -> Unit = {}) =
+        resumeActiveStreamIfNeeded(conversationId, onAttached = onAttached)
+
+    /**
+     * A server-started attach is announced once, so a status check that fails is retried rather
+     * than dropped; after the last attempt the conversation is reloaded as if the run had finished,
+     * and the status is asked again on [statusRetry]'s backoff so the Stopped chip can still settle.
+     * The ladder stands in for that backoff while it runs: both would ask at once.
+     */
+    private fun attachWithRetry(
+        conversationId: String,
+        attemptsLeft: Int = ATTACH_ATTEMPTS,
+        onInactive: () -> Unit = {},
+    ) {
+        resumeActiveStreamIfNeeded(conversationId, onInactive = onInactive) {
+            scope.launch {
+                if (attemptsLeft > 1) delay(ATTACH_RETRY_DELAY_MS)
+                if (handle.state.isStreaming || handle.state.conversationId != conversationId) return@launch
+                if (attemptsLeft > 1) {
+                    attachWithRetry(conversationId, attemptsLeft - 1, onInactive)
+                } else {
+                    host.reloadConversation(conversationId)
+                    if (!handle.state.runStatusSettled) statusRetry.schedule()
                 }
             }
         }
     }
 
-    /** Cancels the connectivity observer and clears the network-error flag. */
-    private fun cancelConnectivityObserver() {
-        connectivityJob?.cancel()
-        connectivityJob = null
+    fun resumeActiveStreamIfNeeded(
+        conversationId: String,
+        onInactive: () -> Unit = {},
+        onAttached: () -> Unit = {},
+        // Unsettled, the Stopped chip stays off a reply that may be paused for approval.
+        onFailed: (Throwable) -> Unit = { e ->
+            val refused = e is ApiException && e.statusCode in CLIENT_ERRORS
+            if (!refused && !handle.state.runStatusSettled) statusRetry.schedule()
+        },
+    ) {
+        // Sibling of onResume (runs on conversation open); apply the same hardening so the two
+        // can't race into two resumes, and a pending Stop is never overridden by a restart.
+        if (abortRequested) {
+            // A Stop is pending, so this client has a run going: nothing paused for the chip to misread.
+            settleRunStatus()
+            return
+        }
+        val session = streamSession
+        // An attach usually starts from an ENDED session — the previous turn finished, which is
+        // exactly when a server-admitted queued turn arrives — so "ended" cannot by itself mean
+        // stale, as it does for the callers that capture a live session. What is stale: a newer
+        // session started during the read (a local send won), or a session that was live at the
+        // start ended during it (its Final or aborted frame landed; resuming would resurrect it).
+        // Not isResumeStale: it reads the already-ended session as stale and would drop every
+        // such attach.
+        val endedAtStart = isSessionEnded
+        scope.launch {
+            suspendRunCatching {
+                val status = chatRepository.checkStreamStatus(conversationId, steeringDelegate::reclaimParked)
+                statusRetry.stop()
+                val superseded = streamSession != session || (!endedAtStart && isSessionEnded)
+                if (superseded || abortRequested) {
+                    settleRunStatus()
+                    return@launch
+                }
+                if (status.active) {
+                    // The server only starts a run once the previous turn has finished, so a live
+                    // one is proof every boundary before it is done. That is the only evidence the
+                    // queued-turn fence gets when a run ends without a `Final` — without it the
+                    // admission stays armed and the drain refuses silently for the rest of the
+                    // ViewModel's life.
+                    status.createdAt?.let(queueDelegate::retireAdmissionsBefore)
+                    handle.update {
+                        content = content.attachedTo(status).copy(
+                            screenState = ChatScreenState.ACTIVE,
+                            runStatusSettled = true,
+                        )
+                        // The server recorded the run as temporary (v0.8.9-rc1): keep its turn out
+                        // of Room and titling, as web's rebuilt submission does.
+                        if (status.isTemporary) conversation = conversation.copy(isTemporaryChat = true)
+                    }
+                    attachToRun(conversationId)
+                    applyStatusPendingAction(status)
+                    onAttached()
+                } else {
+                    settleRunStatus()
+                    onInactive()
+                }
+            }.onFailure { e ->
+                Logger.d(e) { "No active stream to resume for $conversationId" }
+                onFailed(e)
+            }
+        }
+    }
+
+    private fun settleRunStatus() {
+        statusRetry.stop()
+        if (handle.state.runStatusSettled) return
+        handle.update { content = content.copy(runStatusSettled = true) }
     }
 
     /**
@@ -1109,19 +1224,22 @@ class StreamingManagerDelegate(
      * or falls back to reloading the conversation from the server.
      */
     private fun attemptNetworkRecovery() {
-        if (!lastErrorWasNetwork) return
+        if (!networkRecovery.isArmed) return
         val state = handle.state
         val conversationId = state.conversationId ?: return
         if (state.isStreaming) return
 
-        lastErrorWasNetwork = false
-        cancelConnectivityObserver()
+        networkRecovery.disarm()
         Logger.d { "Network recovered, attempting to resume conversation $conversationId" }
 
         scope.launch {
-            try {
+            suspendRunCatching {
                 val status = chatRepository.checkStreamStatus(conversationId, steeringDelegate::reclaimParked)
                 if (status.active) {
+                    // See resumeActiveStreamIfNeeded: a live server run is the fence's only
+                    // evidence that the boundaries before it are closed, and a network drop is
+                    // precisely how a run ends without the `Final` that would have retired it.
+                    status.createdAt?.let(queueDelegate::retireAdmissionsBefore)
                     handle.update {
                         content = content.copy(
                             isStreaming = true,
@@ -1129,7 +1247,7 @@ class StreamingManagerDelegate(
                         )
                         error = null
                     }
-                    resumeStream(conversationId)
+                    attachToRun(conversationId)
                     applyStatusPendingAction(status)
                 } else {
                     // Stream expired while offline — reload conversation from server
@@ -1137,26 +1255,57 @@ class StreamingManagerDelegate(
                         error = null
                         content = content.copy(retryInfo = null)
                     }
-                    reloadConversation(conversationId)
+                    host.reloadConversation(conversationId)
                 }
-            } catch (e: Exception) {
+            }.onFailure { e ->
                 Logger.w(e) { "Network recovery: could not check stream status" }
             }
         }
     }
 
     private companion object {
-        const val UNEXPECTED_STREAM_END_MESSAGE =
-            "Connection closed before the response completed"
-
-        /** Minimum interval between streaming UI state updates to avoid recomposition spam. */
-        const val STREAMING_UI_UPDATE_INTERVAL_MS = 50L
-
         /**
          * How long after an acked abort to wait for the aborted `final` frame before stopping
          * locally. Generous vs the observed sub-second emit→deliver latency, tight vs the 120s
          * SSE stall timeout that is otherwise the only recovery.
          */
         const val ABORT_FINAL_TIMEOUT_MS = 15_000L
+
+        /** Status checks spent attaching to a run the server started, and the gap between them. */
+        const val ATTACH_ATTEMPTS = 3
+        const val ATTACH_RETRY_DELAY_MS = 2_000L
+        private val CLIENT_ERRORS = 400..499
     }
+}
+
+/**
+ * Streaming a run this screen attached to, without the saved copy of its reply (see
+ * [MessagesState.attachedRun]). The path is rebuilt only when that changes it: otherwise the one on
+ * screen stands, which may be truncated at a turn this screen sent.
+ */
+internal fun MessagesState.attachedTo(status: ChatStatusResponse): MessagesState {
+    val run = AttachedRun(
+        requestId = status.resumeState?.userMessage?.messageId?.takeIf { it.isNotBlank() },
+        responseId = status.resumeState?.responseMessageId?.takeIf { it.isNotBlank() },
+    )
+    return copy(
+        isStreaming = true,
+        attachedRun = run,
+        displayMessages = if (run.changesPath(messages, activeBranches)) {
+            run.displayPath(messages, activeBranches)
+        } else {
+            displayMessages
+        },
+    )
+}
+
+/** [messageId] marked redacted at [revision], in both the tree and the displayed path. */
+private fun MessagesState.withPrivacyRevision(messageId: String, revision: String?): MessagesState {
+    fun Message.marked() = if (this.messageId == messageId) copy(privacyRevision = revision) else this
+    return copy(
+        messages = messages.map { it.marked() },
+        displayMessages = displayMessages.map { node ->
+            if (node.message.messageId == messageId) node.copy(message = node.message.marked()) else node
+        },
+    )
 }

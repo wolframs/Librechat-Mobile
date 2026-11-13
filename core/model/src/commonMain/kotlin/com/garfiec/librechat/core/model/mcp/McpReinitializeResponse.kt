@@ -37,7 +37,11 @@ data class McpReinitializeResponse(
      * already running" from "start one" — a distinction the connection-state model cannot express.
      */
     val authorizationState: String? = null,
-)
+) {
+    /** The provider's sign-in link, when the reconnect needs one: set only with [oauthRequired], never blank. */
+    val authorizationUrl: String?
+        get() = oauthUrl?.takeIf { oauthRequired == true && it.isNotBlank() }
+}
 
 /** Wire values of [McpReinitializeResponse.failureReason]. */
 object McpFailureReasons {
@@ -54,4 +58,12 @@ object McpAuthorizationStates {
     const val AUTHORIZED = "authorized"
     const val NEEDS_AUTHORIZATION = "needs_authorization"
     const val ERROR = "error"
+
+    /**
+     * v0.8.8-rc3, and NOT a member of the connection-status union: it appears only on the
+     * per-server entries of `GET /api/mcp/tools`, where passive discovery reports that stored
+     * OAuth authorization must be renewed. [applyDiscoveryAuthorizationState] folds it into the
+     * status map as [NEEDS_AUTHORIZATION], which is what every surface already renders.
+     */
+    const val REAUTH_REQUIRED = "reauth_required"
 }

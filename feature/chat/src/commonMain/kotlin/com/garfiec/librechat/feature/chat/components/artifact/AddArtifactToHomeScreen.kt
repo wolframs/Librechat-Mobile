@@ -13,14 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,11 +32,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.common.extensions.firstGrapheme
 import com.garfiec.librechat.core.model.artifactTypeGlyph
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.chat.resources.Res
 import com.garfiec.librechat.feature.chat.resources.add_to_home_screen_confirm
 import com.garfiec.librechat.feature.chat.resources.add_to_home_screen_dialog_emoji_label
@@ -116,7 +122,7 @@ fun ProvideAddArtifactToHomeScreen(content: @Composable () -> Unit) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AddArtifactToHomeScreenDialog(
+internal fun AddArtifactToHomeScreenDialog(
     initialName: String,
     artifactType: String,
     onConfirm: (name: String, emoji: String?) -> Unit,
@@ -137,8 +143,10 @@ private fun AddArtifactToHomeScreenDialog(
     // rather than silently pinning the type default the user didn't ask for.
     val customPending = (choice as? IconChoice.Custom)?.emoji?.isBlank() == true
 
-    AlertDialog(
+    AdaptiveAlertDialog(
+        modifier = Modifier.clearFocusOnTap(),
         onDismissRequest = onDismiss,
+        scrollableText = false,
         title = { Text(stringResource(Res.string.add_to_home_screen_dialog_title)) },
         text = {
             Column(
@@ -153,7 +161,7 @@ private fun AddArtifactToHomeScreenDialog(
                 )
                 Spacer(Modifier.height(16.dp))
 
-                OutlinedTextField(
+                AdaptiveOutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
@@ -197,13 +205,13 @@ private fun AddArtifactToHomeScreenDialog(
 
                 (choice as? IconChoice.Custom)?.let { custom ->
                     Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        // A single grapheme, so a short fixed width is enough.
+                    AdaptiveOutlinedTextField(
+                        // A single grapheme, so a short width is enough, but not narrower than its label.
                         value = custom.emoji,
-                        onValueChange = { choice = IconChoice.Custom(firstGrapheme(it)) },
+                        onValueChange = { choice = IconChoice.Custom(it.firstGrapheme()) },
                         singleLine = true,
                         label = { Text(stringResource(Res.string.add_to_home_screen_dialog_emoji_label)) },
-                        modifier = Modifier.width(120.dp),
+                        modifier = Modifier.widthIn(min = 120.dp),
                     )
                 }
             }
@@ -231,7 +239,7 @@ private fun IconPreview(glyph: String, modifier: Modifier = Modifier) {
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = glyph, style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Text(text = glyph, style = glyphStyle(MaterialTheme.typography.headlineMedium, PREVIEW_GLYPH_SIZE), color = Color.White)
     }
 }
 
@@ -263,51 +271,19 @@ private fun IconChip(
             .then(semanticsModifier),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = glyph, style = MaterialTheme.typography.titleLarge)
+        Text(text = glyph, style = glyphStyle(MaterialTheme.typography.titleLarge, CHIP_GLYPH_SIZE))
     }
 }
 
 /**
- * Keeps only the first emoji grapheme cluster so the field holds a single glyph without corrupting the
- * common multi-code-unit emoji a naive "first code point" cut would break: variation-selector emoji
- * (❤️), skin-tone modifiers (👍🏽), flags and subdivision flags (🇺🇸), and ZWJ sequences (👨‍👩‍👧).
+ * [base] with its size in dp: the glyph is an icon drawn in a fixed circle, so a large font would only
+ * push it past the circle's edge.
  */
-private fun firstGrapheme(input: String): String {
-    if (input.isEmpty()) return input
-    val (first, firstEnd) = codePointAt(input, 0)
-    if (first < 0) return "" // lone/partial surrogate — would render as a replacement box
-    // A flag is a pair of regional-indicator symbols.
-    if (first in 0x1F1E6..0x1F1FF) {
-        if (firstEnd < input.length) {
-            val (next, nextEnd) = codePointAt(input, firstEnd)
-            if (next in 0x1F1E6..0x1F1FF) return input.substring(0, nextEnd)
-        }
-        return input.substring(0, firstEnd)
-    }
-    var end = firstEnd
-    while (end < input.length) {
-        val (cp, cpEnd) = codePointAt(input, end)
-        val extends = cp == 0x200D || // ZWJ
-            cp in 0xFE00..0xFE0F || // variation selectors
-            cp in 0x1F3FB..0x1F3FF || // skin-tone modifiers
-            cp == 0x20E3 || // enclosing keycap
-            cp in 0x0300..0x036F || // combining marks
-            cp in 0xE0020..0xE007F // tag chars (subdivision flags)
-        if (!extends) break
-        end = cpEnd
-        // A ZWJ joins the following emoji into the same cluster — pull it in too.
-        if (cp == 0x200D && end < input.length) end = codePointAt(input, end).second
-    }
-    return input.substring(0, end)
+@Composable
+private fun glyphStyle(base: TextStyle, size: Dp): TextStyle {
+    val fontSize = with(LocalDensity.current) { size.toSp() }
+    return base.copy(fontSize = fontSize, lineHeight = TextUnit.Unspecified)
 }
 
-/** Reads the code point starting at [index], returning it with the index just past it; -1 for a lone surrogate. */
-private fun codePointAt(s: String, index: Int): Pair<Int, Int> {
-    val c = s[index]
-    if (c.isHighSurrogate() && index + 1 < s.length && s[index + 1].isLowSurrogate()) {
-        val cp = 0x10000 + ((c.code - 0xD800) shl 10) + (s[index + 1].code - 0xDC00)
-        return cp to index + 2
-    }
-    if (c.isHighSurrogate() || c.isLowSurrogate()) return -1 to index + 1
-    return c.code to index + 1
-}
+private val CHIP_GLYPH_SIZE = 22.dp
+private val PREVIEW_GLYPH_SIZE = 24.dp

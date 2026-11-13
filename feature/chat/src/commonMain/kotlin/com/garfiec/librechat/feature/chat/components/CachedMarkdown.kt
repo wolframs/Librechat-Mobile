@@ -1,17 +1,21 @@
 package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import com.mikepenz.markdown.compose.components.MarkdownComponents
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.model.ImageTransformer
+import com.mikepenz.markdown.model.MarkdownAnnotator
 import com.mikepenz.markdown.model.MarkdownColors
+import com.mikepenz.markdown.model.MarkdownInlineContent
 import com.mikepenz.markdown.model.MarkdownTypography
 import com.mikepenz.markdown.model.State
 import com.mikepenz.markdown.model.markdownInlineContent
-import com.mikepenz.markdown.model.markdownPadding
 import com.mikepenz.markdown.model.rememberMarkdownState
 
 /**
@@ -43,8 +47,8 @@ import com.mikepenz.markdown.model.rememberMarkdownState
  * of partial-content entries into the shared LRU and evict other messages'
  * settled ASTs. The terminal content is cached once the reply renders as settled.
  *
- * Parsed state is independent of presentation, so the chat-wide paragraph spacing
- * can recompose all three rendering paths without invalidating the AST cache.
+ * Padding/dimens/etc are left at library defaults — callers that need to
+ * customize those should fall back to invoking [Markdown] directly.
  *
  * [immediate] parses the *initial* content synchronously (no Loading frame on
  * first paint) — used for fully-settled artifact content. It only affects the
@@ -55,6 +59,10 @@ import com.mikepenz.markdown.model.rememberMarkdownState
  * see StreamingCursor.kt. It rewrites the content being parsed, so it also opts out
  * of the AST cache on both sides: a sentinel-bearing AST must never be served to a
  * settled render, and a per-delta write would evict other messages' ASTs.
+ *
+ * Citation pills need no cache rule of their own: [content] is already normalized against the
+ * turn's search results, so a reply whose results land later is different content with its own
+ * cache key.
  */
 @Composable
 fun CachedMarkdown(
@@ -65,19 +73,36 @@ fun CachedMarkdown(
     immediate: Boolean = false,
     streaming: Boolean = false,
     trailingCursor: Boolean = false,
+    // How each node draws; find-in-page swaps in components that mark matches (SearchableMarkdown).
+    components: MarkdownComponents = ChatMarkdownComponents,
 ) {
     val cache = LocalParsedMarkdownCache.current
     val rendered = if (trailingCursor) withStreamingCursor(content) else content
     val key = parsedMarkdownCacheKey(rendered)
-    val padding = markdownPadding(
-        block = LocalChatParagraphSpacing.current.blockSpacingDp.dp,
-    )
     // The last message opts into synchronous first-parse; see [LocalImmediateMarkdown].
     val immediate = immediate || LocalImmediateMarkdown.current
-    val annotator = if (trailingCursor) StreamingCursorAnnotator else NoOpMarkdownAnnotator
-    val inlineContent =
-        if (trailingCursor) rememberStreamingCursorInlineContent() else markdownInlineContent()
     val cacheable = !streaming && !trailingCursor
+    // Remembered per media holder: the renderer keys its inline-image layout on the transformer.
+    val media = LocalMarkdownMedia.current
+    // Citations arrive normalized (see `normalizeCitations`): only resolvable groups are left, in
+    // the canonical form the annotator claims and these pills resolve.
+    val citations = rememberCitationInlineContent(rendered, media.citations, typography.paragraph)
+    val annotator = when {
+        citations.isEmpty() -> if (trailingCursor) StreamingCursorAnnotator else NoOpMarkdownAnnotator
+        trailingCursor -> CursorAndCitationAnnotator
+        else -> CitationAnnotator
+    }
+    val inlineContent = when {
+        citations.isEmpty() ->
+            if (trailingCursor) rememberStreamingCursorInlineContent() else markdownInlineContent()
+        else -> {
+            val merged = remember(citations, trailingCursor) {
+                if (trailingCursor) StreamingCursorInlineContent + citations else citations
+            }
+            markdownInlineContent(merged)
+        }
+    }
+    val imageTransformer = remember(media) { ChatImageTransformer(media) }
 
     if (cacheable) {
         // Fast path: stable content + a cache hit → render the cached AST with
@@ -85,15 +110,7 @@ fun CachedMarkdown(
         // the 32-bit hash key) keeps a hash collision on the shared cache from
         // rendering a different message's AST.
         cache[key]?.takeIf { it.content == rendered }?.let { cached ->
-            Markdown(
-                state = cached,
-                colors = colors,
-                typography = typography,
-                modifier = modifier,
-                padding = padding,
-                annotator = annotator,
-                inlineContent = inlineContent,
-            )
+            MarkdownWithImages(cached, colors, typography, annotator, inlineContent, components, imageTransformer, modifier)
             return
         }
     }
@@ -129,13 +146,37 @@ fun CachedMarkdown(
         ?: cache[key]?.takeIf { it.content == rendered }
         ?: liveState
 
-    Markdown(
-        state = effective,
-        colors = colors,
-        typography = typography,
-        modifier = modifier,
-        padding = padding,
-        annotator = annotator,
-        inlineContent = inlineContent,
-    )
+    MarkdownWithImages(effective, colors, typography, annotator, inlineContent, components, imageTransformer, modifier)
+}
+
+/**
+ * [Markdown] with the reply's images resolved and the parsed source on hand for the inline image
+ * slot, which is given only the link and needs the source to read the alt text. The source is the
+ * one [state] was parsed from: `retainState` can hold a Success a delta behind the current content,
+ * and the slot walks that AST's offsets.
+ */
+@Suppress("LongParameterList")
+@Composable
+private fun MarkdownWithImages(
+    state: State,
+    colors: MarkdownColors,
+    typography: MarkdownTypography,
+    annotator: MarkdownAnnotator,
+    inlineContent: MarkdownInlineContent,
+    components: MarkdownComponents,
+    imageTransformer: ImageTransformer,
+    modifier: Modifier = Modifier,
+) {
+    CompositionLocalProvider(LocalMarkdownSource provides (state as? State.Success)?.content) {
+        Markdown(
+            state = state,
+            colors = colors,
+            typography = typography,
+            modifier = modifier,
+            annotator = annotator,
+            inlineContent = inlineContent,
+            components = components,
+            imageTransformer = imageTransformer,
+        )
+    }
 }

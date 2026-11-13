@@ -42,10 +42,22 @@ class ChatChromeEquivalenceTest {
     }
 
     @Test
+    fun `streaming thinking flush is equivalent`() {
+        val next = streaming.withContent { copy(streamingThinking = "Considering the request") }
+        assertTrue(streaming.chromeEquivalentTo(next))
+    }
+
+    @Test
     fun `active tool call updates are equivalent`() {
         val next = streaming.withContent {
             copy(activeToolCalls = listOf(ActiveToolCall(id = "t1", name = "web_search")))
         }
+        assertTrue(streaming.chromeEquivalentTo(next))
+    }
+
+    @Test
+    fun `sandbox boot flag updates are equivalent`() {
+        val next = streaming.withContent { copy(sandboxStartingToolCallIds = setOf("t1")) }
         assertTrue(streaming.chromeEquivalentTo(next))
     }
 
@@ -148,7 +160,9 @@ class ChatChromeEquivalenceTest {
             .withContent {
                 copy(
                     activeToolCalls = listOf(ActiveToolCall(id = "t1", name = "web_search")),
+                    sandboxStartingToolCallIds = setOf("t1"),
                     streamingAttachments = listOf(Attachment(messageId = "m1")),
+                    streamingThinking = "Considering",
                 )
             }
             .copy(
@@ -160,7 +174,9 @@ class ChatChromeEquivalenceTest {
             )
         val neutral = loud.neutralizeStreamingChurn()
         assertTrue(neutral.streamingContent.isEmpty())
+        assertTrue(neutral.streamingThinking.isEmpty())
         assertTrue(neutral.activeToolCalls.isEmpty())
+        assertTrue(neutral.sandboxStartingToolCallIds.isEmpty())
         assertTrue(neutral.streamingAttachments.isEmpty())
         assertTrue(neutral.comparisonState.primaryStreamingContent.isEmpty())
         assertTrue(neutral.comparisonState.secondaryStreamingContent.isEmpty())
@@ -169,10 +185,28 @@ class ChatChromeEquivalenceTest {
         assertEquals(ChatScreenState.ACTIVE, neutral.screenState)
     }
 
+    /** The breakdown sheet is chrome: Totals must grow with each live usage event. */
     @Test
-    fun `token usage update is not equivalent`() {
+    fun `pending usage update is not equivalent`() {
         val next = streaming.withContent {
-            copy(tokenUsage = com.garfiec.librechat.core.model.usage.TokenUsage())
+            copy(
+                pendingUsage = com.garfiec.librechat.feature.chat.util.PendingUsage(
+                    usage = com.garfiec.librechat.core.model.usage.UsageAmount(input = 10),
+                    foldedKeys = setOf("run:1"),
+                ),
+            )
+        }
+        assertFalse(streaming.chromeEquivalentTo(next))
+    }
+
+    @Test
+    fun `context totals update is not equivalent`() {
+        val next = streaming.withContent {
+            copy(
+                contextUsageTotals = com.garfiec.librechat.core.model.usage.ContextUsageTotals(
+                    branch = com.garfiec.librechat.core.model.usage.UsageAmount(output = 5),
+                ),
+            )
         }
         assertFalse(streaming.chromeEquivalentTo(next))
     }

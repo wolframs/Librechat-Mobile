@@ -1,14 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Drawer -->
-    <string name="settings">Paramètres</string>
 
     <!-- Content descriptions -->
-    <string name="cd_back_to_conversations">Retour aux conversations</string>
 
     <!-- Version mismatch dialog -->
     <string name="version_mismatch_title">Incompatibilité de version du backend</string>
     <string name="version_mismatch_message">Cette application a été conçue pour LibreChat v%1$s, mais votre serveur exécute la v%2$s. Certaines fonctionnalités pourraient ne pas fonctionner correctement.</string>
     <string name="dismiss">Ignorer</string>
     <string name="dont_warn_again">Ne plus avertir</string>
+    <string name="session_expired_title">Déconnecté</string>
+    <string name="session_expired_message">Votre session a expiré. Reconnectez-vous pour continuer.</string>
+    <string name="session_expired_message_named">Votre session pour %1$s a expiré. Reconnectez-vous pour continuer.</string>
+    <string name="session_expired_switched_named">Votre session pour %1$s a expiré : vous utilisez maintenant %2$s. Reconnectez-vous à %1$s depuis le sélecteur de comptes.</string>
+    <string name="session_expired_switched">Votre session a expiré : vous utilisez maintenant %1$s. Reconnectez-vous depuis le sélecteur de comptes.</string>
+    <string name="session_banned_title">Compte restreint</string>
+    <string name="session_banned_message">Votre serveur a temporairement restreint ce compte, par exemple après trop de requêtes ou une violation de ses règles. Tant que la restriction n’est pas levée, vous ne pouvez ni envoyer de messages, ni utiliser d’agents, ni envoyer de fichiers, et vous risquez d’être déconnecté. Si elle persiste, contactez l’administrateur du serveur.</string>
+    <string name="session_banned_message_named">Votre serveur a temporairement restreint %1$s, par exemple après trop de requêtes ou une violation de ses règles. Tant que la restriction n’est pas levée, vous ne pouvez ni envoyer de messages, ni utiliser d’agents, ni envoyer de fichiers, et vous risquez d’être déconnecté. Si elle persiste, contactez l’administrateur du serveur.</string>
+    <string name="session_renewal_blocked_message">Impossible de renouveler votre session : le serveur a refusé la demande d’actualisation.</string>
+    <string name="session_renewal_sign_in_again">Se reconnecter</string>
+    <string name="shared_link_switch_title">Changer de compte ?</string>
+    <string name="shared_link_switch_message">Ce chat partagé se trouve sur %1$s, où vous êtes connecté en tant que %2$s. Passez à ce compte pour l’ouvrir ici.</string>
+    <string name="shared_link_switch_confirm">Changer</string>
+    <string name="shared_link_open_in_browser">Ouvrir dans le navigateur</string>
 </resources>

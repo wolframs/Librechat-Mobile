@@ -2,26 +2,56 @@ package com.garfiec.librechat.feature.chat.viewmodel.delegate
 
 import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.common.EndpointConstants
+import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.repository.ChatRepository
 import com.garfiec.librechat.core.data.repository.MessageRepository
+import com.garfiec.librechat.core.model.ContentType
 import com.garfiec.librechat.core.model.FileReference
 import com.garfiec.librechat.core.model.Message
+import com.garfiec.librechat.core.model.ReasoningOverride
+import com.garfiec.librechat.core.model.code.CodeWorkspaceSubmission
+import com.garfiec.librechat.core.model.request.AddedConversation
+import com.garfiec.librechat.core.model.request.EditedContent
+import com.garfiec.librechat.feature.chat.util.MessageEditShape
 import com.garfiec.librechat.feature.chat.util.buildActiveMessagePath
+import com.garfiec.librechat.feature.chat.util.changedPartIndices
+import com.garfiec.librechat.feature.chat.util.editShapeOf
+import com.garfiec.librechat.feature.chat.util.findRerunParent
+import com.garfiec.librechat.feature.chat.util.hasBlankPartEdit
+import com.garfiec.librechat.feature.chat.util.partEditSeeds
+import com.garfiec.librechat.feature.chat.util.resubmittablePartIndex
+import com.garfiec.librechat.feature.chat.viewmodel.ChatNotice
 import com.garfiec.librechat.feature.chat.viewmodel.ChatRequestBuilder
 import com.garfiec.librechat.feature.chat.viewmodel.MessageEditingHandle
+import com.garfiec.librechat.feature.chat.viewmodel.MessageEditingState
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
 import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Owns the message-mutation send paths — edit (user / assistant), regenerate, and continue —
- * plus the inline edit-field UI state. Each path optimistically reshapes the tree (a new
- * sibling or a stream anchor via [MessageTreeDelegate]) and resubmits through
- * [StreamingManagerDelegate], reusing [ChatRequestBuilder] for the shared request pieces.
+ * Owns the message-mutation send paths — edit, regenerate, and continue — plus the inline edit
+ * field's state. Each path optimistically reshapes the tree (a new sibling or a stream anchor via
+ * [MessageTreeDelegate]) and resubmits through [StreamingManagerDelegate], reusing
+ * [ChatRequestBuilder] for the shared request pieces.
  *
- * The send-readiness gate and message-text extraction live in `ChatViewModel` (shared with
- * the new-message send path and TTS); they're injected as [runWhenSendReady] / [getMessageText].
+ * The send-readiness gate lives in [SendReadinessDelegate], injected as [runWhenSendReady].
+ *
+ * ## Two editors
+ * `editShapeOf` picks one when the editor opens, and the same call gates the Edit affordance in
+ * `MessageList`, so a button is never offered for a shape this delegate would refuse.
+ * - [MessageEditShape.PLAIN_TEXT] edits the flat `text`: every user turn, and a reply with no
+ *   content parts. Save sends no `index`. A rerun resubmits the user's draft as a new sibling; on
+ *   a reply it can only be a plain regenerate, because `editedContent` is index-addressed over a
+ *   content array this message does not have.
+ * - [MessageEditShape.CONTENT_PARTS] edits one field per editable part. Save sends each changed
+ *   part's `index`; a rerun carries exactly one changed TEXT part as `editedContent` so the reply
+ *   continues from it.
+ *
+ * ## Nothing here may close the editor before the server has answered
+ * Every sink reads its `Result` and keeps the editor open on failure, so an offline save, a 5xx or
+ * a content-filter refusal never silently leaves the old text in place (#579).
  */
 class MessageEditingDelegate(
     private val handle: MessageEditingHandle,
@@ -30,26 +60,58 @@ class MessageEditingDelegate(
     private val treeDelegate: MessageTreeDelegate,
     private val streamingManager: StreamingManagerDelegate,
     private val requestBuilder: ChatRequestBuilder,
-    private val getMessageText: (String) -> String,
-    private val runWhenSendReady: (action: () -> Unit) -> Unit,
+    private val runWhenSendReady: (onRefused: () -> Unit, action: () -> Unit) -> Unit,
+    /** `ComparisonModeDelegate.onSendStart`: resets both panes before a comparison resubmit. */
+    private val onComparisonSendStart: () -> Unit,
+    /**
+     * `ComparisonModeDelegate.buildAddedConvo`: Compare's second model, null when not comparing.
+     * Given the primary's model-parameter payload, whose instructions the second model shares.
+     */
+    private val buildAddedConvo: (
+        parentMessageId: String?,
+        primaryEndpoint: String?,
+        primaryModelParams: JsonObject?,
+    ) -> AddedConversation?,
+    /**
+     * `CodeWorkspaceDelegate.submissionForSend`. An edit, regenerate or continue runs in a chat
+     * that has sent before, so a held decision (null) sends nothing and the recorded one applies.
+     */
+    private val codeWorkspace: () -> CodeWorkspaceSubmission? = { CodeWorkspaceSubmission.NONE },
 ) {
 
-    fun editMessage(messageId: String, newText: String) {
-        if (newText.isBlank() || handle.state.isStreaming) return
+    /**
+     * Message ids whose save is still out. Tracked here rather than read off
+     * [MessageEditingState.isSavingEdit], because `startEditing` replaces that state: a second Edit
+     * on the same row while its save is in flight would otherwise clear the flag and let a second
+     * PUT sequence race the first over the same content array — the race the sequential save exists
+     * to avoid. Main-thread confined, like every other write in this delegate.
+     */
+    private val savesInFlight = mutableSetOf<String>()
 
-        val originalMessage = handle.state.messages.find { it.messageId == messageId } ?: return
+    private fun closeEditor() = handle.update { editing = MessageEditingState() }
 
-        runWhenSendReady {
-            if (originalMessage.isCreatedByUser) {
-                editUserMessage(originalMessage, newText)
-            } else {
-                editAiMessage(originalMessage)
-            }
-        }
+    /**
+     * "Retry without files" (v0.8.9-rc1): sends the failed reply's user turn again as a new
+     * version beside it, with none of its files and its quotes, skills and reasoning choice kept
+     * (web's `ask` with `overrideFiles: []`). Earlier turns' files still go, which is what "Branch
+     * without files" is for.
+     */
+    fun retryWithoutFiles(failedReplyId: String) {
+        val state = handle.state
+        if (state.isStreaming) return
+        val reply = state.messages.find { it.messageId == failedReplyId } ?: return
+        if (reply.isCreatedByUser) return
+        val parent = state.messages.find { it.messageId == reply.parentMessageId } ?: return
+        if (!parent.isCreatedByUser || parent.text.isBlank()) return
+        runWhenSendReady({}) { editUserMessage(parent, parent.text, withoutFiles = true) }
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    private fun editUserMessage(originalMessage: Message, newText: String) {
+    private fun editUserMessage(originalMessage: Message, newText: String, withoutFiles: Boolean = false) {
+        val files = if (withoutFiles) null else originalMessage.files
+        // A retry is a fresh send of the same turn, so it replays the quoted excerpts too; an edit
+        // has never carried them.
+        val quotes = if (withoutFiles) originalMessage.quotes else null
         val parentMessageId = originalMessage.parentMessageId
 
         // Optimistically insert the edited text as a new sibling of the original user
@@ -68,7 +130,12 @@ class MessageEditingDelegate(
             isCreatedByUser = true,
             sender = "User",
             createdAt = Clock.System.now().toString(),
-            files = originalMessage.files,
+            files = files,
+            quotes = quotes,
+            // The edited turn keeps its skill pills and primes the same skills (web's
+            // `overrideManualSkills: message.manualSkills` on save-and-submit).
+            manualSkills = originalMessage.manualSkills,
+            reasoningOverride = originalMessage.reasoningOverride,
         )
         handle.update {
             val updatedMessages = content.messages + optimisticMessage
@@ -82,34 +149,43 @@ class MessageEditingDelegate(
             text = newText,
             parentMessageId = parentMessageId,
             userMessageId = optimisticMessage.messageId,
-            files = originalMessage.files,
-            isEdited = true,
-            logLabel = "editUserMessage",
+            files = files,
+            quotes = quotes,
+            manualSkills = originalMessage.manualSkills,
+            reasoningOverride = originalMessage.reasoningOverride,
+            isEdited = !withoutFiles,
+            logLabel = if (withoutFiles) "retryWithoutFiles" else "editUserMessage",
         )
     }
 
-    private fun editAiMessage(aiMessage: Message) {
-        val parentUserMessage = handle.state.messages.find {
-            it.messageId == aiMessage.parentMessageId
-        } ?: return
-
-        // Editing an assistant message resubmits its parent user turn (isEdited +
-        // isRegenerate) — the same shape as regenerate, so anchor the stream to the
-        // parent user message and let the new response stream in below it, replacing
-        // the old one. The web client seeds the placeholder with the edited content
-        // for a transient preview; we don't (the regenerated server response is
-        // authoritative on Final either way).
-        if (handle.state.conversationId == null) return
+    /**
+     * Replays [parentUserMessage] to produce a new reply, optionally continuing from an edited
+     * content part of the old one.
+     *
+     * [editedContent] and the wire `responseMessageId` are a pair: the server reads the latter as
+     * the history `head`, so it is what makes the edited message's content the prefix the reply
+     * continues from. Passing the content without the id loads an unrelated branch and silently
+     * drops the edit. With neither, this is an ordinary regenerate.
+     */
+    private fun rerunReply(
+        aiMessage: Message,
+        parentUserMessage: Message,
+        editedContent: EditedContent?,
+    ) {
         treeDelegate.anchorStreamTo(parentUserMessage.messageId)
         launchSend(
             text = parentUserMessage.text,
             parentMessageId = parentUserMessage.parentMessageId,
             overrideParentMessageId = parentUserMessage.messageId,
+            responseMessageId = aiMessage.messageId.takeIf { editedContent != null },
             files = parentUserMessage.files,
             quotes = parentUserMessage.quotes,
-            isEdited = true,
+            manualSkills = parentUserMessage.manualSkills,
+            reasoningOverride = parentUserMessage.reasoningOverride,
+            isEdited = editedContent != null,
             isRegenerate = true,
-            logLabel = "editAiMessage",
+            editedContent = editedContent,
+            logLabel = if (editedContent != null) "rerunEditedReply" else "rerunReply",
         )
     }
 
@@ -123,7 +199,7 @@ class MessageEditingDelegate(
             it.messageId == aiMessage.parentMessageId
         } ?: return
 
-        runWhenSendReady { regenerateMessageNow(parentUserMessage) }
+        runWhenSendReady({}) { regenerateMessageNow(parentUserMessage) }
     }
 
     private fun regenerateMessageNow(parentUserMessage: Message) {
@@ -134,8 +210,45 @@ class MessageEditingDelegate(
             overrideParentMessageId = parentUserMessage.messageId,
             files = parentUserMessage.files,
             quotes = parentUserMessage.quotes,
+            manualSkills = parentUserMessage.manualSkills,
+            reasoningOverride = parentUserMessage.reasoningOverride,
             isRegenerate = true,
             logLabel = "regenerateMessage",
+        )
+    }
+
+    /**
+     * Manual context compaction (v0.8.8-rc3): summarize the branch up to its leaf and end WITHOUT a
+     * reply. Regenerate-shaped — no user message is created — which is why it goes down this path
+     * and not the new-message one.
+     *
+     * The shape is borrowed for the CLIENT's benefit only: `isRegenerate` is set here and stripped
+     * again by `ChatPayloadBuilder`, because rc3 400s it arriving beside `compact`.
+     */
+    fun compactConversation() {
+        val state = handle.state
+        if (!state.canCompactNow) return
+        val leaf = state.compactionLeaf ?: return
+        runWhenSendReady({}) { compactConversationNow(leaf) }
+    }
+
+    private fun compactConversationNow(leaf: Message) {
+        handle.update { content = content.copy(isCompacting = true) }
+        // The leaf is both the summary's parent and the server-side anchor: `parentMessageId` is
+        // what the controller compacts up to.
+        treeDelegate.anchorStreamTo(leaf.messageId)
+        launchSend(
+            text = "",
+            parentMessageId = leaf.messageId,
+            userMessageId = leaf.messageId,
+            // The leaf is a PERSISTED row, not a message this turn minted, so the early-abort
+            // un-send must never remove it — the same rule regenerate and continue follow.
+            optimisticUserMessageId = null,
+            isRegenerate = true,
+            compact = true,
+            // A summary of the branch, not a reply: there is no second answer to compare.
+            withComparison = false,
+            logLabel = "compactConversation",
         )
     }
 
@@ -149,7 +262,7 @@ class MessageEditingDelegate(
             it.messageId == lastAiMessage.message.parentMessageId
         } ?: return
 
-        runWhenSendReady { continueGenerationNow(lastAiMessage.message, parentUserMessage) }
+        runWhenSendReady({}) { continueGenerationNow(lastAiMessage.message, parentUserMessage) }
     }
 
     private fun continueGenerationNow(lastAiMessage: Message, parentUserMessage: Message) {
@@ -159,9 +272,12 @@ class MessageEditingDelegate(
             overrideParentMessageId = parentUserMessage.messageId,
             responseMessageId = lastAiMessage.messageId,
             files = parentUserMessage.files,
+            reasoningOverride = parentUserMessage.reasoningOverride,
             isEdited = true,
             isRegenerate = true,
             isContinued = true,
+            // Never offered in a comparison (its panes keep a lane first): see launchSend.
+            withComparison = false,
             logLabel = "continueGeneration",
         )
     }
@@ -177,10 +293,17 @@ class MessageEditingDelegate(
      * the parent user turn also carry its persisted [quotes] (web's `overrideQuotes`): the
      * server rebuilds the user message from `req.body.quotes` on a regenerate, so omitting
      * them silently drops the quoted context while the chips stay visible. Continue sends
-     * none, matching web. The new-message send path
-     * (`doSendWithSpec`) stays in `ChatViewModel`: it additionally carries an added-conversation
-     * for comparison mode. Stream termination itself is owned uniformly by
-     * [StreamingManagerDelegate].
+     * none, matching web. Regenerate and both edits likewise replay the user turn's persisted
+     * [manualSkills] (web's `overrideManualSkills`), so the new reply is primed with the skills
+     * its pills show; continue and compaction send none. Edit, regenerate and continue replay the
+     * user turn's [reasoningOverride] (web's `overrideReasoning`), not the composer's pending choice,
+     * dropped when the current selection no longer accepts it (the server would 400 it).
+     *
+     * In a comparison an edit or regenerate carries the second model too ([buildAddedConvo]), so
+     * both panes answer again, as on web. Compaction and continue don't; a comparison's panes keep
+     * one lane before continuing it (`ComparisonModeDelegate.keepAndContinue`). The new-message send
+     * path (`SendDispatchDelegate.doSendWithSpec`) is separate: it adds a bespoke stream-terminated
+     * callback this helper deliberately omits.
      */
     @Suppress("LongParameterList")
     private fun launchSend(
@@ -188,25 +311,48 @@ class MessageEditingDelegate(
         parentMessageId: String?,
         logLabel: String,
         userMessageId: String? = null,
+        /**
+         * The id the early-abort un-send may remove. Defaults to [userMessageId] because for every
+         * path but compaction they are the same message — compaction sends an existing leaf's id as
+         * the wire `messageId` while minting nothing, so the two must be separable.
+         */
+        optimisticUserMessageId: String? = userMessageId,
         overrideParentMessageId: String? = null,
         responseMessageId: String? = null,
         files: List<FileReference>? = null,
         quotes: List<String>? = null,
+        manualSkills: List<String>? = null,
+        reasoningOverride: ReasoningOverride? = null,
         isEdited: Boolean = false,
         isRegenerate: Boolean = false,
         isContinued: Boolean = false,
+        compact: Boolean? = null,
+        editedContent: EditedContent? = null,
+        withComparison: Boolean = true,
     ) {
-        // userMessageId is non-null only for the edit-user path, whose optimistic sibling this
-        // turn minted; regenerate/continue/edit-AI resubmit a persisted message the early-abort
-        // un-send must never remove.
-        streamingManager.prepareForStreaming(isEdit = true, optimisticUserMessageId = userMessageId)
+        // optimisticUserMessageId is non-null only for the edit-user path, whose optimistic sibling
+        // this turn minted; regenerate/continue/rerun/compact resubmit a persisted message the
+        // early-abort un-send must never remove.
+        streamingManager.prepareForStreaming(
+            isEdit = true,
+            optimisticUserMessageId = optimisticUserMessageId,
+            // The resume pin applies the same skills-flag rule as the body.
+            manualSkills = manualSkills,
+        )
 
         val state = handle.state
         val isAgent = state.selectedEndpoint == EndpointConstants.AGENTS
-        val webSearchEnabled = state.modelParameters.webSearch
+        val webSearchEnabled = requestBuilder.builtInWebSearch()
         val ephemeralAgent = requestBuilder.buildEphemeralAgent()
         Logger.d { "$logLabel: webSearch=$webSearchEnabled, ephemeralAgent=$ephemeralAgent" }
         val dispatch = requestBuilder.currentDispatch()
+        val modelParams = requestBuilder.buildModelParams()
+        val addedConvo = if (withComparison) {
+            onComparisonSendStart()
+            buildAddedConvo(parentMessageId, state.selectedEndpoint, modelParams)
+        } else {
+            null
+        }
         streamingManager.launchStream(
             chatRepository.startChat(
                 text = text,
@@ -216,6 +362,7 @@ class MessageEditingDelegate(
                 key = dispatch.key,
                 modelDisplayLabel = dispatch.modelDisplayLabel,
                 model = state.selectedModel,
+                spec = state.selectedSpec,
                 userMessageId = userMessageId,
                 parentMessageId = parentMessageId,
                 agentId = if (isAgent) state.selectedModel else null,
@@ -223,13 +370,20 @@ class MessageEditingDelegate(
                 responseMessageId = responseMessageId,
                 isEdited = isEdited,
                 isRegenerate = isRegenerate,
+                compact = compact,
                 isContinued = isContinued,
                 webSearch = webSearchEnabled,
                 files = files,
                 quotes = quotes,
+                manualSkills = manualSkills,
                 ephemeralAgent = ephemeralAgent,
                 isTemporary = state.isTemporaryChat,
-                modelParams = requestBuilder.buildModelParams(),
+                modelParams = modelParams,
+                editedContent = editedContent,
+                addedConvo = addedConvo,
+                reasoningOverride = reasoningOverride?.takeIf { state.replaysReasoning(it) },
+                // A compaction runs no model turn, so it decides nothing.
+                codeWorkspace = if (compact == true) null else codeWorkspace()?.takeUnless { it == CodeWorkspaceSubmission.NONE },
             ),
         )
     }
@@ -237,36 +391,288 @@ class MessageEditingDelegate(
     // ── Inline edit-field UI state ───────────────────────────────────
 
     fun startEditing(messageId: String) {
-        val text = getMessageText(messageId)
-        handle.update { editing = editing.copy(editingMessageId = messageId, editingText = text) }
+        // A row whose save is still out keeps the editor it has: reseeding it would clear
+        // `isSavingEdit` and re-enable a Save that would race the one in flight, and the in-flight
+        // one's result would land on an editor it no longer owns.
+        if (messageId in savesInFlight) return
+        val message = handle.state.messages.find { it.messageId == messageId } ?: return
+        when (editShapeOf(message)) {
+            // Seeded from the flat text, NOT from a content-parts flattening: joining text and
+            // reasoning parts would drop the model's reasoning into the answer field, and saving it
+            // would write the two back as one blob.
+            MessageEditShape.PLAIN_TEXT -> handle.update {
+                editing = MessageEditingState(
+                    editingMessageId = messageId,
+                    editingText = message.text,
+                    editingTextOriginal = message.text,
+                )
+            }
+            MessageEditShape.CONTENT_PARTS -> {
+                val seeds = partEditSeeds(message)
+                handle.update {
+                    editing = MessageEditingState(
+                        editingMessageId = messageId,
+                        partDrafts = seeds,
+                        partOriginals = seeds,
+                    )
+                }
+            }
+            // The affordance is hidden for this shape; a tap that raced the state change lands here.
+            MessageEditShape.NONE -> return
+        }
     }
 
     fun onEditTextChanged(text: String) {
+        if (handle.state.isSavingEdit) return
         handle.update { editing = editing.copy(editingText = text) }
     }
 
+    fun onEditPartTextChanged(index: Int, text: String) {
+        if (handle.state.isSavingEdit) return
+        if (index !in handle.state.editing.partDrafts) return
+        handle.update { editing = editing.copy(partDrafts = editing.partDrafts + (index to text)) }
+    }
+
     fun cancelEditing() {
-        handle.update { editing = editing.copy(editingMessageId = null, editingText = "") }
+        closeEditor()
     }
 
-    fun submitEdit() {
-        val messageId = handle.state.editingMessageId ?: return
-        val newText = handle.state.editingText.trim()
-        if (newText.isBlank()) return
-
-        handle.update { editing = editing.copy(editingMessageId = null, editingText = "") }
-        editMessage(messageId, newText)
+    /**
+     * Persists the open editor's draft, whichever shape it is. The UI has one Save button and does
+     * not route: the live state already says which editor is open, so a single entry point cannot
+     * disagree with it.
+     */
+    fun saveEdit() {
+        if (handle.state.editing.isEditingParts) savePartEdits() else saveEditOnly()
     }
 
-    fun saveEditOnly() {
-        val messageId = handle.state.editingMessageId ?: return
-        val conversationId = handle.state.conversationId ?: return
-        val newText = handle.state.editingText.trim()
-        if (newText.isBlank()) return
+    /** Reruns the turn from the open editor, whichever shape it is. See [saveEdit]. */
+    fun rerunEdit() {
+        if (handle.state.editing.isEditingParts) rerunPartEdit() else rerunPlainTextEdit()
+    }
 
-        handle.update { editing = editing.copy(editingMessageId = null, editingText = "") }
+    /**
+     * Rerun from the flat-text editor.
+     *
+     * On a user turn the draft is resubmitted as a new sibling. On a reply it cannot be: there is
+     * no content array for `editedContent` to address, so the draft is left unsent and this is a
+     * plain regenerate — which the editor's footer says before the button is pressed.
+     */
+    private fun rerunPlainTextEdit() {
+        val state = handle.state
+        val messageId = state.editingMessageId ?: return
+        val message = state.messages.find { it.messageId == messageId } ?: return
+        val newText = state.editingText.trim()
+        val original = state.editing.editingTextOriginal
+        // Checked BEFORE the editor is cleared: these early returns do not run `onRefused`, so
+        // clearing first would throw the draft away for a send that never started.
+        if (state.isSavingEdit || state.isStreaming || !state.canStartRun) return
+
+        if (message.isCreatedByUser) {
+            // Retained attachments make an otherwise textless turn submittable, as they do in the
+            // composer and on the parts path. A plain `isBlank` return here would leave Rerun
+            // enabled and silently doing nothing on an image-only turn.
+            if (newText.isBlank() && message.files.isNullOrEmpty()) return
+            closeEditor()
+            // A refusal (no model, a readiness timeout, Compare setup opening during the wait)
+            // reopens the edit with its text rather than dropping what the user wrote.
+            runWhenSendReady({ reopenPlainText(messageId, newText, original) }) {
+                editUserMessage(message, newText)
+            }
+            return
+        }
+
+        val parent = findRerunParent(state.messages, message.parentMessageId) ?: return
+        closeEditor()
+        runWhenSendReady({ reopenPlainText(messageId, newText, original) }) {
+            rerunReply(message, parent, editedContent = null)
+        }
+    }
+
+    /**
+     * Rerun from the content-parts editor.
+     *
+     * A **user** turn can reach here too — the Assistants thread sync persists one with a
+     * `content[]` rather than a flat text — and is resubmitted as a new sibling built from its TEXT
+     * drafts joined by newlines, as upstream builds it. Its reasoning parts are not part of what
+     * the user said, so they are left out of the new turn.
+     *
+     * A **reply** has three outcomes, decided by `resubmittablePartIndex`: one changed TEXT part
+     * becomes `editedContent` and the reply continues from it; no change is a plain regenerate;
+     * anything else is refused here and the footer asks for a Save first (see that function).
+     */
+    private fun rerunPartEdit() {
+        val state = handle.state
+        val messageId = state.editingMessageId ?: return
+        val message = state.messages.find { it.messageId == messageId } ?: return
+        if (state.isSavingEdit || state.isStreaming || !state.canStartRun) return
+
+        val drafts = state.editing.partDrafts
+        val originals = state.editing.partOriginals
+        if (hasBlankPartEdit(drafts, originals)) return
+
+        if (message.isCreatedByUser) {
+            val newText = joinedUserPartText(message, drafts)
+            // Retained attachments make an otherwise textless turn submittable, as they do in the
+            // composer; a turn with neither text nor files has nothing to send.
+            if (newText.isBlank() && message.files.isNullOrEmpty()) return
+            closeEditor()
+            runWhenSendReady({ reopenParts(messageId, drafts, originals) }) {
+                editUserMessage(message, newText)
+            }
+            return
+        }
+
+        val changed = changedPartIndices(drafts, originals)
+        val editedIndex = resubmittablePartIndex(message, drafts, originals)
+        // Changed, but not in a form one `editedContent` can carry. The affordance is disabled for
+        // this, so only a raced tap arrives here.
+        if (editedIndex == null && changed.isNotEmpty()) return
+
+        val parent = findRerunParent(state.messages, message.parentMessageId) ?: return
+        val editedContent = editedIndex?.let { EditedContent.text(index = it, text = drafts.getValue(it)) }
+
+        closeEditor()
+        runWhenSendReady({ reopenParts(messageId, drafts, originals) }) {
+            rerunReply(message, parent, editedContent)
+        }
+    }
+
+    /**
+     * A user turn's parts recombined into the text a resubmit sends: its TEXT drafts, in content
+     * order, newline-joined (upstream's `join('\n')`). THINK parts are excluded — a user turn does
+     * not reason, and anything the sync left in one is not what the user wrote.
+     */
+    private fun joinedUserPartText(message: Message, drafts: Map<Int, String>): String =
+        drafts.keys.sorted()
+            .filter { message.content?.getOrNull(it)?.type == ContentType.TEXT }
+            .joinToString("\n") { drafts.getValue(it) }
+            .trim()
+
+    private fun reopenPlainText(messageId: String, text: String, original: String) = handle.update {
+        editing = MessageEditingState(
+            editingMessageId = messageId,
+            editingText = text,
+            editingTextOriginal = original,
+        )
+    }
+
+    private fun reopenParts(
+        messageId: String,
+        drafts: Map<Int, String>,
+        originals: Map<Int, String>,
+    ) = handle.update {
+        editing = MessageEditingState(
+            editingMessageId = messageId,
+            partDrafts = drafts,
+            partOriginals = originals,
+        )
+    }
+
+    /**
+     * Persists the flat-text editor's draft, and closes the editor only once the server has taken
+     * it. A failure keeps the draft on screen and reports the reason.
+     */
+    private fun saveEditOnly() {
+        val state = handle.state
+        val messageId = state.editingMessageId ?: return
+        val conversationId = state.conversationId ?: return
+        val newText = state.editingText.trim()
+        if (newText.isBlank() || state.isSavingEdit) return
+        // Gated like `submitFeedback`: this writes Room, which re-emits through the
+        // loadConversation observer and rebuilds displayMessages with no streamingLeafId,
+        // un-truncating the in-place streaming view. The affordance is disabled too.
+        if (state.isStreaming) return
+        if (!savesInFlight.add(messageId)) return
+
+        handle.update { editing = editing.copy(isSavingEdit = true) }
         handle.scope.launch {
-            messageRepository.updateMessageText(conversationId, messageId, newText)
+            val result = try {
+                messageRepository.updateMessageText(conversationId, messageId, newText)
+            } finally {
+                savesInFlight -= messageId
+            }
+            handle.update {
+                // The editor may have moved on — Edit tapped on another row while this was in
+                // flight. Closing it then would discard THAT message's draft, and splicing
+                // baselines across messages would mark untouched text as unsaved. The write landed either way; only the editor is no longer its business.
+                // A reopen of the SAME row cannot happen: `savesInFlight` refuses it.
+                if (editing.editingMessageId != messageId) {
+                    if (result is Result.Error) error = result.message ?: ChatNotice.MESSAGE_SAVE_FAILED.marker()
+                } else if (result is Result.Error) {
+                    editing = editing.copy(isSavingEdit = false)
+                    error = result.message ?: ChatNotice.MESSAGE_SAVE_FAILED.marker()
+                } else {
+                    closeEditor()
+                }
+            }
+        }
+    }
+
+    /**
+     * Persists every changed content part, then closes the editor — but only if all of them landed.
+     *
+     * Written one part at a time and in order: each call rewrites the whole stored content array
+     * server-side, so two in flight would race and the loser's edit would be overwritten by the
+     * winner's copy of the old array. Nothing rolls a write back either, so a refused part leaves
+     * the earlier ones saved; recording what actually landed is what lets the editor reconcile with
+     * the server instead of claiming nothing was saved, and leaves only the refused parts marked as
+     * changed.
+     */
+    private fun savePartEdits() {
+        val state = handle.state
+        val messageId = state.editingMessageId ?: return
+        val conversationId = state.conversationId ?: return
+        if (state.isSavingEdit || state.isStreaming) return
+
+        val drafts = state.editing.partDrafts
+        val originals = state.editing.partOriginals
+        if (hasBlankPartEdit(drafts, originals)) return
+        val changed = changedPartIndices(drafts, originals)
+        if (changed.isEmpty()) return
+        if (!savesInFlight.add(messageId)) return
+
+        handle.update { editing = editing.copy(isSavingEdit = true) }
+        handle.scope.launch {
+            var failure: Result.Error? = null
+            val saved = mutableMapOf<Int, String>()
+            try {
+                for (index in changed) {
+                    // Re-checked per part, not just at the tap: each write reaches Room, and a run
+                    // that starts part-way through the sequence would have the rest re-emit through
+                    // the loadConversation observer and un-truncate the streaming anchor. Stopping
+                    // leaves the unwritten parts marked unsaved, which is what the editor shows.
+                    if (handle.state.isStreaming) {
+                        failure = Result.Error()
+                        break
+                    }
+                    val text = drafts.getValue(index)
+                    val result = messageRepository.updateMessageContentPart(conversationId, messageId, index, text)
+                    if (result is Result.Error) {
+                        failure = result
+                        break
+                    }
+                    saved[index] = text
+                }
+            } finally {
+                savesInFlight -= messageId
+            }
+            handle.update {
+                // See saveEditOnly: the editor may belong to another message by now.
+                if (editing.editingMessageId != messageId) {
+                    failure?.let { error = it.message ?: ChatNotice.MESSAGE_SAVE_FAILED.marker() }
+                } else if (failure == null) {
+                    closeEditor()
+                } else {
+                    // Advance only the baselines that landed, so the saved parts stop reading as
+                    // unsaved and the refused ones keep asking to be saved.
+                    editing = editing.copy(
+                        isSavingEdit = false,
+                        partOriginals = editing.partOriginals + saved,
+                    )
+                    error = failure.message ?: ChatNotice.MESSAGE_SAVE_FAILED.marker()
+                }
+            }
         }
     }
 }

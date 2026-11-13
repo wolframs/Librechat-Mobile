@@ -13,6 +13,53 @@
       },
       "version": "7.28.4"
     },
+    "dat-gui": {
+      "bytes": 61886,
+      "files": {
+        "THIRD_PARTY_NOTICES.txt": "46166c28ad6a16dba5818e967012c120d2ac1b6e76fd809e081c1a938f6f9728",
+        "index.js": "9ce2c983c32bdfd9fa3464ef4855b6b978066bb5244eb356110ae4660b8cccfa"
+      },
+      "license": "Apache-2.0",
+      "modules": [
+        "dat.gui"
+      ],
+      "recipe": "6ef7ab1c0dfbaa28c5687540a809cc3c2adda2cd0e9d6706cd62ad19f552e50c",
+      "source": {
+        "package": "dat.gui",
+        "type": "bundle"
+      },
+      "version": "0.7.9"
+    },
+    "date-fns": {
+      "bytes": 75549,
+      "files": {
+        "THIRD_PARTY_NOTICES.txt": "d0d8e395110f6bd1256a5c3de770b84e98253ffad37e844e9a96d3c6ae3ad42e",
+        "index.js": "28c7df15b51d2a3c505d6983fd5160cf377707cee714baeb7347a5b918b4f441"
+      },
+      "license": "MIT",
+      "modules": [
+        "date-fns"
+      ],
+      "recipe": "6ef7ab1c0dfbaa28c5687540a809cc3c2adda2cd0e9d6706cd62ad19f552e50c",
+      "source": {
+        "package": "date-fns",
+        "type": "bundle"
+      },
+      "version": "3.6.0"
+    },
+    "docx-preview": {
+      "bytes": 85873,
+      "files": {
+        "LICENSE": "8668bf4417d161e4eb4d47d6044526e4914d9eb3c748573d9bb7e87708c1253f",
+        "docx-preview.min.js": "a011a499016a269eb048b8558a3eefc94bc33568ef434235943948ff24a40005"
+      },
+      "license": "Apache-2.0",
+      "source": {
+        "package": "docx-preview",
+        "type": "npm"
+      },
+      "version": "0.3.7"
+    },
     "highlight": {
       "bytes": 133392,
       "files": {
@@ -27,6 +74,19 @@
         "type": "npm"
       },
       "version": "11.12.0"
+    },
+    "jszip": {
+      "bytes": 131383,
+      "files": {
+        "LICENSE.markdown": "566c953c6090b1218ca6217dd7359d45dde46581968586dc607d59a78af6a9c4",
+        "jszip.min.js": "acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e"
+      },
+      "license": "MIT",
+      "source": {
+        "package": "jszip",
+        "type": "npm"
+      },
+      "version": "3.10.1"
     },
     "katex": {
       "bytes": 560825,
@@ -61,6 +121,23 @@
         "type": "npm"
       },
       "version": "0.16.21"
+    },
+    "lucide-react": {
+      "bytes": 504347,
+      "files": {
+        "THIRD_PARTY_NOTICES.txt": "ea98897cd97f8f834f355b3b96991afc45225d03cb015078c17099643658af73",
+        "index.js": "591cbafc578a4bf73b4be726793c9ce356a02791bf26f1d8d89b9babdb90f82f"
+      },
+      "license": "ISC",
+      "modules": [
+        "lucide-react"
+      ],
+      "recipe": "6ef7ab1c0dfbaa28c5687540a809cc3c2adda2cd0e9d6706cd62ad19f552e50c",
+      "source": {
+        "package": "lucide-react",
+        "type": "bundle"
+      },
+      "version": "0.394.0"
     },
     "marked": {
       "bytes": 76326,
@@ -127,6 +204,137 @@
       },
       "version": "18.3.1"
     },
+    "react-router": {
+      "bytes": 211081,
+      "files": {
+        "THIRD_PARTY_NOTICES.txt": "b37c44c8a65a3929fe0dbe436fe26439207e265c32a474e8ed74c5fa41871c64",
+        "index.js": "1eb234752b90f575c2e873abc7490d751cbec252f1207857d7332f2345d6e13b"
+      },
+      "license": "MIT",
+      "modules": [
+        "react-router-dom",
+        "react-router"
+      ],
+      "recipe": "6ef7ab1c0dfbaa28c5687540a809cc3c2adda2cd0e9d6706cd62ad19f552e50c",
+      "source": {
+        "package": "react-router-dom",
+        "type": "bundle"
+      },
+      "version": "7.18.5"
+    },
+    "recharts": {
+      "bytes": 624122,
+      "files": {
+        "THIRD_PARTY_NOTICES.txt": "3147ead4a7901273dc055f55a2d3a2341135f836082e65ca86801989ff75463b",
+        "index.js": "599637d656f2d00991626899243cea3c61357bb1ae45409199267a6a592b4763"
+      },
+      "license": "MIT",
+      "modules": [
+        "recharts"
+      ],
+      "recipe": "6ef7ab1c0dfbaa28c5687540a809cc3c2adda2cd0e9d6706cd62ad19f552e50c",
+      "source": {
+        "package": "recharts",
+        "type": "bundle"
+      },
+      "version": "3.10.1"
+    },
+    "shadcn-ui": {
+      "bytes": 491177,
+      "files": {
+        "THIRD_PARTY_NOTICES.txt": "dfe83839701518af74af4cdace5d6998aa77a9b1553b42e1291d1d8d11a6d870",
+        "index.js": "5ef21ebb0c46d565b9543f3d3c9b2382040c6b147d51bc68f533eb870976cf5d"
+      },
+      "license": "MIT",
+      "modules": [
+        "@radix-ui/react-accordion",
+        "@radix-ui/react-alert-dialog",
+        "@radix-ui/react-aspect-ratio",
+        "@radix-ui/react-avatar",
+        "@radix-ui/react-checkbox",
+        "@radix-ui/react-collapsible",
+        "@radix-ui/react-dialog",
+        "@radix-ui/react-dropdown-menu",
+        "@radix-ui/react-hover-card",
+        "@radix-ui/react-label",
+        "@radix-ui/react-menubar",
+        "@radix-ui/react-navigation-menu",
+        "@radix-ui/react-popover",
+        "@radix-ui/react-progress",
+        "@radix-ui/react-radio-group",
+        "@radix-ui/react-select",
+        "@radix-ui/react-separator",
+        "@radix-ui/react-slider",
+        "@radix-ui/react-slot",
+        "@radix-ui/react-switch",
+        "@radix-ui/react-tabs",
+        "@radix-ui/react-toast",
+        "@radix-ui/react-toggle",
+        "@radix-ui/react-toggle-group",
+        "@radix-ui/react-tooltip",
+        "class-variance-authority",
+        "clsx",
+        "tailwind-merge",
+        "embla-carousel-react",
+        "react-day-picker",
+        "/lib/utils",
+        "/components/ui/accordion",
+        "/components/ui/alert-dialog",
+        "/components/ui/alert",
+        "/components/ui/avatar",
+        "/components/ui/badge",
+        "/components/ui/breadcrumb",
+        "/components/ui/button",
+        "/components/ui/calendar",
+        "/components/ui/card",
+        "/components/ui/carousel",
+        "/components/ui/checkbox",
+        "/components/ui/collapsible",
+        "/components/ui/dialog",
+        "/components/ui/dropdown-menu",
+        "/components/ui/input",
+        "/components/ui/label",
+        "/components/ui/menubar",
+        "/components/ui/navigation-menu",
+        "/components/ui/pagination",
+        "/components/ui/popover",
+        "/components/ui/progress",
+        "/components/ui/radio-group",
+        "/components/ui/select",
+        "/components/ui/separator",
+        "/components/ui/skeleton",
+        "/components/ui/slider",
+        "/components/ui/switch",
+        "/components/ui/table",
+        "/components/ui/tabs",
+        "/components/ui/textarea",
+        "/components/ui/toast",
+        "/components/ui/toaster",
+        "/components/ui/toggle-group",
+        "/components/ui/toggle",
+        "/components/ui/tooltip",
+        "/components/ui/use-toast"
+      ],
+      "recipe": "6ef7ab1c0dfbaa28c5687540a809cc3c2adda2cd0e9d6706cd62ad19f552e50c",
+      "source": {
+        "shadcn": {
+          "components_url": "https://raw.githubusercontent.com/LibreChat-AI/LibreChat/8d3da9bbb220a0a96be9330a2e1cbd385fb786d5/packages/data-provider/src/artifacts.ts",
+          "licenses": [
+            {
+              "title": "shadcn/ui component sources, as embedded in LibreChat's packages/data-provider/src/artifacts.ts (MIT)",
+              "url": "https://raw.githubusercontent.com/shadcn-ui/ui/729b9ec8cacfae0bc31958c1a8e425d0a21be54e/LICENSE.md"
+            },
+            {
+              "title": "LibreChat (MIT), which carries those sources",
+              "url": "https://raw.githubusercontent.com/LibreChat-AI/LibreChat/8d3da9bbb220a0a96be9330a2e1cbd385fb786d5/LICENSE"
+            }
+          ],
+          "shared_files_url": "https://raw.githubusercontent.com/LibreChat-AI/LibreChat/8d3da9bbb220a0a96be9330a2e1cbd385fb786d5/client/src/utils/artifacts.ts"
+        },
+        "type": "bundle"
+      },
+      "version": "8d3da9bbb220"
+    },
     "tailwind": {
       "bytes": 408350,
       "files": {
@@ -139,6 +347,55 @@
         "url": "https://cdn.tailwindcss.com/3.4.17"
       },
       "version": "3.4.17"
+    },
+    "three": {
+      "bytes": 678349,
+      "files": {
+        "THIRD_PARTY_NOTICES.txt": "55f2751be6238efc969a1bcd16e959d8f948d2314c1ac2ab9d04b0c2b23e332d",
+        "index.js": "e68fbef8604d818bf37ce5d75fa2e48fcd2b35b97a772d69c08f43314fa4f1fc"
+      },
+      "license": "MIT",
+      "modules": [
+        "three"
+      ],
+      "recipe": "6ef7ab1c0dfbaa28c5687540a809cc3c2adda2cd0e9d6706cd62ad19f552e50c",
+      "source": {
+        "package": "three",
+        "type": "bundle"
+      },
+      "version": "0.167.1"
+    },
+    "vaul": {
+      "bytes": 129439,
+      "files": {
+        "THIRD_PARTY_NOTICES.txt": "92a3893cf5df818b0994fb74ba62827e9a17c050bf0c2dbd7c28c1c4a74e86e6",
+        "index.js": "286c6fe74abb3b4f5cf8a3484b26fae26a9de1a24287fe94837db70cd6ad5876"
+      },
+      "license": "MIT",
+      "modules": [
+        "vaul",
+        "/components/ui/drawer"
+      ],
+      "recipe": "6ef7ab1c0dfbaa28c5687540a809cc3c2adda2cd0e9d6706cd62ad19f552e50c",
+      "source": {
+        "package": "vaul",
+        "shadcn": {
+          "components_url": "https://raw.githubusercontent.com/LibreChat-AI/LibreChat/8d3da9bbb220a0a96be9330a2e1cbd385fb786d5/packages/data-provider/src/artifacts.ts",
+          "licenses": [
+            {
+              "title": "shadcn/ui component sources, as embedded in LibreChat's packages/data-provider/src/artifacts.ts (MIT)",
+              "url": "https://raw.githubusercontent.com/shadcn-ui/ui/729b9ec8cacfae0bc31958c1a8e425d0a21be54e/LICENSE.md"
+            },
+            {
+              "title": "LibreChat (MIT), which carries those sources",
+              "url": "https://raw.githubusercontent.com/LibreChat-AI/LibreChat/8d3da9bbb220a0a96be9330a2e1cbd385fb786d5/LICENSE"
+            }
+          ],
+          "shared_files_url": "https://raw.githubusercontent.com/LibreChat-AI/LibreChat/8d3da9bbb220a0a96be9330a2e1cbd385fb786d5/client/src/utils/artifacts.ts"
+        },
+        "type": "bundle"
+      },
+      "version": "0.9.9"
     }
   },
   "version": 1

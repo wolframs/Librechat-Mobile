@@ -11,31 +11,34 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.garfiec.librechat.core.data.repository.ArtifactShortcutRepository
 import com.garfiec.librechat.core.model.ArtifactShortcut
-import com.garfiec.librechat.core.model.artifactTypeLabel
 import com.garfiec.librechat.core.model.displayGlyph
 import com.garfiec.librechat.core.model.displayLabel
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveScaffold
 import com.garfiec.librechat.core.ui.components.EmptyState
+import com.garfiec.librechat.core.ui.components.artifactTypeLabel
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBar
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBarSpec
+import com.garfiec.librechat.core.ui.components.topbar.BarIcons
+import com.garfiec.librechat.core.ui.components.topbar.BarNavigation
+import com.garfiec.librechat.core.ui.components.topbar.BarTitle
 import com.garfiec.librechat.feature.settings.resources.Res
 import com.garfiec.librechat.feature.settings.resources.artifact_shortcuts_disabled_message
 import com.garfiec.librechat.feature.settings.resources.artifact_shortcuts_empty
@@ -66,19 +69,15 @@ fun ArtifactShortcutsScreen(
     val disabledMessage = stringResource(Res.string.artifact_shortcuts_disabled_message)
     val scope = rememberCoroutineScope()
 
-    Scaffold(
+    AdaptiveScaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(Res.string.artifact_shortcuts_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(Res.string.cd_back),
-                        )
-                    }
-                },
+            AdaptiveTopBar(
+                spec = AdaptiveTopBarSpec(
+                    navigation = BarNavigation(BarIcons.Back, stringResource(Res.string.cd_back), onNavigateBack),
+                    title = BarTitle(stringResource(Res.string.artifact_shortcuts_title)),
+                    actions = emptyList(),
+                ),
             )
         },
     ) { innerPadding ->
@@ -101,7 +100,7 @@ fun ArtifactShortcutsScreen(
                             }
                         },
                     )
-                    HorizontalDivider()
+                    AdaptiveDivider()
                 }
             }
         }
@@ -109,7 +108,7 @@ fun ArtifactShortcutsScreen(
 }
 
 @Composable
-private fun ArtifactShortcutRow(
+internal fun ArtifactShortcutRow(
     shortcut: ArtifactShortcut,
     onDelete: () -> Unit,
 ) {
@@ -122,9 +121,10 @@ private fun ArtifactShortcutRow(
             modifier = Modifier.size(40.dp),
             contentAlignment = Alignment.Center,
         ) {
+            // Sized in dp, as the box is: at a large font scale a 22sp glyph outgrows its 40dp box.
             Text(
                 text = shortcut.displayGlyph,
-                fontSize = 22.sp,
+                fontSize = with(LocalDensity.current) { GlyphSize.toSp() },
             )
         }
         Column(modifier = Modifier.weight(1f)) {
@@ -140,6 +140,7 @@ private fun ArtifactShortcutRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         IconButton(onClick = onDelete) {
@@ -151,3 +152,5 @@ private fun ArtifactShortcutRow(
         }
     }
 }
+
+private val GlyphSize = 22.dp

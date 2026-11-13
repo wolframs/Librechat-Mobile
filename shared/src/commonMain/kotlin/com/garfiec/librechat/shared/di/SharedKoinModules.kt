@@ -4,11 +4,13 @@ import com.garfiec.librechat.core.common.di.commonModule
 import com.garfiec.librechat.core.data.di.dataModule
 import com.garfiec.librechat.core.logging.di.loggingModule
 import com.garfiec.librechat.core.network.di.networkModule
+import com.garfiec.librechat.core.notifications.di.notificationsModule
 import com.garfiec.librechat.feature.agents.di.agentsModule
 import com.garfiec.librechat.feature.auth.di.authModule
 import com.garfiec.librechat.feature.chat.di.chatModule
 import com.garfiec.librechat.feature.conversations.di.conversationsModule
 import com.garfiec.librechat.feature.files.di.filesModule
+import com.garfiec.librechat.feature.schedules.di.schedulesFeatureModule
 import com.garfiec.librechat.feature.settings.di.settingsModule
 import com.garfiec.librechat.feature.skills.di.skillsFeatureModule
 import com.garfiec.librechat.shared.navigation.sharedAppModule
@@ -25,23 +27,24 @@ import org.koin.core.module.Module
  * iOS-only binding (`LibreChatSDK`). Adding a feature module means editing
  * this one list, so whole-module divergence is impossible by construction.
  *
- * `authPlatformModule` is intentionally absent: `authModule` already
- * `includes(authPlatformModule)`, so listing it here would double-add it.
  * Engine + `SseHttpTransport` are platform-specific but arrive via
- * `networkModule.includes(networkPlatformModule)` (expect/actual), so they
- * need no per-platform entry here.
+ * `networkModule.includes(networkPlatformModule)` (expect/actual). A platform
+ * module is included by its own feature module and is never listed here, or it
+ * would be added twice.
  */
 val sharedKoinModules: List<Module> = listOf(
     commonModule,
     loggingModule,
     networkModule,
     dataModule,
+    notificationsModule,
     authModule,
     chatModule,
     conversationsModule,
     settingsModule,
     agentsModule,
     filesModule,
+    schedulesFeatureModule,
     skillsFeatureModule,
     sharedAppModule,
 )

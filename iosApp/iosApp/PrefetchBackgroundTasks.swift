@@ -12,30 +12,38 @@ enum PrefetchBackgroundTasks {
 
     /// Installs a launch handler per identifier.
     ///
-    /// Must be called from `application(_:didFinishLaunchingWithOptions:)` — iOS refuses a
-    /// registration made after launch completes. Touches only Kotlin constants, never Koin; each
-    /// handler resolves Koin when it fires.
+    /// Must be called exactly once, from `iOSApp.init()` before `startIosKoin()`: iOS refuses a
+    /// registration made after launch completes, throws on a second registration of the same
+    /// identifier, and throws on a submission for an identifier that has no handler yet — and
+    /// Koin's eager prefetch coordinator submits from a background thread as soon as it can.
+    /// Touches only Kotlin constants, never Koin; each handler resolves Koin when it fires.
     static func register() {
-        register(
+        let refresh = register(
             identifier: IosPrefetchTasks.shared.REFRESH_ID,
             budgetSeconds: IosPrefetchTasks.shared.REFRESH_BUDGET_SECONDS
         )
-        register(
+        let processing = register(
             identifier: IosPrefetchTasks.shared.PROCESSING_ID,
             budgetSeconds: IosPrefetchTasks.shared.PROCESSING_BUDGET_SECONDS
         )
+        // Opens the Kotlin side's submission gate, and only when both handlers are in place: a
+        // submission for an identifier iOS refused to register throws the same way as one made too
+        // early, so a refused registration keeps the gate shut and the Kotlin side logs and skips.
+        guard refresh && processing else { return }
+        IosPrefetchTasks.shared.markLaunchHandlersRegistered()
     }
 
-    private static func register(identifier: String, budgetSeconds: Double) {
+    private static func register(identifier: String, budgetSeconds: Double) -> Bool {
         let registered = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: identifier,
             using: nil
         ) { task in
             run(task, budgetSeconds: budgetSeconds)
         }
-        guard !registered else { return }
+        guard !registered else { return true }
         assertionFailure("BGTaskScheduler refused \(identifier) — is it in BGTaskSchedulerPermittedIdentifiers?")
         NSLog("[W/Prefetch] BGTaskScheduler refused registration for \(identifier)")
+        return false
     }
 
     private static func run(_ task: BGTask, budgetSeconds: Double) {
@@ -153,7 +161,7 @@ private final class BackgroundAssertion: @unchecked Sendable {
 /// `expirationHandler` fires on the system's own queue, so the handle is guarded rather than merely
 /// stored — and a cancellation that lands before the work is assigned is remembered, so it cannot be
 /// lost in the gap between installing the handler and starting the task.
-private final class CancellableWork: @unchecked Sendable {
+final class CancellableWork: @unchecked Sendable {
 
     private let lock = NSLock()
     private var task: Task<Void, Never>?

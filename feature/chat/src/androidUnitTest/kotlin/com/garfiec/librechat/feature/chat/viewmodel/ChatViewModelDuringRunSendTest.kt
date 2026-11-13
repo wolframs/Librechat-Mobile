@@ -3,6 +3,7 @@ package com.garfiec.librechat.feature.chat.viewmodel
 import androidx.lifecycle.viewModelScope
 import com.garfiec.librechat.core.common.BackendBuildClass
 import com.garfiec.librechat.core.common.DetectedBackend
+import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
@@ -28,6 +29,7 @@ import com.garfiec.librechat.feature.chat.util.AskAnswerDraft
 import com.garfiec.librechat.feature.chat.viewmodel.delegate.PickedFile
 import com.garfiec.librechat.feature.chat.viewmodel.delegate.PlatformFileHandler
 import com.google.common.truth.Truth.assertThat
+import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -41,6 +43,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -56,11 +59,11 @@ import org.junit.Test
  *
  * The defect this locks down: `ChatPrefsState` is merged into the state by the `uiState` combine,
  * i.e. onto the EXPOSED flow only, while [ChatViewModel.sendDuringRun] decides from the private
- * backing state — where the slice still held `ChatPrefsState()`'s `QUEUE` default. Every during-run
- * send queued, and steering was unreachable from the composer no matter what the user chose.
+ * backing state — where the slice still held `ChatPrefsState()`'s default. Every during-run send
+ * followed that default, and the other route was unreachable from the composer whatever the user chose.
  *
  * It failed *invisibly*, which is why nothing caught it: the send button takes its icon from the
- * exposed state, so it rendered itself "Steer this reply" and then queued. Asserting on
+ * exposed state, so it showed the user's choice and then did the default. Asserting on
  * `uiState.value` cannot reproduce that — the combine populates the copy a test would read. Only
  * driving the real send path does, so this test builds the whole ViewModel and calls
  * [ChatViewModel.sendDuringRun], the exact entry point the composer's send button routes to.
@@ -181,8 +184,20 @@ class ChatViewModelDuringRunSendTest {
             vm.sendDuringRun()
             runCurrent()
 
-            coVerify(exactly = 1) { chatRepository.steerChat(SteerRequest(CONVERSATION_ID, TEXT)) }
+            coVerify(exactly = 1) {
+                chatRepository.steerChat(match { it.conversationId == CONVERSATION_ID && it.text == TEXT })
+            }
             assertThat(vm.uiState.value.messageQueue).isEmpty()
+        }
+
+    @Test
+    fun `send during a run interrupts when the preference is interrupt`() =
+        duringRunTest(DuringRunAction.INTERRUPT) { vm ->
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+
+            coVerify(exactly = 1) { chatRepository.steerChat(match { it.text == TEXT && it.preempt == true }) }
         }
 
     @Test
@@ -552,18 +567,7 @@ class ChatViewModelDuringRunSendTest {
             runCurrent()
             assertThat(vm.uiState.value.messageQueue).hasSize(1)
 
-            resumedStream.emit(
-                StreamEvent.Final(
-                    requestMessage = null,
-                    responseMessage = com.garfiec.librechat.core.model.Message(
-                        messageId = SETTLED_ID,
-                        conversationId = CONVERSATION_ID,
-                        text = "done",
-                        isCreatedByUser = false,
-                    ),
-                    conversation = null,
-                ),
-            )
+            resumedStream.emit(cleanFinal())
             runCurrent()
 
             // The drain really ran — without this the assertion below could pass simply because
@@ -572,6 +576,147 @@ class ChatViewModelDuringRunSendTest {
             assertThat(vm.uiState.value.isStreaming).isTrue()
 
             assertThat(vm.uiState.value.justSettledMessageId).isEqualTo(SETTLED_ID)
+        }
+
+    /**
+     * A steer the reply finished before taking (no tool step to inject at) comes back on the
+     * Final and is sent as a follow-up, and the user is told. Run on the real queue: the drain starts
+     * inline in the Final's own dispatch and its send clears the error channel, which is why the
+     * notice is a one-shot signal and must still have been emitted once the drain is under way.
+     */
+    @Test
+    fun `a steer the reply finished before taking is sent as a follow-up and the user is told`() =
+        duringRunTest(DuringRunAction.STEER) { vm ->
+            val notices = mutableListOf<Int>()
+            backgroundScope.launch { vm.steersQueuedAsFollowUp.collect { notices += it } }
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+            assertThat(vm.uiState.value.pendingSteers.map { it.text }).containsExactly(TEXT)
+            assertThat(notices).isEmpty()
+
+            resumedStream.emit(cleanFinal(listOf(PendingSteer(steerId = "steer-1", text = TEXT, createdAt = 1L))))
+            runCurrent()
+
+            assertThat(vm.uiState.value.pendingSteers).isEmpty()
+            assertThat(vm.uiState.value.messageQueue).isEmpty()
+            assertThat(vm.uiState.value.isStreaming).isTrue()
+            assertThat(notices).containsExactly(1)
+        }
+
+    /**
+     * The same hand-back into a queue already HELD (here by a refused steer) is not sent after the
+     * reply — the clean finish leaves a paused queue alone — so saying it will be would be untrue.
+     */
+    @Test
+    fun `a steer handed back into a held queue is not announced as sent after`() =
+        duringRunTest(
+            preference = DuringRunAction.STEER,
+            arrange = {
+                coEvery { chatRepository.steerChat(any()) } returnsMany listOf(
+                    Result.Error(
+                        exception = ApiException(statusCode = 200, message = "refused", body = """{"type":"moderation"}"""),
+                    ),
+                    Result.Success(SteerResponse(status = "queued", steerId = "steer-2")),
+                )
+            },
+        ) { vm ->
+            val notices = mutableListOf<Int>()
+            backgroundScope.launch { vm.steersQueuedAsFollowUp.collect { notices += it } }
+            vm.onInputChanged("refused words")
+            vm.sendDuringRun()
+            runCurrent()
+            assertThat(vm.uiState.value.isQueueHeldForRefusal).isTrue()
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+            assertThat(vm.uiState.value.pendingSteers.map { it.text }).containsExactly(TEXT)
+
+            resumedStream.emit(cleanFinal(listOf(PendingSteer(steerId = "steer-2", text = TEXT, createdAt = 1L))))
+            runCurrent()
+
+            assertThat(vm.uiState.value.isStreaming).isFalse()
+            assertThat(vm.uiState.value.messageQueue.map { it.text }).containsExactly("refused words", TEXT).inOrder()
+            assertThat(notices).isEmpty()
+        }
+
+    /**
+     * A steer the server REFUSED waits for the user, through a clean finish that would otherwise
+     * drain it, and the screen says so. Run on the real queue for the reason the parked-steer test
+     * gives: the delegate's fakes cannot tell a self-draining enqueue from a held one.
+     */
+    @Test
+    fun `a refused steer is held through a clean finish until the user sends it`() =
+        duringRunTest(
+            preference = DuringRunAction.STEER,
+            arrange = {
+                coEvery { chatRepository.steerChat(any()) } returns Result.Error(
+                    exception = ApiException(
+                        statusCode = 200,
+                        message = "The server refused this message.",
+                        body = """{"type":"message_limit","windowInMinutes":1,"retryAfterSeconds":30}""",
+                    ),
+                )
+            },
+        ) { vm ->
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+
+            // Said at once, while the run is still streaming.
+            assertThat(vm.uiState.value.isStreaming).isTrue()
+            assertThat(vm.uiState.value.isQueueHeldForRefusal).isTrue()
+            assertThat(vm.uiState.value.error).isEqualTo(ChatNotice.MESSAGE_LIMIT_RETRY.marker(30L))
+
+            resumedStream.emit(cleanFinal())
+            runCurrent()
+
+            // A clean finish drains an ordinary queue; this one stays put.
+            assertThat(vm.uiState.value.isStreaming).isFalse()
+            assertThat(vm.uiState.value.messageQueue.map { it.text }).containsExactly(TEXT)
+            assertThat(vm.uiState.value.pausedQueueCount).isEqualTo(1)
+            assertThat(vm.uiState.value.isQueueHeldForRefusal).isTrue()
+            coVerify(exactly = 0) {
+                chatRepository.startChat(
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                    any(),
+                )
+            }
+
+            vm.sendQueuedNow()
+            runCurrent()
+
+            assertThat(vm.uiState.value.isStreaming).isTrue()
+            assertThat(vm.uiState.value.messageQueue).isEmpty()
+            assertThat(vm.uiState.value.isQueueHeldForRefusal).isFalse()
+        }
+
+    @Test
+    fun `cancelling the refused message retires the explanation but not the hold`() =
+        duringRunTest(
+            preference = DuringRunAction.STEER,
+            arrange = {
+                coEvery { chatRepository.steerChat(any()) } returns Result.Error(
+                    exception = ApiException(statusCode = 200, message = "refused", body = """{"type":"moderation"}"""),
+                )
+            },
+        ) { vm ->
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+            vm.onInputChanged("the next turn")
+            vm.queueMessage()
+            runCurrent()
+            assertThat(vm.uiState.value.isQueueHeldForRefusal).isTrue()
+
+            vm.cancelQueued(vm.uiState.value.messageQueue.first { it.text == TEXT }.localId)
+            runCurrent()
+
+            // The other follow-up is still held, but nothing in it was refused.
+            assertThat(vm.uiState.value.messageQueue.map { it.text }).containsExactly("the next turn")
+            assertThat(vm.uiState.value.isQueuePaused).isTrue()
+            assertThat(vm.uiState.value.isQueueHeldForRefusal).isFalse()
         }
 
     // ─── pending quotes (v0.8.7 "Add to chat", SYNC A11) ─────────────
@@ -583,7 +728,8 @@ class ChatViewModelDuringRunSendTest {
             chatRepository.startChat(
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), quotes = captureNullable(captured),
+                any(),
+                captureNullable(captured),
             )
         } returns MutableSharedFlow()
         return captured
@@ -625,43 +771,111 @@ class ChatViewModelDuringRunSendTest {
                 .containsExactly("the selected excerpt")
             assertThat(vm.uiState.value.pendingQuotes).isEmpty()
 
-            resumedStream.emit(
-                StreamEvent.Final(
-                    requestMessage = null,
-                    responseMessage = com.garfiec.librechat.core.model.Message(
-                        messageId = SETTLED_ID,
-                        conversationId = CONVERSATION_ID,
-                        text = "done",
-                        isCreatedByUser = false,
-                    ),
-                    conversation = null,
-                ),
-            )
+            resumedStream.emit(cleanFinal())
             runCurrent()
 
             assertThat(vm.uiState.value.messageQueue).isEmpty()
             assertThat(captured.last()).containsExactly("the selected excerpt")
         }
 
+    // ─── steer quotes (v0.8.8-rc2) ───────────────────────────────────
+
+    /** Captures the `SteerRequest` the ViewModel actually posts. */
+    private fun captureSteerRequest(response: SteerResponse): CapturingSlot<SteerRequest> {
+        val slot = slot<SteerRequest>()
+        coEvery { chatRepository.steerChat(capture(slot)) } returns Result.Success(response)
+        return slot
+    }
+
     @Test
-    fun `a composer steer leaves the staged quotes for the next real send`() =
+    fun `a composer steer carries the staged quotes and clears them`() =
         duringRunTest(DuringRunAction.STEER) { vm ->
-            // Web parity: server steers never carry quotes, so a composer-origin steer must not
-            // consume them — they stay staged and ride the next fresh submit instead.
+            // `POST /chat/steer` carries quotes from v0.8.8-rc2, so they leave the composer with
+            // the words — leaving them staged would glue them onto whatever is sent next instead.
+            val request = captureSteerRequest(SteerResponse(status = "queued", steerId = "s1", quotesAccepted = true))
             vm.addPendingQuote("the selected excerpt")
             vm.onInputChanged(TEXT)
             vm.sendDuringRun()
             runCurrent()
 
-            coVerify(exactly = 1) { chatRepository.steerChat(SteerRequest(CONVERSATION_ID, TEXT)) }
+            assertThat(request.captured.quotes).containsExactly("the selected excerpt")
+            assertThat(request.captured.text).isEqualTo(TEXT)
+            assertThat(vm.uiState.value.pendingQuotes).isEmpty()
+        }
+
+    @Test
+    fun `an ack that drops the quotes does NOT re-stage them`() =
+        duringRunTest(DuringRunAction.STEER) { vm ->
+            // A pre-quotes server 202s while dropping the excerpts, but the steer is still queued
+            // and will still inject: re-staging here would deliver them twice, once inside the
+            // injected part and once on the next send. The applied event is where the loss is real.
+            captureSteerRequest(SteerResponse(status = "queued", steerId = "s1", quotesAccepted = null))
+            vm.addPendingQuote("the selected excerpt")
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+
+            assertThat(vm.uiState.value.pendingQuotes).isEmpty()
+        }
+
+    @Test
+    fun `a quote-less applied event re-stages the excerpts exactly once`() =
+        duringRunTest(DuringRunAction.STEER) { vm ->
+            // The injected part carries no quotes, so the local record holds the only copy. Both
+            // recovery triggers can fire for one steer, so the restore has to be idempotent.
+            captureSteerRequest(SteerResponse(status = "queued", steerId = "s1", quotesAccepted = null))
+            vm.addPendingQuote("the selected excerpt")
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+            assertThat(vm.uiState.value.pendingQuotes).isEmpty()
+
+            resumedStream.emit(StreamEvent.SteerApplied(steerId = "s1", text = TEXT, quotes = emptyList()))
+            runCurrent()
             assertThat(vm.uiState.value.pendingQuotes).containsExactly("the selected excerpt")
+
+            resumedStream.emit(StreamEvent.SteerApplied(steerId = "s1", text = TEXT, quotes = emptyList()))
+            runCurrent()
+            assertThat(vm.uiState.value.pendingQuotes).containsExactly("the selected excerpt")
+        }
+
+    @Test
+    fun `an applied event that kept the quotes re-stages nothing`() =
+        duringRunTest(DuringRunAction.STEER) { vm ->
+            captureSteerRequest(SteerResponse(status = "queued", steerId = "s1", quotesAccepted = true))
+            vm.addPendingQuote("the selected excerpt")
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+
+            resumedStream.emit(
+                StreamEvent.SteerApplied(steerId = "s1", text = TEXT, quotes = listOf("the selected excerpt")),
+            )
+            runCurrent()
+            assertThat(vm.uiState.value.pendingQuotes).isEmpty()
+        }
+
+    @Test
+    fun `a rejected steer re-homes its quotes onto the queued follow-up`() =
+        duringRunTest(DuringRunAction.STEER) { vm ->
+            // The queue sends through the normal path, where quotes work on any server — so the
+            // excerpts ride the spec rather than going back to the composer.
+            coEvery { chatRepository.steerChat(any()) } returns
+                Result.Error(exception = ApiException(statusCode = 409, message = "no active run", body = null))
+            vm.addPendingQuote("the selected excerpt")
+            vm.onInputChanged(TEXT)
+            vm.sendDuringRun()
+            runCurrent()
+
+            assertThat(vm.uiState.value.messageQueue.single().quotes).containsExactly("the selected excerpt")
+            assertThat(vm.uiState.value.pendingQuotes).isEmpty()
         }
 
     @Test
     fun `quote capture is gated on server version and endpoint`() {
         val gatedOn = ChatUiState(
             gates = FeatureGatesState(backendVersion = "0.8.7"),
-            selection = ModelSelectionState(selectedEndpoint = "anthropic"),
+            selection = ModelSelectionState(choice = ModelChoice.Raw("anthropic", null)),
         )
         assertThat(gatedOn.quoteCaptureAvailable).isTrue()
 
@@ -676,7 +890,7 @@ class ChatViewModelDuringRunSendTest {
         // Assistants endpoints bypass the server-side merge (web quotesSupported).
         assertThat(
             gatedOn.copy(
-                selection = ModelSelectionState(selectedEndpoint = "assistants"),
+                selection = ModelSelectionState(choice = ModelChoice.Raw("assistants", null)),
             ).quoteCaptureAvailable,
         ).isFalse()
     }
@@ -696,6 +910,19 @@ class ChatViewModelDuringRunSendTest {
         ),
     )
 
+    /** The run finishing cleanly, handing back [pendingSteers] it never injected. */
+    private fun cleanFinal(pendingSteers: List<PendingSteer> = emptyList()) = StreamEvent.Final(
+        requestMessage = null,
+        responseMessage = com.garfiec.librechat.core.model.Message(
+            messageId = SETTLED_ID,
+            conversationId = CONVERSATION_ID,
+            text = "done",
+            isCreatedByUser = false,
+        ),
+        conversation = null,
+        pendingSteers = pendingSteers,
+    )
+
     private fun duringRunTest(
         preference: DuringRunAction,
         arrange: () -> Unit = {},
@@ -705,7 +932,7 @@ class ChatViewModelDuringRunSendTest {
         every { settingsDataStore.duringRunAction } returns flowOf(preference)
         // Stages the (endpoint, model) `init` applies, so the conversation opens with a real
         // selection rather than waiting on the model pipeline.
-        selectionHandoff.put(conversationId = CONVERSATION_ID, endpoint = ENDPOINT, model = MODEL)
+        selectionHandoff.put(conversationId = CONVERSATION_ID, choice = ModelChoice.Raw(ENDPOINT, MODEL))
         val vm = newViewModel()
         runCurrent()
         try {

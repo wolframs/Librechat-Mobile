@@ -16,6 +16,12 @@ Use these paths when generating focused diffs between the current baseline commi
 | `api/server/services/` | AuthService, MCP, Endpoints, Files, Runs, Tools, Artifacts, etc. | Business logic that shapes responses and implements features |
 | `api/models/` | Mongoose models (Agent, Conversation, Message, File, etc.) | DB schema drives API response shapes — especially fields, defaults, enums |
 
+## Client Transport Contract (`@librechat/chat`)
+
+| Path | What It Contains | Why It Matters |
+|------|------------------|----------------|
+| `packages/chat/src/core/` | `types.ts`: typed `ChatTransport` (send/reconnect/abort/status/resume/steer/queue, result variants, refusal codes, `generationProtocolVersion`). `transport/`: SSE frame parser. `reducer.ts` + `steps/`: how stream events fold into messages | Upstream's own spec of the streaming protocol mobile implements. Diffed first, by the coordinator (SKILL Phase 0 step 9). Exists from 2026-10-10 (#16964); message types are re-exported from `librechat-data-provider`, not redefined |
+
 ## Data Provider Package (canonical types + API client)
 
 | Path | What It Contains | Why It Matters |
@@ -66,9 +72,9 @@ Use these paths when generating focused diffs between the current baseline commi
 GitHub Releases often explicitly flag breaking changes and migrations that diffs hide.
 For every stable or rc tag between current baseline and target (inclusive; untagged partial targets have no release notes — scan merged PRs and commit subjects instead):
 ```bash
-gh api repos/danny-avila/LibreChat/releases/tags/{tag} --jq .body
+gh api repos/LibreChat-AI/LibreChat/releases/tags/{tag} --jq .body
 ```
-Falls back to `WebFetch` on `https://github.com/danny-avila/LibreChat/releases/tag/{tag}`.
+Falls back to `WebFetch` on `https://github.com/LibreChat-AI/LibreChat/releases/tag/{tag}`.
 
 Upstream has no repo-root `CHANGELOG.md` — release notes on GitHub are the canonical changelog.
 
@@ -82,6 +88,7 @@ cd upstream && git diff {base_commit}..{target_commit} --stat -- \
   api/server/middleware/ \
   api/server/services/ \
   api/models/ \
+  packages/chat/src/ \
   packages/data-provider/src/ \
   packages/data-schemas/src/ \
   packages/api/src/ \
@@ -106,6 +113,25 @@ Some paths below contain values the client copies verbatim because the server ne
 `fullMimeTypesList` / `excelMimeTypes` / `bedrockDocumentFormats` (`file-config.ts`),
 `FEEDBACK_TAGS` (`feedback.ts`), `ArtifactModes` (`artifacts.ts`), plus the whole of
 `parameterSettings.ts` and `packages/api/src/artifacts/update.ts`.
+
+### Artifact runtime dependencies (vendored, not mirrored as Kotlin)
+
+What a React artifact may `import` is decided in three upstream places, none served over the API:
+
+| Path | What It Contains | Client side |
+|------|------------------|-------------|
+| `client/src/utils/artifacts.ts` → `standardDependencies` | The npm packages web's Sandpack installs for every artifact | `bundle` entries in `scripts/web-assets.json`, pins in `scripts/artifact-modules/package.json` |
+| `client/src/utils/artifacts.ts` → `sharedFiles`, `TAILWIND_CDN` | Where shadcn/ui sources are mounted (`/lib/utils`, and the `artifactUIComponents` spread at `/components/ui/*`); the Tailwind build | `shadcn-ui` / `vaul` `modules`; the `tailwind` pin |
+| `packages/data-provider/src/artifacts.ts` → `shadcnComponents`, `artifactUIComponents` | The component sources themselves, and which ones are mounted | Compiled into the `shadcn-ui` / `vaul` bundles from a commit-pinned URL; `modules` |
+| `packages/api/src/prompts/artifacts/index.ts` | The system prompt telling the model which libraries exist (and lucide-react's exact version) | What models actually write against |
+
+All four are `scripts/mirrors.json` entries (`artifact-*`), so Phase 0's check-mirrors run reports
+them. A drift there is reconciled through **`/update-web-assets`**, never by hand-editing a
+vendored file: a new or bumped package needs node for `--sync`, a dependency-policy check, and an
+`advisory` if it is unmaintained, deprecated or vulnerable (the app then asks users before
+loading it). A diff in `client/src/components/Artifacts/` that changes how Sandpack is set up
+(`customSetup`, `externalResources`, a new template) is the same class of change: read it as a
+change to what artifacts can import.
 
 `excelMimeTypes` is tracked separately because upstream spreads it into `fullMimeTypesList` while
 the Kotlin transcription inlines it — so it moves without `fullMimeTypesList` appearing to change.

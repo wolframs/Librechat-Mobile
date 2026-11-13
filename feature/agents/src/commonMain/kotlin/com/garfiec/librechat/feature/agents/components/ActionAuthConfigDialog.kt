@@ -12,23 +12,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.AdaptiveRadioButton
+import com.garfiec.librechat.core.ui.components.SecretTextField
+import com.garfiec.librechat.core.ui.components.UrlKeyboardOptions
+import com.garfiec.librechat.core.ui.components.VerbatimKeyboardOptions
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.agents.resources.*
 import com.garfiec.librechat.feature.agents.resources.Res
 import org.jetbrains.compose.resources.stringResource
@@ -72,9 +77,17 @@ internal fun AuthConfigDialog(
     var localClientUrl by rememberSaveable { mutableStateOf(clientUrl) }
     var localScope by rememberSaveable { mutableStateOf(scope) }
     var localTokenExchangeMethod by rememberSaveable { mutableStateOf(tokenExchangeMethod) }
+    var apiKeyRevealed by remember { mutableStateOf(false) }
+    var clientSecretRevealed by remember { mutableStateOf(false) }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        apiKeyRevealed = false
+        clientSecretRevealed = false
+    }
 
-    AlertDialog(
+    AdaptiveAlertDialog(
+        modifier = Modifier.clearFocusOnTap(),
         onDismissRequest = onDismiss,
+        scrollableText = false,
         title = { Text(stringResource(Res.string.label_authentication)) },
         text = {
             Column(
@@ -111,24 +124,20 @@ internal fun AuthConfigDialog(
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        HorizontalDivider()
+                        AdaptiveDivider()
                         Text(
                             text = stringResource(Res.string.label_api_key_settings),
                             style = MaterialTheme.typography.labelLarge,
                         )
 
-                        OutlinedTextField(
+                        SecretTextField(
                             value = localApiKey,
                             onValueChange = { localApiKey = it },
+                            revealed = apiKeyRevealed,
+                            onRevealedChange = { apiKeyRevealed = it },
                             label = { Text(stringResource(Res.string.label_api_key)) },
                             placeholder = {
                                 Text(if (isEditing) HIDDEN_PLACEHOLDER else "sk-...")
-                            },
-                            singleLine = true,
-                            visualTransformation = if (localApiKey == HIDDEN_PLACEHOLDER) {
-                                VisualTransformation.None
-                            } else {
-                                PasswordVisualTransformation()
                             },
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -155,12 +164,13 @@ internal fun AuthConfigDialog(
                         )
 
                         AnimatedVisibility(visible = localAuthorizationType == "custom") {
-                            OutlinedTextField(
+                            AdaptiveOutlinedTextField(
                                 value = localCustomHeader,
                                 onValueChange = { localCustomHeader = it },
                                 label = { Text(stringResource(Res.string.label_custom_auth_header)) },
                                 placeholder = { Text("X-Api-Key") },
                                 singleLine = true,
+                                keyboardOptions = VerbatimKeyboardOptions,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -172,13 +182,13 @@ internal fun AuthConfigDialog(
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        HorizontalDivider()
+                        AdaptiveDivider()
                         Text(
                             text = stringResource(Res.string.label_oauth_settings),
                             style = MaterialTheme.typography.labelLarge,
                         )
 
-                        OutlinedTextField(
+                        AdaptiveOutlinedTextField(
                             value = localOauthClientId,
                             onValueChange = { localOauthClientId = it },
                             label = { Text(stringResource(Res.string.label_client_id)) },
@@ -186,49 +196,49 @@ internal fun AuthConfigDialog(
                                 Text(if (isEditing) HIDDEN_PLACEHOLDER else "client-id")
                             },
                             singleLine = true,
+                            keyboardOptions = VerbatimKeyboardOptions,
                             modifier = Modifier.fillMaxWidth(),
                         )
 
-                        OutlinedTextField(
+                        SecretTextField(
                             value = localOauthClientSecret,
                             onValueChange = { localOauthClientSecret = it },
+                            revealed = clientSecretRevealed,
+                            onRevealedChange = { clientSecretRevealed = it },
                             label = { Text(stringResource(Res.string.label_client_secret)) },
                             placeholder = {
                                 Text(if (isEditing) HIDDEN_PLACEHOLDER else "client-secret")
                             },
-                            singleLine = true,
-                            visualTransformation = if (localOauthClientSecret == HIDDEN_PLACEHOLDER) {
-                                VisualTransformation.None
-                            } else {
-                                PasswordVisualTransformation()
-                            },
                             modifier = Modifier.fillMaxWidth(),
                         )
 
-                        OutlinedTextField(
+                        AdaptiveOutlinedTextField(
                             value = localAuthUrl,
                             onValueChange = { localAuthUrl = it },
                             label = { Text(stringResource(Res.string.label_authorization_url)) },
                             placeholder = { Text("https://auth.example.com/authorize") },
                             singleLine = true,
+                            keyboardOptions = UrlKeyboardOptions,
                             modifier = Modifier.fillMaxWidth(),
                         )
 
-                        OutlinedTextField(
+                        AdaptiveOutlinedTextField(
                             value = localClientUrl,
                             onValueChange = { localClientUrl = it },
                             label = { Text(stringResource(Res.string.label_token_url)) },
                             placeholder = { Text("https://auth.example.com/token") },
                             singleLine = true,
+                            keyboardOptions = UrlKeyboardOptions,
                             modifier = Modifier.fillMaxWidth(),
                         )
 
-                        OutlinedTextField(
+                        AdaptiveOutlinedTextField(
                             value = localScope,
                             onValueChange = { localScope = it },
                             label = { Text(stringResource(Res.string.label_scope)) },
                             placeholder = { Text("openid profile") },
                             singleLine = true,
+                            keyboardOptions = VerbatimKeyboardOptions,
                             modifier = Modifier.fillMaxWidth(),
                         )
 
@@ -293,7 +303,7 @@ private fun AuthTypeRadioOption(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(
+        AdaptiveRadioButton(
             selected = selected,
             onClick = onClick,
         )

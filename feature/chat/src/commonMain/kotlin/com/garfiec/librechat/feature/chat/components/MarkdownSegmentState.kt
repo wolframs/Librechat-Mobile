@@ -8,11 +8,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import com.garfiec.librechat.core.model.content.CitationIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.CoroutineContext
+
+/**
+ * [rememberMarkdownSegments] with citations normalized against the turn's search results
+ * ([LocalMarkdownMedia]), so the segments hold only citations that resolve, ready to draw as pills.
+ * With [withoutCitations] every citation is removed instead: find-in-page draws its own strings, which
+ * have no pills, and its match numbering ([countMarkdownOccurrences]) counts the same stripped text.
+ */
+@Composable
+internal fun rememberCitedMarkdownSegments(
+    text: String,
+    streaming: Boolean,
+    withoutCitations: Boolean,
+): List<MarkdownSegment> {
+    val segments = rememberMarkdownSegments(text, streaming)
+    val index = if (withoutCitations) CitationIndex.Empty else LocalMarkdownMedia.current.citations
+    return remember(segments, index, streaming) { segments.withCitations(index, streaming) }
+}
 
 /**
  * Parses [text] into [MarkdownSegment]s. While [streaming], parsing runs off the main thread with
@@ -28,13 +46,14 @@ internal fun rememberMarkdownSegments(
     }
 
     val latestText by rememberUpdatedState(text)
-    var segments by remember { mutableStateOf(parseMarkdownSegments(text)) }
+    var segments by remember { mutableStateOf(parseMarkdownSegments(text, streaming = true)) }
     val initialText = remember { text }
 
     LaunchedEffect(Unit) {
         collectMarkdownSegments(
             texts = snapshotFlow { latestText },
             alreadyParsed = initialText,
+            parse = { parseMarkdownSegments(it, streaming = true) },
         ) { segments = it }
     }
 

@@ -5,7 +5,7 @@ plugins {
     id("librechat.kotlin.serialization")
 }
 
-extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+android {
     namespace = "com.garfiec.librechat.core.data"
     testOptions {
         // Robolectric needs the merged manifest + resources on the host-JVM unit-test classpath.
@@ -43,7 +43,8 @@ kotlin {
             implementation(libs.koin.test)
             implementation(libs.ktor.client.mock)
             // Host-JVM Room lane (account-tenancy migration + isolation suite): Robolectric supplies a
-            // working framework SQLite on the JVM, since production Android uses the framework driver.
+            // working framework SQLite; the host JVM can't load the Android-only bundled library
+            // production uses.
             implementation(libs.robolectric)
             implementation(libs.android.test.core)
             implementation(libs.room.testing)

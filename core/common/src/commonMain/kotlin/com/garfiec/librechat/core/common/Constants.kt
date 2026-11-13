@@ -2,10 +2,11 @@ package com.garfiec.librechat.core.common
 
 object EndpointConstants {
     const val AGENTS = "agents"
-    const val ANTHROPIC = "anthropic"
 }
 
 object ToolConstants {
+    /** The chat's one web-search control, which runs LibreChat's search tool or the provider's
+     *  built-in search, never both (`feature/chat`'s `WebSearchRoute`); also the tool's own name. */
     const val WEB_SEARCH = "web_search"
 
     /** Google Gemini "URL Context" grounding (v0.8.7). A Google-only model parameter,
@@ -16,6 +17,21 @@ object ToolConstants {
     /** Inline memory tools (`set_memory`/`delete_memory`). Doubles as the `memory` agent
      *  capability key and the `ephemeralAgent.memory` request flag. */
     const val MEMORY = "memory"
+
+    /** The two inline memory tools, matched EXACTLY and case-sensitively on the tool's own name
+     *  (upstream `Part.tsx` routes on `toolCall.name === 'set_memory' || … 'delete_memory'`), so
+     *  an MCP tool whose name merely contains "memory" is not drawn as a memory write.
+     *  Registered in scripts/mirrors.json. */
+    const val SET_MEMORY = "set_memory"
+    const val DELETE_MEMORY = "delete_memory"
+
+    /** The `skills` agent capability key: without it the server injects no skills into any run
+     *  (upstream `resolveAgentScopedSkillIds`). Doubles as the `ephemeralAgent.skills` flag. */
+    const val SKILLS = "skills"
+
+    /** The `artifacts` agent capability key and the chat's Artifacts toggle, sent as
+     *  `ephemeralAgent.artifacts` with a mode, not a boolean. */
+    const val ARTIFACTS = "artifacts"
     const val FILE_SEARCH = "file_search"
     const val EXECUTE_CODE = "execute_code"
     const val PROGRAMMATIC_TOOLS = "programmatic_tools"

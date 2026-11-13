@@ -1,20 +1,20 @@
 package com.garfiec.librechat.feature.conversations.components
 
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.DriveFileMove
-import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.MarkChatRead
+import androidx.compose.material.icons.filled.MarkChatUnread
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,20 +25,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.DpOffset
-import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveDropdownMenu
+import com.garfiec.librechat.core.ui.components.MenuDragSelection
+import com.garfiec.librechat.core.ui.components.dragSelectRowIcon
+import com.garfiec.librechat.core.ui.components.menuDragTarget
+import com.garfiec.librechat.core.ui.theme.chromeColors
 import com.garfiec.librechat.feature.conversations.resources.*
 import com.garfiec.librechat.feature.conversations.resources.Res
 import org.jetbrains.compose.resources.stringResource
 
+/**
+ * The menu's read-state item: "Mark as unread" on a chat that is read and not open, "Mark as read"
+ * (Switchboard's addition, the same `/seen` call) on one that is unread.
+ */
+enum class ReadStateAction { MarkUnread, MarkRead }
+
 // Rounded to match the app's other surfaces (dialogs/sheets) rather than the menu default's
 // near-square corners.
-private val MenuShape = RoundedCornerShape(16.dp)
 
 /**
  * Anchored dropdown variant of [ConversationActions]. Same action set, but presented as a
- * [DropdownMenu] (web-style) instead of a bottom sheet — used by the navigation drawer's
+ * [AdaptiveDropdownMenu] (web-style) instead of a bottom sheet — used by the navigation drawer's
  * long-press menu. Must be placed inside the anchor's layout (e.g. the conversation row's Box)
- * so the menu positions itself at the row. Tags/Export are delegated to the caller (which hosts
+ * so the menu positions itself at the row. Bookmarks/Export are delegated to the caller (which hosts
  * the pickers), mirroring [ConversationActions].
  *
  * Rename/Delete only *request* their confirmation dialogs via [onRenameRequest]/[onDeleteRequest];
@@ -53,35 +62,42 @@ fun ConversationActionsMenu(
     onRenameRequest: () -> Unit,
     onArchive: () -> Unit,
     onDeleteRequest: () -> Unit,
+    // Required: a call site that leaves it out would offer Favorite and Bookmarks… to a gated user.
+    bookmarksEnabled: Boolean,
     modifier: Modifier = Modifier,
-    onTags: () -> Unit = {},
+    /** Opens the chat's bookmark checklist; null leaves "Bookmarks…" out. */
+    onBookmarks: (() -> Unit)? = null,
     onShare: () -> Unit = {},
     onDuplicate: (String) -> Unit = {},
     onExport: () -> Unit = {},
-    onBookmarkToggle: () -> Unit = {},
-    isBookmarked: Boolean = false,
+    onFavoriteToggle: () -> Unit = {},
+    isFavorite: Boolean = false,
     onPinToggle: () -> Unit = {},
     isPinned: Boolean = false,
     showPinAction: Boolean = false,
     onMoveToProject: () -> Unit = {},
     showMoveToProject: Boolean = false,
     showShareAction: Boolean = false,
-    bookmarksEnabled: Boolean = true,
+    /** The read-state item under Rename (v0.8.9-rc1); null leaves it out. */
+    readStateAction: ReadStateAction? = null,
+    onReadStateAction: (ReadStateAction) -> Unit = {},
     // Position offset relative to the anchor; callers feed the long-press point so the menu
     // opens with its left edge under the finger.
     offset: DpOffset = DpOffset.Zero,
+    dragSelection: MenuDragSelection? = null,
 ) {
-    DropdownMenu(
+    AdaptiveDropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
         offset = offset,
-        shape = MenuShape,
         // A step above the drawer's surfaceContainerLow so the menu reads as a distinct surface
         // floating over it instead of blending into the panel.
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        containerColor = chromeColors().popover,
         modifier = modifier,
+        dragSelection = dragSelection,
     ) {
         MenuActionItem(
+            dragSelection = dragSelection,
             icon = Icons.Default.Edit,
             label = stringResource(Res.string.rename),
             onClick = {
@@ -90,8 +106,27 @@ fun ConversationActionsMenu(
             },
         )
 
+        if (readStateAction != null) {
+            MenuActionItem(
+                dragSelection = dragSelection,
+                icon = when (readStateAction) {
+                    ReadStateAction.MarkUnread -> Icons.Default.MarkChatUnread
+                    ReadStateAction.MarkRead -> Icons.Default.MarkChatRead
+                },
+                label = when (readStateAction) {
+                    ReadStateAction.MarkUnread -> stringResource(Res.string.mark_as_unread)
+                    ReadStateAction.MarkRead -> stringResource(Res.string.mark_as_read)
+                },
+                onClick = {
+                    onDismiss()
+                    onReadStateAction(readStateAction)
+                },
+            )
+        }
+
         if (showPinAction) {
             MenuActionItem(
+                dragSelection = dragSelection,
                 icon = if (isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
                 label = if (isPinned) stringResource(Res.string.unpin) else stringResource(Res.string.pin),
                 iconTint = if (isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
@@ -102,30 +137,35 @@ fun ConversationActionsMenu(
             )
         }
 
+        // The favorite star is the reserved Saved tag, so it is gated with bookmarks.
         if (bookmarksEnabled) {
             MenuActionItem(
-                icon = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                label = if (isBookmarked) stringResource(Res.string.remove_bookmark) else stringResource(Res.string.bookmark),
-                iconTint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                dragSelection = dragSelection,
+                icon = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                label = if (isFavorite) stringResource(Res.string.remove_favorite) else stringResource(Res.string.favorite),
+                iconTint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 onClick = {
                     onDismiss()
-                    onBookmarkToggle()
+                    onFavoriteToggle()
                 },
             )
+            if (onBookmarks != null) {
+                MenuActionItem(
+                    dragSelection = dragSelection,
+                    icon = Icons.Default.Bookmark,
+                    label = stringResource(Res.string.bookmarks_ellipsis),
+                    onClick = {
+                        onDismiss()
+                        onBookmarks()
+                    },
+                )
+            }
         }
-
-        MenuActionItem(
-            icon = Icons.AutoMirrored.Filled.Label,
-            label = stringResource(Res.string.tags),
-            onClick = {
-                onDismiss()
-                onTags()
-            },
-        )
 
         if (showMoveToProject) {
             MenuActionItem(
-                icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                dragSelection = dragSelection,
+                icon = Icons.Default.DriveFileMove,
                 label = stringResource(Res.string.move_to_project),
                 onClick = {
                     onDismiss()
@@ -136,6 +176,7 @@ fun ConversationActionsMenu(
 
         if (showShareAction) {
             MenuActionItem(
+                dragSelection = dragSelection,
                 icon = Icons.Default.Share,
                 label = stringResource(Res.string.share),
                 onClick = {
@@ -147,6 +188,7 @@ fun ConversationActionsMenu(
 
         val duplicateTitle = stringResource(Res.string.copy_of).replace("%1\$s", title)
         MenuActionItem(
+            dragSelection = dragSelection,
             icon = Icons.Default.ContentCopy,
             label = stringResource(Res.string.duplicate),
             onClick = {
@@ -156,6 +198,7 @@ fun ConversationActionsMenu(
         )
 
         MenuActionItem(
+            dragSelection = dragSelection,
             icon = Icons.Default.FileDownload,
             label = stringResource(Res.string.export),
             onClick = {
@@ -165,6 +208,7 @@ fun ConversationActionsMenu(
         )
 
         MenuActionItem(
+            dragSelection = dragSelection,
             icon = Icons.Default.Archive,
             label = stringResource(Res.string.archive),
             onClick = {
@@ -174,6 +218,7 @@ fun ConversationActionsMenu(
         )
 
         MenuActionItem(
+            dragSelection = dragSelection,
             icon = Icons.Default.Delete,
             label = stringResource(Res.string.delete),
             tint = MaterialTheme.colorScheme.error,
@@ -222,17 +267,20 @@ private fun MenuActionItem(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
+    dragSelection: MenuDragSelection?,
     tint: Color = MaterialTheme.colorScheme.onSurface,
     iconTint: Color = tint,
 ) {
     DropdownMenuItem(
         text = { Text(label) },
         onClick = onClick,
+        modifier = Modifier.menuDragTarget(dragSelection, onClick),
         leadingIcon = {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
                 tint = iconTint,
+                modifier = Modifier.dragSelectRowIcon(),
             )
         },
         colors = MenuDefaults.itemColors(

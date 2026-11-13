@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 8,
-    "identityHash": "bb6df01921e67318308bcfe0a6ed2a19",
+    "identityHash": "859cd7f7464c4e6f0278c1f9050fd1f2",
     "entities": [
       {
         "tableName": "conversations",
@@ -130,7 +130,7 @@
       },
       {
         "tableName": "messages",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `parentMessageId` TEXT, `sender` TEXT, `text` TEXT, `content` TEXT, `isCreatedByUser` INTEGER NOT NULL, `model` TEXT, `endpoint` TEXT, `iconURL` TEXT, `unfinished` INTEGER NOT NULL, `error` INTEGER NOT NULL, `finishReason` TEXT, `tokenCount` INTEGER, `feedback` TEXT, `files` TEXT, `attachments` TEXT, `metadata` TEXT, `cacheTTL` TEXT, `quotes` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `accountId` TEXT, PRIMARY KEY(`messageId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `parentMessageId` TEXT, `sender` TEXT, `text` TEXT, `content` TEXT, `isCreatedByUser` INTEGER NOT NULL, `model` TEXT, `endpoint` TEXT, `iconURL` TEXT, `unfinished` INTEGER NOT NULL, `error` INTEGER NOT NULL, `finishReason` TEXT, `tokenCount` INTEGER, `feedback` TEXT, `files` TEXT, `attachments` TEXT, `metadata` TEXT, `quotes` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `accountId` TEXT, PRIMARY KEY(`messageId`))",
         "fields": [
           {
             "fieldPath": "messageId",
@@ -225,11 +225,6 @@
           {
             "fieldPath": "metadata",
             "columnName": "metadata",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "cacheTTL",
-            "columnName": "cacheTTL",
             "affinity": "TEXT"
           },
           {
@@ -611,11 +606,35 @@
             "id"
           ]
         }
+      },
+      {
+        "tableName": "servers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_id` TEXT NOT NULL, `custom_headers` TEXT NOT NULL, PRIMARY KEY(`server_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverId",
+            "columnName": "server_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "customHeaders",
+            "columnName": "custom_headers",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_id"
+          ]
+        }
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'bb6df01921e67318308bcfe0a6ed2a19')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '859cd7f7464c4e6f0278c1f9050fd1f2')"
     ]
   }
 }

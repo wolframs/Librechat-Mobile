@@ -6,7 +6,6 @@ import com.garfiec.librechat.core.model.Message
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
-import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.emptyFlow
@@ -101,8 +100,7 @@ class ChatViewModelContextProjectionInitTest {
         // message tail (both required for the projection to reach the agents-branch map lookup).
         selectionHandoff.put(
             conversationId = conversationId,
-            endpoint = EndpointConstants.AGENTS,
-            model = agentId,
+            choice = ModelChoice.Raw(EndpointConstants.AGENTS, agentId),
             optimisticUserMessage = Message(
                 messageId = "user-msg-1",
                 conversationId = conversationId,

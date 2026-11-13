@@ -1,13 +1,22 @@
 package com.garfiec.librechat
 
+import android.text.InputType
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextReplacement
 import com.garfiec.librechat.core.ui.theme.LibreChatTheme
 import com.garfiec.librechat.feature.auth.screen.ServerUrlScreen
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -16,8 +25,17 @@ class AuthFlowTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
+    private lateinit var view: View
+
+    /**
+     * These tests run inside the app's own package against its real Koin graph, so
+     * [ServerUrlScreen]'s ViewModel pre-fills the field with whatever server URL the installed app
+     * last saved on this device. Each test therefore sets the field's contents itself. Editing the
+     * field also stops a prefill that has not landed yet from overwriting it later.
+     */
     private fun setUpServerUrlScreen() {
         composeTestRule.setContent {
+            view = LocalView.current
             LibreChatTheme {
                 ServerUrlScreen(
                     onServerValidate = {},
@@ -37,13 +55,36 @@ class AuthFlowTest {
     @Test
     fun serverUrlScreen_connectButtonDisabledWhenEmpty() {
         setUpServerUrlScreen()
+        composeTestRule.onNodeWithText("Server URL").performTextClearance()
         composeTestRule.onNodeWithText("Connect").assertIsNotEnabled()
     }
 
     @Test
     fun serverUrlScreen_enablesConnectOnInput() {
         setUpServerUrlScreen()
-        composeTestRule.onNodeWithText("Server URL").performTextInput("https://example.com")
+        composeTestRule.onNodeWithText("Server URL").performTextReplacement("https://example.com")
         composeTestRule.onNodeWithText("Connect").assertIsEnabled()
+    }
+
+    @Test
+    fun serverUrlScreen_fieldAsksForUrlKeyboardWithoutAutocorrect() {
+        setUpServerUrlScreen()
+        composeTestRule.onNodeWithTag("server_url_field").performClick()
+        composeTestRule.waitForIdle()
+        val info = EditorInfo()
+        composeTestRule.runOnUiThread { view.onCreateInputConnection(info) }
+
+        assertEquals(0, info.inputType and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+        assertEquals(InputType.TYPE_TEXT_VARIATION_URI, info.inputType and InputType.TYPE_MASK_VARIATION)
+        assertEquals(EditorInfo.IME_ACTION_GO, info.imeOptions and EditorInfo.IME_MASK_ACTION)
+    }
+
+    @Test
+    fun serverUrlScreen_keyboardGoConnects() {
+        setUpServerUrlScreen()
+        // A cleartext IP answers with the insecure-connection prompt before any network call.
+        composeTestRule.onNodeWithText("Server URL").performTextReplacement("http://192.168.1.1")
+        composeTestRule.onNodeWithTag("server_url_field").performImeAction()
+        composeTestRule.onNodeWithText("Insecure connection").assertIsDisplayed()
     }
 }

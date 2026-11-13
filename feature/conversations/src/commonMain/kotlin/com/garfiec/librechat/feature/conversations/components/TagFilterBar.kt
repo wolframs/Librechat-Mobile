@@ -14,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -28,8 +27,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.model.ConversationTag
+import com.garfiec.librechat.core.ui.components.AdaptiveFilterChip
 import com.garfiec.librechat.feature.conversations.resources.*
 import com.garfiec.librechat.feature.conversations.resources.Res
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,7 +65,7 @@ fun TagFilterBar(
 
             if (selectedTags.isNotEmpty() && !expanded) {
                 Text(
-                    text = stringResource(Res.string.tags_active_count, selectedTags.size, if (selectedTags.size > 1) "s" else ""),
+                    text = pluralStringResource(Res.plurals.tags_active_count, selectedTags.size, selectedTags.size),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -84,7 +85,7 @@ fun TagFilterBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (selectedTags.isNotEmpty()) {
-                    FilterChip(
+                    AdaptiveFilterChip(
                         selected = false,
                         onClick = onClearFilter,
                         label = { Text(stringResource(Res.string.clear)) },
@@ -100,7 +101,7 @@ fun TagFilterBar(
 
                 tags.forEach { tag ->
                     val tagName = tag.tag ?: return@forEach
-                    FilterChip(
+                    AdaptiveFilterChip(
                         selected = tagName in selectedTags,
                         onClick = { onTagToggle(tagName) },
                         label = {

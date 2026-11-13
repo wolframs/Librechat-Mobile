@@ -1,16 +1,21 @@
 package com.garfiec.librechat.core.data.di
 
-import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import com.garfiec.librechat.core.common.ChannelPolicy
 import com.garfiec.librechat.core.common.di.KoinQualifiers
 import com.garfiec.librechat.core.data.datastore.CommonTokenDataStore
+import com.garfiec.librechat.core.data.datastore.PreferenceMigrationRunner
 import com.garfiec.librechat.core.data.datastore.TokenDataStore
 import com.garfiec.librechat.core.data.db.LibreChatDatabase
 import com.garfiec.librechat.core.data.db.migration.MIGRATION_3_4
 import com.garfiec.librechat.core.data.db.migration.MIGRATION_4_5
+import com.garfiec.librechat.core.data.pdf.AndroidPdfNormalizer
+import com.garfiec.librechat.core.data.pdf.PdfNormalizer
 import com.garfiec.librechat.core.data.prefetch.AttachmentWarmer
 import com.garfiec.librechat.core.data.prefetch.CoilAttachmentWarmer
 import com.garfiec.librechat.core.data.prefetch.PrefetchScheduler
@@ -19,18 +24,19 @@ import com.garfiec.librechat.core.data.repository.AndroidSwitchCacheCleaner
 import com.garfiec.librechat.core.data.repository.CommonSessionCacheCleaner
 import com.garfiec.librechat.core.data.repository.SessionCacheCleaner
 import com.garfiec.librechat.core.data.repository.SwitchCacheCleaner
-import com.garfiec.librechat.core.network.client.SecureTokenStorage
+import com.garfiec.librechat.core.data.update.AndroidAppInstallSource
+import com.garfiec.librechat.core.data.update.AppInstallSource
+import com.garfiec.librechat.core.data.update.AppUpdateRepository
+import com.garfiec.librechat.core.data.update.AppUpdateRepositoryImpl
+import com.garfiec.librechat.core.data.update.NoopAppInstallSource
+import com.garfiec.librechat.core.network.client.RefreshCookieCredentials
 import com.garfiec.librechat.core.network.client.TokenManager
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.CoroutineDispatcher
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.Module
 import org.koin.dsl.binds
 import org.koin.dsl.module
-
-private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(
-    name = DATASTORE_FILE_NAME,
-    corruptionHandler = settingsCorruptionHandler(),
-)
 
 actual val dataPlatformModule: Module = module {
 
@@ -38,16 +44,43 @@ actual val dataPlatformModule: Module = module {
     // so a common default plus a platform override would throw at launch.
     single<AttachmentWarmer> { CoilAttachmentWarmer(androidContext()) }
     single<PrefetchScheduler> { WorkManagerPrefetchScheduler(androidContext()) }
+    single<PdfNormalizer> { AndroidPdfNormalizer(androidContext()) }
+    single<AppInstallSource> {
+        if (get<ChannelPolicy>().selfUpdateCheck) AndroidAppInstallSource(androidContext()) else NoopAppInstallSource()
+    }
+    single<AppUpdateRepository> {
+        val policy = get<ChannelPolicy>()
+        AppUpdateRepositoryImpl(
+            isSupported = policy.selfUpdateCheck,
+            releaseNotesSupported = policy.releaseNotes,
+            api = get(),
+            store = get(),
+            appInfo = get(),
+        )
+    }
 
     // --- Database ---
     single {
+        // The bundled driver, not the framework's: a framework cursor can't read back a row over 2 MB,
+        // and a reply with large tool outputs is one.
         Room.databaseBuilder(androidContext(), LibreChatDatabase::class.java, "librechat.db")
+            .setDriver(BundledSQLiteDriver())
+            .setQueryCoroutineContext(get<CoroutineDispatcher>(KoinQualifiers.IO))
             .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
             .build()
     }
 
     // --- DataStore ---
-    single<DataStore<Preferences>> { androidContext().settingsDataStore }
+    // Built here rather than by the preferencesDataStore delegate, which cannot reach the Koin graph
+    // the migration runner needs. Same file: the delegate resolves to preferencesDataStoreFile(name).
+    single<DataStore<Preferences>> {
+        val context = androidContext()
+        PreferenceDataStoreFactory.create(
+            corruptionHandler = settingsCorruptionHandler(),
+            migrations = listOf(PreferenceMigrationRunner(get())),
+            produceFile = { context.preferencesDataStoreFile(DATASTORE_FILE_NAME) },
+        )
+    }
 
     // --- Token Storage ---
     single {
@@ -58,7 +91,13 @@ actual val dataPlatformModule: Module = module {
         )
         // Bound as CommonTokenDataStore too: TokenCacheWarmer needs warmTokenCache(), which is
         // deliberately not part of the TokenManager contract.
-    } binds arrayOf(TokenManager::class, SecureTokenStorage::class, CommonTokenDataStore::class)
+    } binds arrayOf(
+        TokenManager::class,
+        // The refresh-cookie seam (ImageCookiePlugin, logout): per-account refresh-token reads, kept off
+        // TokenManager so the six fakes that implement it don't gain a second credential.
+        RefreshCookieCredentials::class,
+        CommonTokenDataStore::class,
+    )
 
     // --- Session Cache Cleaner ---
     single<SessionCacheCleaner> {

@@ -1,12 +1,8 @@
 package com.garfiec.librechat.feature.auth.viewmodel
 
-import com.garfiec.librechat.core.data.datastore.SavedLoginCredentialRef
-import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AuthRepository
 import com.garfiec.librechat.core.model.User
 import com.garfiec.librechat.core.model.VerifyTwoFactorOutcome
-import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSave
-import com.garfiec.librechat.feature.auth.credentials.PendingCredentialSaveHandoff
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -29,27 +25,18 @@ class TwoFactorViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val authRepository = mockk<AuthRepository>(relaxed = true)
-    private val serverDataStore = mockk<ServerDataStore>(relaxed = true)
-    private lateinit var credentialSaveHandoff: PendingCredentialSaveHandoff
 
     @Before
-    fun setup() {
-        Dispatchers.setMain(testDispatcher)
-        credentialSaveHandoff = PendingCredentialSaveHandoff()
-    }
+    fun setup() = Dispatchers.setMain(testDispatcher)
 
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun createViewModel() = TwoFactorViewModel(
-        authRepository = authRepository,
-        serverDataStore = serverDataStore,
-        credentialSaveHandoff = credentialSaveHandoff,
-        initialTempToken = TEMP_TOKEN,
-    )
+    private fun createViewModel() = TwoFactorViewModel(authRepository, initialTempToken = TEMP_TOKEN)
 
+    /** Types [code] one digit at a time, as the IME delivers it. */
     private fun TwoFactorViewModel.enterDigits(code: String) =
-        code.forEachIndexed { index, digit -> onDigitChanged(index, digit.toString()) }
+        code.indices.forEach { onCodeChanged(code.take(it + 1)) }
 
     @Test
     fun `entering six digits verifies the code as TOTP`() = runTest {
@@ -63,6 +50,101 @@ class TwoFactorViewModelTest {
         coVerify { authRepository.verifyTwoFactor(TEMP_TOKEN, "123456", false) }
         assertThat(viewModel.uiState.value.isVerified).isTrue()
         assertThat(viewModel.uiState.value.isLoading).isFalse()
+    }
+
+    @Test
+    fun `pasting the whole code at once verifies it`() = runTest {
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.Success(USER)
+
+        val viewModel = createViewModel()
+        viewModel.onCodeChanged("123456")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { authRepository.verifyTwoFactor(TEMP_TOKEN, "123456", false) }
+        assertThat(viewModel.uiState.value.isVerified).isTrue()
+    }
+
+    @Test
+    fun `a full code delivered twice submits once`() = runTest {
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } coAnswers {
+            delay(1_000)
+            VerifyTwoFactorOutcome.Success(USER)
+        }
+
+        val viewModel = createViewModel()
+        viewModel.onCodeChanged("123456")
+        viewModel.onCodeChanged("123456")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { authRepository.verifyTwoFactor(any(), any(), any()) }
+    }
+
+    @Test
+    fun `submit while a verify is in flight does not send a second request`() = runTest {
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } coAnswers {
+            delay(1_000)
+            VerifyTwoFactorOutcome.Success(USER)
+        }
+
+        val viewModel = createViewModel()
+        viewModel.onCodeChanged("123456")
+        viewModel.submit()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { authRepository.verifyTwoFactor(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a kept entry edited below six and back re-submits`() = runTest {
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.ConnectionFailure
+
+        val viewModel = createViewModel()
+        viewModel.enterDigits("123456")
+        advanceUntilIdle()
+
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.Success(USER)
+        viewModel.onCodeChanged("12345")
+        viewModel.onCodeChanged("123457")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { authRepository.verifyTwoFactor(TEMP_TOKEN, "123457", false) }
+        assertThat(viewModel.uiState.value.isVerified).isTrue()
+    }
+
+    @Test
+    fun `a fresh code pasted over a kept entry submits it`() = runTest {
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.ConnectionFailure
+
+        val viewModel = createViewModel()
+        viewModel.onCodeChanged("123456")
+        advanceUntilIdle()
+
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.Success(USER)
+        viewModel.onCodeChanged("654321")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { authRepository.verifyTwoFactor(TEMP_TOKEN, "654321", false) }
+        assertThat(viewModel.uiState.value.isVerified).isTrue()
+    }
+
+    @Test
+    fun `the kept code delivered again does not re-submit`() = runTest {
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.ConnectionFailure
+
+        val viewModel = createViewModel()
+        viewModel.onCodeChanged("123456")
+        advanceUntilIdle()
+
+        viewModel.onCodeChanged("123456")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { authRepository.verifyTwoFactor(any(), any(), any()) }
     }
 
     @Test
@@ -81,53 +163,6 @@ class TwoFactorViewModelTest {
     }
 
     @Test
-    fun `successful verification offers staged password save before navigation`() = runTest {
-        val pending = PendingCredentialSave(
-            ref = SavedLoginCredentialRef(
-                serverUrl = "https://chat.example.com",
-                credentialId = "user · server-id",
-                username = "user@example.com",
-            ),
-            password = "password123",
-        )
-        credentialSaveHandoff.stage(pending)
-        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
-            VerifyTwoFactorOutcome.Success(USER)
-
-        val viewModel = createViewModel()
-        viewModel.enterDigits("123456")
-        advanceUntilIdle()
-
-        assertThat(viewModel.uiState.value.pendingCredentialSave).isEqualTo(pending)
-        assertThat(viewModel.uiState.value.isVerified).isFalse()
-
-        viewModel.onCredentialSaveHandled(saved = true)
-        advanceUntilIdle()
-
-        coVerify { serverDataStore.rememberLoginCredential(pending.ref) }
-        assertThat(viewModel.uiState.value.pendingCredentialSave).isNull()
-        assertThat(viewModel.uiState.value.isVerified).isTrue()
-    }
-
-    @Test
-    fun `abandoning verification clears staged password`() = runTest {
-        credentialSaveHandoff.stage(
-            PendingCredentialSave(
-                ref = SavedLoginCredentialRef(
-                    serverUrl = "https://chat.example.com",
-                    credentialId = "user · server-id",
-                    username = "user@example.com",
-                ),
-                password = "password123",
-            ),
-        )
-
-        createViewModel().abandon()
-
-        assertThat(credentialSaveHandoff.consume()).isNull()
-    }
-
-    @Test
     fun `a rejected code surfaces the server's message and clears the spent entry`() = runTest {
         coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
             VerifyTwoFactorOutcome.CodeRejected("Invalid 2FA code or backup code")
@@ -139,7 +174,7 @@ class TwoFactorViewModelTest {
         val state = viewModel.uiState.value
         assertThat(state.error).isEqualTo("Invalid 2FA code or backup code")
         assertThat(state.isVerified).isFalse()
-        assertThat(state.digits).containsExactlyElementsIn(List(6) { "" })
+        assertThat(state.code).isEmpty()
         assertThat(state.codeAttempt).isEqualTo(1)
     }
 
@@ -154,7 +189,7 @@ class TwoFactorViewModelTest {
 
         val state = viewModel.uiState.value
         assertThat(state.error).isEqualTo("Couldn't reach the server. Check your connection and try again.")
-        assertThat(state.digits.joinToString("")).isEqualTo("123456")
+        assertThat(state.code).isEqualTo("123456")
         assertThat(state.codeAttempt).isEqualTo(0)
     }
 
@@ -190,7 +225,7 @@ class TwoFactorViewModelTest {
 
         val state = viewModel.uiState.value
         assertThat(state.error).isEqualTo(message)
-        assertThat(state.digits).containsExactlyElementsIn(List(6) { "" })
+        assertThat(state.code).isEmpty()
         assertThat(state.codeAttempt).isEqualTo(1)
         assertThat(state.isVerified).isFalse()
     }
@@ -207,9 +242,30 @@ class TwoFactorViewModelTest {
 
         val state = viewModel.uiState.value
         assertThat(state.error).isEqualTo("Server error. Please try again.")
-        assertThat(state.digits.joinToString("")).isEqualTo("123456")
+        assertThat(state.code).isEqualTo("123456")
         assertThat(state.codeAttempt).isEqualTo(0)
         assertThat(state.isVerified).isFalse()
+    }
+
+    @Test
+    fun `a tenant-required 403 is worded as a refusal and keeps the entry`() = runTest {
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.NotEvaluated("Tenant context required", code = "TENANT_CONTEXT_REQUIRED")
+
+        val viewModel = createViewModel()
+        viewModel.enterDigits("123456")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertThat(state.refusal).isEqualTo(AuthRefusal.TenantRequired)
+        assertThat(state.code).isEqualTo("123456")
+
+        // The next attempt starts clean.
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.NotEvaluated("Server error. Please try again.")
+        viewModel.submit()
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.refusal).isNull()
     }
 
     @Test
@@ -225,7 +281,7 @@ class TwoFactorViewModelTest {
 
         val state = viewModel.uiState.value
         assertThat(state.error).isEqualTo("Too many verification attempts, please try again after 5 minutes.")
-        assertThat(state.digits.joinToString("")).isEqualTo("123456")
+        assertThat(state.code).isEqualTo("123456")
         assertThat(state.codeAttempt).isEqualTo(0)
     }
 
@@ -240,14 +296,14 @@ class TwoFactorViewModelTest {
 
         val viewModel = createViewModel()
         viewModel.enterDigits("123456")
-        runCurrent() // let submit() set isLoading before the repo call suspends
+        runCurrent() // start the verify so it is in flight when the mode switches
 
         viewModel.toggleBackupMode()
 
         val switched = viewModel.uiState.value
         assertThat(switched.isBackupMode).isTrue()
         assertThat(switched.isLoading).isFalse()
-        assertThat(switched.digits).containsExactlyElementsIn(List(6) { "" })
+        assertThat(switched.code).isEmpty()
 
         advanceUntilIdle()
         assertThat(viewModel.uiState.value.isVerified).isTrue()
@@ -273,12 +329,30 @@ class TwoFactorViewModelTest {
         assertThat(settled.isVerified).isFalse()
         assertThat(settled.isBackupMode).isTrue()
         assertThat(settled.error).isNull()
-        assertThat(settled.digits).containsExactlyElementsIn(List(6) { "" })
+        assertThat(settled.code).isEmpty()
         assertThat(settled.isLoading).isFalse()
     }
 
     private companion object {
         const val TEMP_TOKEN = "temp-abc"
         val USER = User(mongoId = "u1", email = "a@b.com")
+    }
+
+    @Test
+    fun `only a connection failure offers the diagnostic log`() = runTest {
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.ConnectionFailure
+        val viewModel = createViewModel()
+        viewModel.onCodeChanged("123456")
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.offerDiagnosticLog).isTrue()
+
+        coEvery { authRepository.verifyTwoFactor(any(), any(), any()) } returns
+            VerifyTwoFactorOutcome.CodeRejected("Invalid code")
+        viewModel.onCodeChanged("654321")
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.error).isEqualTo("Invalid code")
+        assertThat(viewModel.uiState.value.offerDiagnosticLog).isFalse()
     }
 }

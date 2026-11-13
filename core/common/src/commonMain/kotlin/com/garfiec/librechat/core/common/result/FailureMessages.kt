@@ -11,6 +11,14 @@ class AccessGatewayException(
 ) : Exception("Access gateway rejected the request", cause)
 
 /**
+ * The platform refused to send a request over plain HTTP to this host: iOS App Transport Security
+ * allows cleartext only to local-network names and addresses. Retrying won't help; https will.
+ */
+class CleartextBlockedException(
+    cause: Throwable? = null,
+) : Exception("Cleartext HTTP is not permitted for this host", cause)
+
+/**
  * What went wrong, coarsely. Deliberately broad: it exists so the UI can decide whether to offer a
  * retry (and, later, localize) without ever reading an exception message.
  */
@@ -24,8 +32,19 @@ enum class FailureKind {
     /** A response arrived but wasn't what the API promised: HTML, truncated JSON, wrong shape. */
     MalformedResponse,
 
+    /**
+     * The TLS handshake failed: the server's certificate is self-signed, from a private CA, expired,
+     * or issued for another name. Retrying won't help. Recognised from the certificate exception
+     * beneath the TLS failure: Android's own, or on iOS the one `:core:network` maps the Darwin
+     * engine's certificate errors to. The iOS SSE transport reports these as a plain `Exception`.
+     */
+    Tls,
+
     /** An access gateway intercepted the request. See [AccessGatewayException]. */
     AccessGateway,
+
+    /** Plain HTTP to a host the platform won't send cleartext to. See [CleartextBlockedException]. */
+    CleartextBlocked,
 
     /** The server answered with an error status and (usually) an explanation of its own. */
     Server,
@@ -45,8 +64,12 @@ internal object FailureMessages {
     const val NETWORK = "Network unavailable. Check your connection."
     const val TIMEOUT = "The server took too long to respond."
     const val MALFORMED = "Unexpected response from the server."
+    const val TLS = "A secure connection couldn't be made: the server's certificate is invalid " +
+        "or isn't trusted by this device."
     const val GATEWAY = "Your server's access gateway rejected this request. " +
         "Check Server connection in Settings."
+    const val CLEARTEXT_BLOCKED = "iOS requires https:// for this address. " +
+        "Use https, or the server's local IP or .local name."
     const val UNKNOWN = "Something went wrong. Please try again."
 }
 
@@ -94,14 +117,23 @@ internal fun classifyFailure(throwable: Throwable): FailureKind {
     // Bounded: a malformed cause chain must not spin forever.
     repeat(TRAVERSAL_LIMIT) {
         val error = current ?: return FailureKind.Unknown
-        when (error) {
-            is AccessGatewayException -> return FailureKind.AccessGateway
-            is ApiException -> return FailureKind.Server
-            else -> Unit
+        val byType = when (error) {
+            is AccessGatewayException -> FailureKind.AccessGateway
+            is CleartextBlockedException -> FailureKind.CleartextBlocked
+            is ApiException -> FailureKind.Server
+            else -> null
         }
+        if (byType != null) return byType
         val name = error::class.simpleName.orEmpty()
         when {
             name.contains("Timeout") -> return FailureKind.Timeout
+            // A certificate problem fails the same way on every retry, so it isn't "the network".
+            // Not SSLHandshakeException by name: Android also throws it for a reset mid-handshake
+            // and for https:// against a plain-HTTP port. A rejected certificate is the
+            // CertificateException beneath it, which this walk reaches next.
+            name.contains("SSLPeerUnverified") ||
+                name.contains("CertPath") ||
+                name.contains("Certificate") -> return FailureKind.Tls
             name.contains("UnresolvedAddress") ||
                 name.contains("UnknownHost") ||
                 name.contains("ConnectException") ||
@@ -126,11 +158,19 @@ private const val TRAVERSAL_LIMIT = 8
  */
 fun FailureKind.message(): String = defaultMessage()
 
+/**
+ * The [FailureKind] of this failure, for callers that branch on it themselves. Unlike [toSafeError]
+ * it doesn't log.
+ */
+fun Throwable.failureKind(): FailureKind = classifyFailure(this)
+
 /** The safe, user-facing text for a [FailureKind]. */
 internal fun FailureKind.defaultMessage(): String = when (this) {
     FailureKind.Network -> FailureMessages.NETWORK
     FailureKind.Timeout -> FailureMessages.TIMEOUT
     FailureKind.MalformedResponse -> FailureMessages.MALFORMED
+    FailureKind.Tls -> FailureMessages.TLS
     FailureKind.AccessGateway -> FailureMessages.GATEWAY
+    FailureKind.CleartextBlocked -> FailureMessages.CLEARTEXT_BLOCKED
     FailureKind.Server, FailureKind.Unknown -> FailureMessages.UNKNOWN
 }

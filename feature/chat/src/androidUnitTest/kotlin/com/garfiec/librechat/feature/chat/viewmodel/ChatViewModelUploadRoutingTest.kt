@@ -2,6 +2,7 @@ package com.garfiec.librechat.feature.chat.viewmodel
 
 import androidx.lifecycle.viewModelScope
 import com.garfiec.librechat.core.common.EndpointConstants
+import com.garfiec.librechat.core.common.ToolConstants
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
 import com.garfiec.librechat.core.data.datastore.ChatHeaderAlignment
@@ -10,8 +11,12 @@ import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.DuringRunAction
 import com.garfiec.librechat.core.data.datastore.StarredModelsDisplay
 import com.garfiec.librechat.core.data.datastore.UploadRoutingMode
+import com.garfiec.librechat.core.model.Agent
 import com.garfiec.librechat.core.model.EndpointConfig
+import com.garfiec.librechat.core.model.response.FileUploadConfig
 import com.garfiec.librechat.core.model.response.UploadRoute
+import com.garfiec.librechat.feature.chat.components.AttachedFile
+import com.garfiec.librechat.feature.chat.viewmodel.delegate.PdfPasswordPrompt
 import com.garfiec.librechat.feature.chat.viewmodel.delegate.PickedFile
 import com.garfiec.librechat.feature.chat.viewmodel.delegate.PlatformFileHandler
 import com.garfiec.librechat.feature.chat.viewmodel.delegate.RoutedFile
@@ -21,6 +26,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -66,6 +72,7 @@ class ChatViewModelUploadRoutingTest {
     private val platformDelegateFactory get() = fixture.platformDelegateFactory
     private val serverFileSelectionHandoff get() = fixture.serverFileSelectionHandoff
     private val fileHandler = mockk<PlatformFileHandler>(relaxed = true)
+    private val tray = MutableStateFlow<List<AttachedFile>>(emptyList())
 
     private val endpointConfigs = MutableStateFlow<Map<String, EndpointConfig>>(emptyMap())
     private val availableModels = MutableStateFlow<Map<String, List<String>>>(emptyMap())
@@ -98,7 +105,7 @@ class ChatViewModelUploadRoutingTest {
         every { platformDelegateFactory.createShareConsumer().sharesFor(any()) } returns shares
 
         every { platformDelegateFactory.createFileHandler(any()) } returns fileHandler
-        every { fileHandler.attachedFiles } returns MutableStateFlow(emptyList())
+        every { fileHandler.attachedFiles } returns tray
 
         coEvery { conversationRepository.getConversation(any(), any()) } returns Result.Error(message = "test")
     }
@@ -132,6 +139,38 @@ class ChatViewModelUploadRoutingTest {
             // The whole point of the feature: today this PDF is silently dropped server-side.
             assertThat(routes).containsExactly(UploadRoute.TEXT)
         }
+
+    /** The PDF password retry is routed like any retry, so it must wait for the agent's provider too. */
+    @Test
+    fun `a PDF password retry waits for the agent provider, then reaches the handler`() {
+        val gate = CompletableDeferred<Result<String?>>()
+        routingTest(
+            endpoint = EndpointConstants.AGENTS,
+            model = AGENT_ID,
+            agentProvider = "anthropic",
+            providerAnswer = { gate.await() },
+        ) { vm ->
+            val prompt =
+                PdfPasswordPrompt(
+                    chipKey = "chip",
+                    file = PickedFile(ref = "ref", name = "a.pdf", mimeType = PDF),
+                    incorrectPassword = false,
+                )
+            every { fileHandler.pdfPasswordPrompts } returns MutableStateFlow(listOf(prompt))
+
+            vm.submitPdfPassword("hunter2")
+            runCurrent()
+            verify(exactly = 0) { fileHandler.submitPdfPassword(any(), any()) }
+
+            gate.complete(Result.Success("anthropic"))
+            runCurrent()
+            // Bound to the prompt that was on screen when the user answered, not whatever heads the queue later.
+            verify(exactly = 1) { fileHandler.submitPdfPassword(prompt, "hunter2") }
+
+            vm.dismissPdfPassword()
+            verify(exactly = 1) { fileHandler.dismissPdfPassword() }
+        }
+    }
 
     @Test
     fun `an agent whose provider is unresolved changes nothing from today`() =
@@ -189,20 +228,25 @@ class ChatViewModelUploadRoutingTest {
         }
 
     @Test
-    fun `an empty capability list is read as unstated, not as a denial`() =
+    fun `an empty agents capability list denies extraction`() =
         routingTest(
-            endpoint = "anthropic",
-            configs = mapOf(
-                "anthropic" to EndpointConfig(),
-                EndpointConstants.AGENTS to EndpointConfig(capabilities = emptyList()),
-            ),
+            endpoint = EndpointConstants.AGENTS,
+            model = AGENT_ID,
+            agentProvider = "ollama",
+            configs = mapOf(EndpointConstants.AGENTS to EndpointConfig(capabilities = emptyList())),
         ) { vm ->
-            // `EndpointConfig.capabilities` defaults to an empty list, so a server that omits the
-            // field is indistinguishable from one sending `[]`. Reading `[]` as "no context
-            // capability" would ship the feature dead against every such server.
-            val routes = routesFor(vm, "notes.docx" to DOCX)
+            assertThat(routesFor(vm, "notes.docx" to DOCX)).containsExactly(UploadRoute.PROVIDER)
+        }
 
-            assertThat(routes).containsExactly(UploadRoute.TEXT)
+    @Test
+    fun `a missing agents capability list allows extraction, as the server's defaults do`() =
+        routingTest(
+            endpoint = EndpointConstants.AGENTS,
+            model = AGENT_ID,
+            agentProvider = "ollama",
+            configs = mapOf(EndpointConstants.AGENTS to EndpointConfig(capabilities = null)),
+        ) { vm ->
+            assertThat(routesFor(vm, "notes.docx" to DOCX)).containsExactly(UploadRoute.TEXT)
         }
 
     // ── Manual mode ─────────────────────────────────────────────────────────
@@ -268,6 +312,38 @@ class ChatViewModelUploadRoutingTest {
 
             assertThat(vm.uiState.value.composer.pendingUploadRouting).isNull()
             io.mockk.verify(exactly = 0) { fileHandler.onFilesSelected(any()) }
+        }
+
+    // Not upload routing, but the same gated-send shape, and this harness drives a real send.
+    @Test
+    fun `a send during Compare setup waits, keeping the text, and goes out once it starts`() =
+        routingTest(endpoint = "anthropic") { vm ->
+            vm.beginComparisonSetup()
+            vm.onInputChanged("which is better")
+
+            vm.sendMessage()
+            runCurrent()
+
+            io.mockk.verify(exactly = 0) {
+                chatRepository.startChat(
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                    any(),
+                )
+            }
+            assertThat(vm.uiState.value.inputText).isEqualTo("which is better")
+
+            vm.startComparison("openAI", "gpt-5")
+            vm.sendMessage()
+            runCurrent()
+
+            io.mockk.verify(exactly = 1) {
+                chatRepository.startChat(
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                    any(),
+                )
+            }
         }
 
     @Test
@@ -416,7 +492,6 @@ class ChatViewModelUploadRoutingTest {
             // answer null and route immediately, as unknown.
             assertThat(captured.isCaptured).isFalse()
 
-            availableModels.value = mapOf(EndpointConstants.AGENTS to listOf(AGENT_ID))
             vm.onModelSelected(EndpointConstants.AGENTS, AGENT_ID)
             runCurrent()
 
@@ -501,13 +576,8 @@ class ChatViewModelUploadRoutingTest {
             model = AGENT_ID,
             providerAnswer = { provider.await() },
         ) { vm ->
-            vm.retryUpload(
-                com.garfiec.librechat.feature.chat.components.AttachedFile(
-                    uri = "notes.docx",
-                    name = "notes.docx",
-                    type = DOCX,
-                ),
-            )
+            tray.value = listOf(failedDocx)
+            vm.retryUpload(failedDocx)
             runCurrent()
 
             // The delegate re-derives the route from the live selection, and a retry is what the
@@ -520,6 +590,108 @@ class ChatViewModelUploadRoutingTest {
             io.mockk.verify(exactly = 1) { fileHandler.retryUpload(any()) }
         }
     }
+
+    @Test
+    fun `a file removed while its retry waits for the provider stays removed`() {
+        val provider = CompletableDeferred<Result<String?>>()
+        routingTest(
+            endpoint = EndpointConstants.AGENTS,
+            model = AGENT_ID,
+            providerAnswer = { provider.await() },
+        ) { vm ->
+            tray.value = listOf(failedDocx)
+            vm.retryUpload(failedDocx)
+            runCurrent()
+            // The row still reads failed, so its × is live: the user takes it off the message.
+            tray.value = emptyList()
+
+            provider.complete(Result.Success("ollama"))
+            runCurrent()
+            // A retry now would append the file again, and the × row's Undo would put back a second copy.
+            verify(exactly = 0) { fileHandler.retryUpload(any()) }
+        }
+    }
+
+    @Test
+    fun `a second tap on a failed row while its retry waits retries once`() {
+        val provider = CompletableDeferred<Result<String?>>()
+        routingTest(
+            endpoint = EndpointConstants.AGENTS,
+            model = AGENT_ID,
+            providerAnswer = { provider.await() },
+        ) { vm ->
+            tray.value = listOf(failedDocx)
+            vm.retryUpload(failedDocx)
+            vm.retryUpload(failedDocx)
+            runCurrent()
+
+            provider.complete(Result.Success("ollama"))
+            runCurrent()
+            verify(exactly = 1) { fileHandler.retryUpload(any()) }
+        }
+    }
+
+    @Test
+    fun `a retry for a file no longer in the tray does nothing`() =
+        routingTest(endpoint = "anthropic") { vm ->
+            // Taken off the message while its row was still on screen: a retry now would upload it again.
+            tray.value = emptyList()
+            vm.retryUpload(failedDocx)
+            runCurrent()
+            verify(exactly = 0) { fileHandler.retryUpload(any()) }
+        }
+
+    @Test
+    fun `a retry for a row that is not failed does nothing`() =
+        routingTest(endpoint = "anthropic") { vm ->
+            val uploaded = failedDocx.copy(uploadFailed = false, uploadProgress = 1f, fileId = "f1")
+            tray.value = listOf(uploaded)
+            vm.retryUpload(uploaded)
+            runCurrent()
+            verify(exactly = 0) { fileHandler.retryUpload(any()) }
+        }
+
+    private val failedDocx = AttachedFile(uri = "notes.docx", name = "notes.docx", type = DOCX, uploadFailed = true)
+
+    @Test
+    fun `a code-environment pick goes as picked and turns the code interpreter on`() {
+        coEvery { fixture.fileRepository.getFileConfig() } returns
+            Result.Success(FileUploadConfig(legacyFileUploadUX = true))
+        routingTest(
+            endpoint = "anthropic",
+            mode = UploadRoutingMode.MANUAL,
+            configs = mapOf(
+                "anthropic" to EndpointConfig(),
+                EndpointConstants.AGENTS to EndpointConfig(capabilities = listOf("execute_code")),
+            ),
+        ) { vm ->
+            assertThat(vm.uiState.value.codeUploadOffered).isTrue()
+            val picked = listOf(
+                PickedFile(ref = "photo.png", name = "photo.png", mimeType = "image/png"),
+                PickedFile(ref = "notes.docx", name = "notes.docx", mimeType = DOCX),
+            )
+            every { fileHandler.describe(any()) } returns picked
+            val captured = slot<List<RoutedFile>>()
+            every { fileHandler.onFilesSelected(capture(captured)) } returns Unit
+
+            vm.onCodeFilesSelected(picked.map { it.ref })
+            runCurrent()
+
+            // No routing sheet even in Manual mode: the destination was the pick.
+            assertThat(vm.uiState.value.composer.pendingUploadRouting).isNull()
+            assertThat(captured.captured.map { it.route }).containsExactly(UploadRoute.CODE, UploadRoute.CODE)
+            assertThat(vm.uiState.value.selection.effectiveTools).contains(ToolConstants.CODE_INTERPRETER)
+        }
+    }
+
+    @Test
+    fun `a code-environment pick is ignored where the option isn't offered`() =
+        routingTest(endpoint = "anthropic") { vm ->
+            vm.onCodeFilesSelected(listOf("a.py"))
+            runCurrent()
+
+            verify(exactly = 0) { fileHandler.onFilesSelected(any()) }
+        }
 
     /** Picks files in manual mode and leaves the batch staged. */
     private fun stage(vm: ChatViewModel, vararg files: Pair<String, String>) {
@@ -564,9 +736,9 @@ class ChatViewModelUploadRoutingTest {
             ?.let { Result.Success(it) }
             ?: Result.Error(message = "unresolved")
         if (providerAnswer != null) {
-            coEvery { agentRepository.getAgentProvider(any()) } coAnswers { providerAnswer() }
+            coEvery { agentRepository.getAgentForViewing(any()) } coAnswers { providerAnswer().asViewedAgent() }
         } else {
-            coEvery { agentRepository.getAgentProvider(any()) } returns providerResult
+            coEvery { agentRepository.getAgentForViewing(any()) } returns providerResult.asViewedAgent()
         }
         val vm = newViewModel()
         runCurrent()
@@ -596,4 +768,11 @@ class ChatViewModelUploadRoutingTest {
         const val PDF = "application/pdf"
         const val DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     }
+}
+
+/** The provider a test scripts, as the single-agent read the delegate makes returns it. */
+private fun Result<String?>.asViewedAgent(): Result<Agent> = when (this) {
+    is Result.Success -> Result.Success(Agent(id = "agent", provider = data))
+    is Result.Error -> this
+    Result.Loading -> Result.Loading
 }

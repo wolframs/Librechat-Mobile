@@ -10,8 +10,8 @@ import org.junit.Test
  * Tests for [AccountScopedDaoRule].
  *
  * Every snippet is run through detekt-test's [lint], which compiles to PSI WITHOUT a binding
- * context — the same "no type resolution" condition the rule faces on `detektMetadataCommonMain`,
- * where the commonMain DAOs live. A rule that fires here fires on the metadata variant.
+ * context — the same "no type resolution" condition the rule faces under the plain `detekt` gate,
+ * where the commonMain DAOs are analysed. A rule that fires here fires in the gate.
  *
  * The DAO corpus below mirrors the production tenant DAOs so the positive cases stay anchored to
  * real query shapes; keep it in sync when those DAOs change.
@@ -49,6 +49,35 @@ class AccountScopedDaoRuleTest {
             findings.flagged("upsertPreservingTags"),
             "@Transaction default-method body must be flagged (leak is in Kotlin, not a @Query)",
         )
+    }
+
+    @Test
+    fun searchTablesAreTenantTables() {
+        val findings = lint(
+            """
+            import androidx.room.Dao
+            import androidx.room.Query
+
+            @Dao
+            interface SearchDao {
+                @Query("SELECT COUNT(*) FROM message_search")
+                suspend fun unscopedSideRead(): Int
+
+                @Query("SELECT searchText FROM messages_fts WHERE messages_fts MATCH :m")
+                suspend fun directFtsRead(m: String): List<String>
+
+                @Query("SELECT messageId FROM message_search WHERE accountId = :a AND +rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH :m)")
+                suspend fun searchWithoutOptOut(a: String, m: String): List<String>
+
+                @Query("SELECT COUNT(*) FROM message_search WHERE accountId = :a")
+                suspend fun accountFilteredRead(a: String): Int
+            }
+            """.trimIndent(),
+        )
+        assertTrue(findings.flagged("unscopedSideRead"), "message_search must need an accountId predicate")
+        assertTrue(findings.flagged("directFtsRead"), "messages_fts spans every account and must be flagged")
+        assertTrue(findings.flagged("searchWithoutOptOut"), "a statement over both search tables is fail-closed")
+        assertTrue(!findings.flagged("accountFilteredRead"), "a scoped message_search read passes")
     }
 
     @Test

@@ -24,10 +24,16 @@ class AndroidFileHandler(
 
     override fun removeFile(file: AttachedFile) = delegate.removeFile(file)
     override fun retryUpload(file: AttachedFile) = delegate.retryUpload(file)
+    override fun insertAt(index: Int, file: AttachedFile) = delegate.insertAt(index, file)
     override suspend fun waitForUploadsAndSend(text: String, doSend: (String) -> Unit) =
         delegate.waitForUploadsAndSend(text, doSend)
     override fun hasPendingUploads(): Boolean = delegate.hasPendingUploads()
     override fun clearAttachedFiles() = delegate.clearAttachedFiles()
     override fun restoreAttachedFiles(files: List<AttachedFile>) = delegate.restoreAttachedFiles(files)
     override fun addPreUploadedFiles(files: List<AttachedFile>) = delegate.addPreUploadedFiles(files)
+
+    override val pdfPasswordPrompts: StateFlow<List<PdfPasswordPrompt>> get() = delegate.pdfPasswordPrompts
+    override fun submitPdfPassword(prompt: PdfPasswordPrompt, password: String) =
+        delegate.submitPdfPassword(prompt, password)
+    override fun dismissPdfPassword() = delegate.dismissPdfPassword()
 }

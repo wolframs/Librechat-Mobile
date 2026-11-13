@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,7 +28,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,12 +43,15 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
+import com.garfiec.librechat.core.ui.components.AdaptiveCircularProgressIndicator
+import com.garfiec.librechat.core.ui.media.mediaThumbnail
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.pow
 import kotlin.random.Random
+import kotlin.time.Clock
 
 data class ImageGenResult(
     /**
@@ -59,10 +64,43 @@ data class ImageGenResult(
     val imageUrls: List<String> = emptyList(),
     val prompt: String? = null,
     val isGenerating: Boolean = false,
+    /** Keys the card's saved faux-progress clock, so it survives the card scrolling away. */
+    val toolCallId: String? = null,
     /** Image-gen quality ("low" | "medium" | "high"). Tunes the faux-progress
      *  duration while [isGenerating], matching the web client. */
     val quality: String? = null,
 )
+
+internal const val IMAGE_GEN_INITIAL_PROGRESS = 0.1f
+internal const val IMAGE_GEN_MAX_FAUX_PROGRESS = 0.9f
+private const val IMAGE_GEN_UPDATE_INTERVAL_MS = 200L
+
+internal fun imageGenFauxDurationMs(quality: String?, random: Random = Random): Int {
+    val baseDuration = when (quality?.lowercase()) {
+        "low" -> 10_000
+        "high" -> 50_000
+        else -> 20_000
+    }
+    val jitter = (baseDuration * 0.3f).toInt().coerceAtLeast(1)
+    return random.nextInt(jitter) + baseDuration
+}
+
+/**
+ * Web's faux-progress curve at [elapsedMs] into a [totalDurationMs] run, quantized to its
+ * 200ms ticks: near-linear to 80% of the run, easing out over the last 20%, capped at 0.9.
+ */
+internal fun imageGenFauxProgress(elapsedMs: Long, totalDurationMs: Int): Float {
+    val totalSteps = (totalDurationMs / IMAGE_GEN_UPDATE_INTERVAL_MS).coerceAtLeast(1)
+    val step = (elapsedMs / IMAGE_GEN_UPDATE_INTERVAL_MS).coerceIn(0, totalSteps)
+    val ratio = step.toFloat() / totalSteps
+    val mapRatio = if (ratio < 0.8f) {
+        ratio.pow(1.1f)
+    } else {
+        val sub = (ratio - 0.8f) / 0.2f
+        0.8f + (1f - (1f - sub).pow(2)) * 0.2f
+    }
+    return (IMAGE_GEN_INITIAL_PROGRESS + mapRatio * 0.8f).coerceAtMost(IMAGE_GEN_MAX_FAUX_PROGRESS)
+}
 
 /**
  * Renders a DALL-E / image generation result card. [ImageGenResult.isGenerating] drives spinner vs
@@ -84,36 +122,34 @@ fun ImageGenCard(
     // Faux progress, ported from web's OpenAIImageGen (the server sends no real
     // progress). Ticks 0.1 → 0.9 over a quality-tuned duration with jitter, then
     // snaps to done the moment the real image (imageUrl) lands and isGenerating flips.
-    var fauxProgress by remember { mutableFloatStateOf(0.1f) }
+    // Saveable and keyed by tool call: the lazy list disposes an off-screen card, so a clock
+    // held in composition would restart at 10% every time the card scrolled back into view.
+    var startedAtMs by rememberSaveable(result.toolCallId) { mutableLongStateOf(0L) }
+    var totalDurationMs by rememberSaveable(result.toolCallId, result.quality) { mutableIntStateOf(0) }
+    var fauxProgress by remember {
+        mutableFloatStateOf(
+            if (startedAtMs > 0L && totalDurationMs > 0) {
+                imageGenFauxProgress(Clock.System.now().toEpochMilliseconds() - startedAtMs, totalDurationMs)
+            } else {
+                IMAGE_GEN_INITIAL_PROGRESS
+            },
+        )
+    }
     LaunchedEffect(result.isGenerating, result.quality) {
         if (!result.isGenerating) {
             fauxProgress = 1f
             return@LaunchedEffect
         }
-        fauxProgress = 0.1f
-        val baseDuration = when (result.quality?.lowercase()) {
-            "low" -> 10_000
-            "high" -> 50_000
-            else -> 20_000
+        if (startedAtMs == 0L) startedAtMs = Clock.System.now().toEpochMilliseconds()
+        if (totalDurationMs == 0) totalDurationMs = imageGenFauxDurationMs(result.quality)
+        while (true) {
+            fauxProgress = imageGenFauxProgress(
+                Clock.System.now().toEpochMilliseconds() - startedAtMs,
+                totalDurationMs,
+            )
+            if (fauxProgress >= IMAGE_GEN_MAX_FAUX_PROGRESS) break
+            delay(IMAGE_GEN_UPDATE_INTERVAL_MS)
         }
-        val jitter = (baseDuration * 0.3f).toInt().coerceAtLeast(1)
-        val totalDuration = Random.nextInt(jitter) + baseDuration
-        val updateInterval = 200L
-        val totalSteps = (totalDuration / updateInterval).toInt().coerceAtLeast(1)
-        var step = 0
-        while (step < totalSteps) {
-            delay(updateInterval)
-            step++
-            val ratio = step.toFloat() / totalSteps
-            val mapRatio = if (ratio < 0.8f) {
-                ratio.pow(1.1f)
-            } else {
-                val sub = (ratio - 0.8f) / 0.2f
-                0.8f + (1f - (1f - sub).pow(2)) * 0.2f
-            }
-            fauxProgress = (0.1f + mapRatio * 0.8f).coerceAtMost(0.9f)
-        }
-        fauxProgress = 0.9f
     }
 
     Card(
@@ -137,6 +173,7 @@ fun ImageGenCard(
                     text = stringResource(if (result.isGenerating) Res.string.generating_image else Res.string.image_generated),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 if (result.isGenerating) {
                     Spacer(modifier = Modifier.width(8.dp))
@@ -144,6 +181,8 @@ fun ImageGenCard(
                         text = "${(fauxProgress * 100).toInt()}%",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             }
@@ -209,7 +248,7 @@ private fun GeneratedImage(url: String, contentDescription: String, onClick: () 
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = 300.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .mediaThumbnail(url, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .semantics { role = Role.Image },
         loading = {
@@ -223,7 +262,7 @@ private fun GeneratedImage(url: String, contentDescription: String, onClick: () 
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                AdaptiveCircularProgressIndicator(modifier = Modifier.size(24.dp))
             }
         },
         error = {

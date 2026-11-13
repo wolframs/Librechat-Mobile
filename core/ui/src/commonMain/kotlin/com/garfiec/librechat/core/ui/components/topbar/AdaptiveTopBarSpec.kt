@@ -1,0 +1,172 @@
+package com.garfiec.librechat.core.ui.components.topbar
+
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.garfiec.librechat.core.ui.glass.GlassFlare
+
+/**
+ * An icon a top bar can draw on either renderer: the Compose [vector], and the SF Symbol the native
+ * iOS bar uses instead. Bar APIs take this type rather than a bare [ImageVector], so an action
+ * cannot be declared without a native symbol.
+ */
+@Immutable
+data class BarIcon(val vector: ImageVector, val sfSymbol: String)
+
+/** The leading control: back, close or the drawer menu, told apart by [icon]. */
+@Immutable
+data class BarNavigation(
+    val icon: BarIcon,
+    val contentDescription: String?,
+    val onClick: () -> Unit,
+)
+
+enum class BarTint { DEFAULT, DESTRUCTIVE }
+
+/** A trailing bar control. Controls are data, not composables, so a native bar can render them. */
+@Immutable
+sealed interface BarAction {
+    val id: String
+    val label: String
+
+    @Immutable
+    data class Icon(
+        override val id: String,
+        val icon: BarIcon,
+        override val label: String,
+        val tint: BarTint = BarTint.DEFAULT,
+        val enabled: Boolean = true,
+        /** Shows a progress indicator in place of the icon (and disables the action). */
+        val busy: Boolean = false,
+        val onClick: () -> Unit,
+    ) : BarAction
+
+    /**
+     * A labelled button. Where the label would leave the title too little room (a narrow screen, a
+     * large font, a long translation), the bar draws [compactIcon] instead, with the label as its
+     * content description.
+     *
+     * A status label (the chat's pull request chip) adds a [leadingIcon] before the label, tinted
+     * [iconTint], with a dot of [badgeTint] on its corner. The native iOS bar draws the glyph and the
+     * label but no dot, so [accessibilityLabel] must say in words whatever the tints say.
+     */
+    @Immutable
+    data class Text(
+        override val id: String,
+        override val label: String,
+        val compactIcon: BarIcon,
+        val enabled: Boolean = true,
+        val leadingIcon: BarIcon? = null,
+        val iconTint: Color? = null,
+        val badgeTint: Color? = null,
+        /** Read in place of [label] by screen readers; null reads the label. */
+        val accessibilityLabel: String? = null,
+        val onClick: () -> Unit,
+    ) : BarAction
+
+    @Immutable
+    data class Toggle(
+        override val id: String,
+        val iconOff: BarIcon,
+        val iconOn: BarIcon,
+        override val label: String,
+        val checked: Boolean,
+        val onCheckedChange: (Boolean) -> Unit,
+        /** The icon's colour while checked, in place of the bar's accent (glass and the native bar). */
+        val checkedTint: Color? = null,
+        /**
+         * Reports the button's bounds in root coordinates, for an effect that starts at it. The
+         * Compose bars only: the native iOS bar's buttons have no Compose layout.
+         */
+        val onAnchor: ((Rect) -> Unit)? = null,
+    ) : BarAction
+
+    /**
+     * A button that opens a menu. [sections] is read when the menu opens, so it may change while
+     * the bar is on screen without rebuilding the bar. With [dragToSelect] (the default), holding or dragging
+     * from the button opens the menu and the same press can slide onto an item and release (the
+     * Compose bars; the native iOS bar keeps its system menu).
+     */
+    @Immutable
+    data class Menu(
+        override val id: String,
+        val icon: BarIcon,
+        override val label: String,
+        val sections: List<BarMenuSection>,
+        val dragToSelect: Boolean = true,
+    ) : BarAction
+}
+
+@Immutable
+data class BarMenuSection(val items: List<BarMenuItem>)
+
+@Immutable
+data class BarMenuItem(
+    val id: String,
+    val label: String,
+    val icon: BarIcon?,
+    val onClick: () -> Unit,
+    val checked: Boolean = false,
+    val destructive: Boolean = false,
+    val enabled: Boolean = true,
+    val subtitle: String? = null,
+)
+
+enum class BarTitleStyle {
+    PLAIN,
+
+    /** A tappable pill, for a title that opens something (e.g. the model picker). */
+    CHIP,
+}
+
+enum class BarTitleAlignment { LEADING, CENTER, FILL }
+
+/** Renaming through the title: tapping it opens a text prompt pre-filled with [initial]. */
+@Immutable
+data class BarRename(
+    val dialogTitle: String,
+    val initial: String,
+    val confirmLabel: String,
+    val cancelLabel: String,
+    val onCommit: (String) -> Unit,
+)
+
+@Immutable
+data class BarTitle(
+    val text: String?,
+    val style: BarTitleStyle = BarTitleStyle.PLAIN,
+    val alignment: BarTitleAlignment = BarTitleAlignment.LEADING,
+    val onClick: (() -> Unit)? = null,
+    val rename: BarRename? = null,
+    /**
+     * Lines a plain title may take before it ellipsizes; 1 for a name with no spaces to break at
+     * (a file name). A tappable or chip title always keeps one.
+     */
+    val maxLines: Int = 2,
+)
+
+@Immutable
+data class AdaptiveTopBarSpec(
+    val navigation: BarNavigation?,
+    val title: BarTitle,
+    val actions: List<BarAction> = emptyList(),
+    /** Lights the edge of the simulated glass bar's actions capsule. Ignored by the other renderers. */
+    val actionsFlare: GlassFlare? = null,
+)
+
+/**
+ * How the Material renderer draws the bar; defaults reproduce a plain M3 `TopAppBar`. A
+ * [BarTitleAlignment.CENTER] title draws a `CenterAlignedTopAppBar`.
+ */
+@Immutable
+data class MaterialBarStyle(
+    /** Unspecified leaves M3's default colours untouched rather than restating them. */
+    val containerColor: Color = Color.Unspecified,
+    /**
+     * Draws the bar, its status-bar band and `belowBar` over a fading surface scrim instead of a solid
+     * container, so the list scrolls up under them as the chat thread does. Only worth it when the
+     * body passes the Scaffold's padding to its list as `contentPadding`. Wins over [containerColor].
+     */
+    val translucent: Boolean = false,
+)

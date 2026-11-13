@@ -18,9 +18,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.model.content.reasoningDisplay
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import org.jetbrains.compose.resources.StringResource
@@ -82,6 +84,9 @@ private fun CollapsibleDisclosureCard(
     // explicit key stops two blocks in one message from sharing a slot (the generated key is
     // positional, and grouping shifts positions).
     stateKey: String = "",
+    // The fold the card starts in. Read once, when the saveable state is first created: a later
+    // change to the preference applies to cards composed from then on, not to this one.
+    initiallyExpanded: Boolean = false,
     // Flips the card open when it becomes true (find-in-page expands folded regions);
     // the user can still collapse it manually afterwards.
     autoExpand: Boolean = false,
@@ -90,7 +95,7 @@ private fun CollapsibleDisclosureCard(
     autoExpandKey: Any? = null,
     body: @Composable () -> Unit,
 ) {
-    var isExpanded by rememberSaveable(key = "collapsible:$stateKey") { mutableStateOf(false) }
+    var isExpanded by rememberSaveable(key = "collapsible:$stateKey") { mutableStateOf(initiallyExpanded) }
     LaunchedEffect(autoExpand, autoExpandKey) {
         if (autoExpand) isExpanded = true
     }
@@ -160,12 +165,23 @@ internal fun ThinkingContentPart(
     searchFocusedOccurrence: Int = -1,
     onFocusedOccurrencePosition: ((LayoutCoordinates, Rect) -> Unit)? = null,
     stateKey: String = "",
+    // True for the live reply's reasoning: its text changes per delta, so it must not be parsed
+    // into the settled-markdown cache (see MarkdownContent / CachedMarkdown).
+    streaming: Boolean = false,
 ) {
+    // Encrypted reasoning (a provider's base64 payload in the THINK stream) is never shown as
+    // thinking: the readable text around it is, and a part with none gets the marker row.
+    val display = remember(thinkingText, streaming) { reasoningDisplay(thinkingText, streaming) }
+    if (display.encrypted) {
+        EncryptedReasoningRow(modifier)
+        return
+    }
+    val readableText = display.text
     // The focused occurrence index is already rebased to this part; when it falls
     // inside the thinking text, pop the card open so the match can be scrolled to.
-    val containsFocusedMatch = remember(thinkingText, searchQuery, searchFocusedOccurrence) {
+    val containsFocusedMatch = remember(readableText, searchQuery, searchFocusedOccurrence) {
         searchFocusedOccurrence >= 0 && !searchQuery.isNullOrBlank() &&
-            searchFocusedOccurrence < countMarkdownOccurrences(thinkingText, searchQuery)
+            searchFocusedOccurrence < countMarkdownOccurrences(readableText, searchQuery)
     }
     CollapsibleDisclosureCard(
         leadingIcon = Icons.Default.Psychology,
@@ -175,6 +191,7 @@ internal fun ThinkingContentPart(
         collapseActionContentDescription = Res.string.cd_collapse_thinking,
         modifier = modifier,
         stateKey = "think:$stateKey",
+        initiallyExpanded = LocalThinkingOpenByDefault.current,
         autoExpand = containsFocusedMatch,
         // Re-arm on every navigation: LocalSearchFocusNonce changes per focus request, so both
         // moving to a different occurrence in this block AND returning to the same one (after a
@@ -183,13 +200,48 @@ internal fun ThinkingContentPart(
         autoExpandKey = LocalSearchFocusNonce.current,
     ) {
         MarkdownContent(
-            thinkingText,
+            readableText,
             fontSizeMultiplier = fontSizeMultiplier,
             useKatex = useKatex,
             searchQuery = searchQuery,
             searchFocusedOccurrence = searchFocusedOccurrence,
             onFocusedOccurrencePosition = onFocusedOccurrencePosition,
+            streaming = streaming,
         )
+    }
+}
+
+/**
+ * Reasoning the model returned encrypted, so there is nothing to show: the thinking card's header
+ * without a disclosure (upstream `ReasoningMarker encrypted`).
+ */
+@Composable
+private fun EncryptedReasoningRow(modifier: Modifier = Modifier) {
+    val description = stringResource(Res.string.cd_reasoning_encrypted)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .heightIn(min = 48.dp)
+            .padding(12.dp)
+            .semantics(mergeDescendants = true) { contentDescription = description },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.Lock,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        DisableSelection {
+            Text(
+                stringResource(Res.string.label_reasoning_encrypted),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -211,7 +263,7 @@ internal fun SummaryContentPart(
     if (summaryText.isBlank()) return
 
     CollapsibleDisclosureCard(
-        leadingIcon = Icons.AutoMirrored.Filled.Notes,
+        leadingIcon = Icons.Default.Notes,
         leadingIconContentDescription = stringResource(Res.string.cd_summary_indicator),
         title = stringResource(Res.string.label_summary),
         expandActionContentDescription = Res.string.cd_expand_summary,

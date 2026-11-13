@@ -3,10 +3,23 @@ package com.garfiec.librechat.core.data.datastore
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import com.garfiec.librechat.core.common.ChannelPolicy
+import com.garfiec.librechat.core.common.DistributionChannel
+import com.garfiec.librechat.core.common.datetime.ClockFormat
+import com.garfiec.librechat.core.common.datetime.DateFormatStyle
+import com.garfiec.librechat.core.common.datetime.DateTimeFormatPrefs
+import com.garfiec.librechat.core.common.datetime.TimestampStyle
 import com.garfiec.librechat.core.common.identity.AccountId
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.common.identity.InMemoryActiveAccountProvider
+import com.garfiec.librechat.core.data.prefetch.PrefetchDepth
+import com.garfiec.librechat.core.model.ArtifactsMode
 import com.garfiec.librechat.core.model.ModelRef
+import com.garfiec.librechat.core.model.usage.ContextDetailPreset
+import com.garfiec.librechat.core.model.usage.ModelTokenomics
 import com.garfiec.librechat.core.network.client.ServerUrlProvider
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +67,17 @@ class DataStoreRoundTripTest {
         ds: DataStore<Preferences>,
         accountProvider: ActiveAccountProvider = resolvedAccountProvider(),
     ) = SettingsDataStore(ds, accountProvider, CoroutineScope(testDispatcher), testDispatcher)
+
+    @Test
+    fun settingsDataStore_artifactsModeDefaultsAndRoundTrips() = runTest(testDispatcher) {
+        val store = settingsStore(createDataStore("settings-artifacts-mode"))
+
+        assertThat(store.artifactsMode.first()).isEqualTo(ArtifactsMode.DEFAULT)
+        store.setArtifactsMode(ArtifactsMode.SHADCN_UI)
+        assertThat(store.artifactsMode.first()).isEqualTo(ArtifactsMode.SHADCN_UI)
+        store.setArtifactsMode(ArtifactsMode.CUSTOM)
+        assertThat(store.artifactsMode.first()).isEqualTo(ArtifactsMode.CUSTOM)
+    }
 
     // --- ServerDataStore ---
 
@@ -131,8 +155,7 @@ class DataStoreRoundTripTest {
         val ds = createDataStore("settings")
         val store = settingsStore(ds)
 
-        assertThat(store.autoScrollEnabled.first()).isTrue()
-        assertThat(store.showThinkingBlocks.first()).isTrue()
+        assertThat(store.thinkingOpenByDefault.first()).isFalse()
         assertThat(store.autoReadEnabled.first()).isFalse()
         assertThat(store.dismissKeyboardOnSend.first()).isTrue()
         assertThat(store.chatFontSize.first()).isEqualTo(ChatFontSize.MEDIUM)
@@ -150,21 +173,84 @@ class DataStoreRoundTripTest {
         val ds = createDataStore("settings-bool")
         val store = settingsStore(ds)
 
-        store.setAutoScrollEnabled(false)
-        store.setShowThinkingBlocks(false)
+        store.setThinkingOpenByDefault(true)
         store.setAutoReadEnabled(true)
         store.setDismissKeyboardOnSend(false)
         store.setShowImageDescriptions(true)
         store.setSttOnDevice(false)
         store.setSttEndOfSpeech(true)
 
-        assertThat(store.autoScrollEnabled.first()).isFalse()
-        assertThat(store.showThinkingBlocks.first()).isFalse()
+        assertThat(store.thinkingOpenByDefault.first()).isTrue()
         assertThat(store.autoReadEnabled.first()).isTrue()
         assertThat(store.dismissKeyboardOnSend.first()).isFalse()
         assertThat(store.showImageDescriptions.first()).isTrue()
         assertThat(store.sttOnDevice.first()).isFalse()
         assertThat(store.sttEndOfSpeech.first()).isTrue()
+    }
+
+    @Test
+    fun siteIcons_openSource_unsetUntilChosen() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-site-icons")
+        val store = PreferenceStore(ds, ChannelPolicy(DistributionChannel.OPEN_SOURCE))
+
+        // Null means "never asked" -- distinct from an explicit off.
+        assertThat(store.observe(AppPreferences.SiteIcons).first()).isNull()
+
+        store.set(AppPreferences.SiteIcons, false)
+        assertThat(store.observe(AppPreferences.SiteIcons).first()).isFalse()
+
+        store.set(AppPreferences.SiteIcons, true)
+        assertThat(store.observe(AppPreferences.SiteIcons).first()).isTrue()
+    }
+
+    @Test
+    fun siteIcons_storeBuild_onUntilTheUserTurnsItOff() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-site-icons-store")
+        val store = PreferenceStore(ds, ChannelPolicy(DistributionChannel.PLAY_STORE))
+
+        assertThat(store.initial(AppPreferences.SiteIcons)).isTrue()
+        assertThat(store.observe(AppPreferences.SiteIcons).first()).isTrue()
+
+        store.set(AppPreferences.SiteIcons, false)
+        assertThat(store.observe(AppPreferences.SiteIcons).first()).isFalse()
+    }
+
+    @Test
+    fun prefetch_untouchedInstallReadsTheDefaults() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-prefetch-defaults")
+        // An upgrade from a build where prefetch was opt-in: some other setting stored, none of these.
+        ds.edit { it[AppPreferences.SiteIcons.key] = true }
+        val store = PreferenceStore(ds, ChannelPolicy(DistributionChannel.OPEN_SOURCE))
+
+        assertThat(store.observe(AppPreferences.PrefetchEnabled).first()).isTrue()
+        assertThat(store.observe(AppPreferences.PrefetchOnMetered).first()).isTrue()
+        assertThat(store.observe(AppPreferences.PrefetchAttachments).first()).isFalse()
+        assertThat(store.observe(AppPreferences.PrefetchDepthSetting).first()).isEqualTo(50)
+    }
+
+    @Test
+    fun prefetch_anExplicitChoiceFromTheOptInBuildSurvives() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-prefetch-explicit")
+        // Written by the opt-in build's own keys, which the registry entries kept.
+        ds.edit {
+            it[booleanPreferencesKey("prefetch_enabled")] = false
+            it[booleanPreferencesKey("prefetch_on_metered")] = false
+            it[intPreferencesKey("prefetch_depth")] = 20
+        }
+        val store = PreferenceStore(ds, ChannelPolicy(DistributionChannel.PLAY_STORE))
+
+        assertThat(store.observe(AppPreferences.PrefetchEnabled).first()).isFalse()
+        assertThat(store.observe(AppPreferences.PrefetchOnMetered).first()).isFalse()
+        assertThat(store.observe(AppPreferences.PrefetchDepthSetting).first()).isEqualTo(20)
+    }
+
+    @Test
+    fun prefetch_anOutOfRangeDepthIsClampedNotReset() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-prefetch-depth")
+        ds.edit { it[AppPreferences.PrefetchDepthSetting.key] = PrefetchDepth.MAX + 500 }
+        val store = PreferenceStore(ds, ChannelPolicy(DistributionChannel.APP_STORE))
+
+        assertThat(store.observe(AppPreferences.PrefetchDepthSetting).first()).isEqualTo(PrefetchDepth.MAX)
     }
 
     @Test
@@ -183,11 +269,42 @@ class DataStoreRoundTripTest {
     }
 
     @Test
+    fun dateTimePrefsStore_defaultThenRoundTrip() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-datetime")
+        val store = DateTimePrefsStore(ds, CoroutineScope(testDispatcher), testDispatcher)
+        assertThat(store.prefs.first()).isEqualTo(DateTimeFormatPrefs())
+
+        val chosen = DateTimeFormatPrefs(TimestampStyle.SMART, ClockFormat.H24, DateFormatStyle.DMY_DOT)
+        store.update { it.copy(style = TimestampStyle.SMART) }
+        store.update { it.copy(clock = ClockFormat.H24) }
+        store.update { it.copy(date = DateFormatStyle.DMY_DOT) }
+        assertThat(store.prefs.first()).isEqualTo(chosen)
+
+        // A fresh instance seeds the first frame from disk. The warm-up is real file IO, which
+        // advanceUntilIdle doesn't wait for — await the ready flag instead.
+        val reopened = DateTimePrefsStore(ds, CoroutineScope(testDispatcher), testDispatcher)
+        reopened.isReady.first { it }
+        assertThat(reopened.initial).isEqualTo(chosen)
+    }
+
+    @Test
     fun uploadRoutingMode_roundTripsAndDefaultsToAuto() {
         assertThat(UploadRoutingMode.fromString(null)).isEqualTo(UploadRoutingMode.AUTO)
         assertThat(UploadRoutingMode.fromString("garbage")).isEqualTo(UploadRoutingMode.AUTO)
         for (mode in UploadRoutingMode.entries) {
             assertThat(UploadRoutingMode.fromString(mode.toStorageString())).isEqualTo(mode)
+        }
+    }
+
+    @Test
+    fun artifactDisplayMode_readsStoredChoicesAndDefaultsToAutomatic() {
+        assertThat(ArtifactDisplayMode.fromString(null)).isEqualTo(ArtifactDisplayMode.AUTOMATIC)
+        assertThat(ArtifactDisplayMode.fromString("auto")).isEqualTo(ArtifactDisplayMode.AUTOMATIC)
+        assertThat(ArtifactDisplayMode.fromString("bottom_sheet")).isEqualTo(ArtifactDisplayMode.BOTTOM_SHEET)
+        assertThat(ArtifactDisplayMode.fromString("fullscreen")).isEqualTo(ArtifactDisplayMode.FULLSCREEN)
+        assertThat(ArtifactDisplayMode.fromString("split")).isEqualTo(ArtifactDisplayMode.AUTOMATIC)
+        for (mode in ArtifactDisplayMode.entries) {
+            assertThat(ArtifactDisplayMode.fromString(mode.toStorageString())).isEqualTo(mode)
         }
     }
 
@@ -209,8 +326,11 @@ class DataStoreRoundTripTest {
         val store = settingsStore(ds)
 
         store.setLastUsedModel("anthropic", "claude-3.5-sonnet")
-        assertThat(store.lastUsedEndpoint.first()).isEqualTo("anthropic")
-        assertThat(store.lastUsedModel.first()).isEqualTo("claude-3.5-sonnet")
+        assertThat(store.lastUsedSelection.first())
+            .isEqualTo(LastUsedSelection("anthropic", "claude-3.5-sonnet", spec = null))
+
+        store.setLastUsedModel("openAI", "gpt-4.1", spec = "fast")
+        assertThat(store.lastUsedSelection.first()).isEqualTo(LastUsedSelection("openAI", "gpt-4.1", "fast"))
 
         store.setSelectedVoiceId("voice-en-us-001")
         assertThat(store.selectedVoiceId.first()).isEqualTo("voice-en-us-001")
@@ -225,8 +345,8 @@ class DataStoreRoundTripTest {
         val provider = InMemoryActiveAccountProvider() // starts Warming
         val store = SettingsDataStore(ds, provider, CoroutineScope(testDispatcher), testDispatcher)
 
-        val emissions = mutableListOf<String?>()
-        val job = launch { store.lastUsedModel.collect { emissions.add(it) } }
+        val emissions = mutableListOf<LastUsedSelection>()
+        val job = launch { store.lastUsedSelection.collect { emissions.add(it) } }
         advanceUntilIdle()
         // While the account is Warming the flow is suppressed (no null emission that a seeder would
         // mistake for "no last-used saved"). Asserting an ABSENCE legitimately needs a snapshot, so
@@ -241,7 +361,7 @@ class DataStoreRoundTripTest {
         // `scope`, so it reads the file on Dispatchers.IO — real threads on the real clock — while
         // advanceUntilIdle() only drains the virtual scheduler. Snapshotting a collector after it
         // races real disk I/O and flakes as "List is empty" under load.
-        assertThat(store.lastUsedModel.first()).isEqualTo("gpt-4o")
+        assertThat(store.lastUsedSelection.first().model).isEqualTo("gpt-4o")
     }
 
     // --- SettingsDataStore: model usage ranking (home-screen shortcuts) ---
@@ -311,6 +431,61 @@ class DataStoreRoundTripTest {
     }
 
     @Test
+    fun settingsDataStore_modelUsage_specSendsCountApartFromTheRawModel() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-usage-spec")
+        val store = settingsStore(ds)
+
+        store.incrementModelUsage("openAI", "gpt-4o", spec = "fast", label = "Fast")
+        // A send whose spec config wasn't loaded carries no label; the stored one stays.
+        store.incrementModelUsage("openAI", "gpt-4o", spec = "fast", label = null)
+        store.incrementModelUsage("openAI", "gpt-4o")
+        // A label without a spec is dropped: a raw shortcut is titled by its model.
+        store.incrementModelUsage("anthropic", "claude", spec = null, label = "Ignored")
+
+        assertThat(store.topUsedModels(5).first())
+            .containsExactly(
+                ModelRef("openAI", "gpt-4o", spec = "fast", label = "Fast"),
+                ModelRef("anthropic", "claude"),
+                ModelRef("openAI", "gpt-4o"),
+            )
+            .inOrder()
+    }
+
+    @Test
+    fun settingsDataStore_modelUsage_aSpecCountedOnTwoPairsIsOneShortcut() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-usage-spec-moved")
+        val store = settingsStore(ds)
+
+        // An admin moved `fast` from gpt-4o to gpt-4.1 between sends: both entries reopen `fast`.
+        repeat(2) { store.incrementModelUsage("openAI", "gpt-4o", spec = "fast", label = "Fast") }
+        store.incrementModelUsage("anthropic", "claude")
+        // The most recent single send, so without the merge it would take the second slot.
+        store.incrementModelUsage("openAI", "gpt-4.1", spec = "fast", label = "Fast")
+
+        assertThat(store.topUsedModels(2).first())
+            .containsExactly(
+                ModelRef("openAI", "gpt-4o", spec = "fast", label = "Fast"),
+                ModelRef("anthropic", "claude"),
+            )
+            .inOrder()
+    }
+
+    @Test
+    fun settingsDataStore_modelUsage_entriesWrittenBeforeSpecsReadAsRaw() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-usage-legacy")
+        val store = settingsStore(ds)
+        // The shape stored before spec sends were counted: a two-part key and no label.
+        ds.edit {
+            it[accountScopedKey("srv:test-account", "model_usage")] =
+                """{"openAI\u0000gpt-4o":{"count":3,"seq":1}}"""
+        }
+
+        store.incrementModelUsage("openAI", "gpt-4o")
+
+        assertThat(store.topUsedModels(5).first()).containsExactly(ModelRef("openAI", "gpt-4o"))
+    }
+
+    @Test
     fun settingsDataStore_modelUsage_blankInputsIgnored() = runTest(testDispatcher) {
         val ds = createDataStore("settings-usage-blank")
         val store = settingsStore(ds)
@@ -363,6 +538,99 @@ class DataStoreRoundTripTest {
         assertThat(store.selectedMcpServers.first()).isEmpty()
     }
 
+    @Test
+    fun settingsDataStore_contextDetail_defaultsToStandardAndKeepsTheCustomMix() = runTest(testDispatcher) {
+        val store = settingsStore(createDataStore("settings-context-detail"))
+
+        assertThat(store.effectiveContextSections.first()).isEqualTo(ContextDetailPreset.STANDARD.sections)
+
+        store.setContextDetailPreset(ContextDetailPreset.SIMPLE)
+        store.setContextDetailAdvanced(true)
+        // Seeded from the preset in force when Advanced first turned on.
+        assertThat(store.effectiveContextSections.first()).isEqualTo(ContextDetailPreset.SIMPLE.sections)
+
+        val mix = ContextDetailPreset.SIMPLE.sections.copy(totals = true)
+        store.setContextDetailCustom(mix)
+        store.setContextDetailAdvanced(false)
+        assertThat(store.effectiveContextSections.first()).isEqualTo(ContextDetailPreset.SIMPLE.sections)
+        store.setContextDetailAdvanced(true)
+        assertThat(store.effectiveContextSections.first()).isEqualTo(mix)
+    }
+
+    @Test
+    fun settingsDataStore_compactNudge_thresholdAndSnoozes() = runTest(testDispatcher) {
+        val store = settingsStore(createDataStore("settings-compact-nudge"))
+
+        assertThat(store.compactNudgeThreshold.first()).isEqualTo(70)
+        store.setCompactNudgeThreshold(0)
+        assertThat(store.compactNudgeThreshold.first()).isEqualTo(0)
+
+        store.snoozeCompactNudge("c1", band = 0)
+        store.snoozeCompactNudge("c2", band = 1)
+        assertThat(store.compactNudgeSnoozes.first()).containsExactly("c1", 0, "c2", 1)
+
+        store.clearCompactNudgeSnooze("c1")
+        assertThat(store.compactNudgeSnoozes.first()).containsExactly("c2", 1)
+    }
+
+    @Test
+    fun settingsDataStore_compactNudgeSnoozes_evictTheOldestPastTheCap() = runTest(testDispatcher) {
+        val store = settingsStore(createDataStore("settings-compact-cap"))
+
+        repeat(201) { store.snoozeCompactNudge("c$it", band = 0) }
+
+        val snoozes = store.compactNudgeSnoozes.first()
+        assertThat(snoozes).hasSize(200)
+        assertThat(snoozes).doesNotContainKey("c0")
+        assertThat(snoozes).containsKey("c200")
+    }
+
+    @Test
+    fun settingsDataStore_skillsToggle_isPerSlotAndPerAccount() = runTest(testDispatcher) {
+        val ds = createDataStore("settings-skills-toggle")
+        val accountA = InMemoryActiveAccountProvider().apply { set(AccountId("srv:a")) }
+        val store = settingsStore(ds, accountA)
+
+        assertThat(store.skillsToggle("c1").first()).isNull()
+        store.setSkillsToggle("c1", on = true)
+        store.setSkillsToggle(SettingsDataStore.SKILLS_TOGGLE_NEW_CHAT_SLOT, on = false)
+        assertThat(store.skillsToggle("c1").first()).isTrue()
+        assertThat(store.skillsToggle(SettingsDataStore.SKILLS_TOGGLE_NEW_CHAT_SLOT).first()).isFalse()
+        // The specs' defaults slot is separate from the plain new-chat slot.
+        assertThat(store.skillsToggle(SettingsDataStore.SKILLS_TOGGLE_SPEC_DEFAULTS_SLOT).first()).isNull()
+
+        // Another account on the same device does not see account A's conversations.
+        val storeB = settingsStore(ds, InMemoryActiveAccountProvider().apply { set(AccountId("srv:b")) })
+        assertThat(storeB.skillsToggle("c1").first()).isNull()
+    }
+
+    @Test
+    fun settingsDataStore_skillsToggle_evictsTheOldestPastTheCap() = runTest(testDispatcher) {
+        val store = settingsStore(createDataStore("settings-skills-cap"))
+
+        repeat(201) { store.setSkillsToggle("c$it", on = true) }
+
+        assertThat(store.skillsToggle("c0").first()).isNull()
+        assertThat(store.skillsToggle("c200").first()).isTrue()
+    }
+
+    @Test
+    fun settingsDataStore_skillsToggle_keepsTheSharedNewChatSlotsPastTheCap() = runTest(testDispatcher) {
+        val store = settingsStore(createDataStore("settings-skills-shared"))
+        store.setSkillsToggle(SettingsDataStore.SKILLS_TOGGLE_NEW_CHAT_SLOT, on = true)
+        store.setSkillsToggle(SettingsDataStore.SKILLS_TOGGLE_SPEC_DEFAULTS_SLOT, on = true)
+
+        // Every new chat's first send writes its own slot; the shared ones are never rewritten.
+        repeat(250) { store.setSkillsToggle("c$it", on = true) }
+
+        assertThat(store.skillsToggle(SettingsDataStore.SKILLS_TOGGLE_NEW_CHAT_SLOT).first()).isTrue()
+        assertThat(store.skillsToggle(SettingsDataStore.SKILLS_TOGGLE_SPEC_DEFAULTS_SLOT).first()).isTrue()
+        // Conversations still keep only the most recent 200.
+        assertThat(store.skillsToggle("c49").first()).isNull()
+        assertThat(store.skillsToggle("c50").first()).isTrue()
+        assertThat(store.skillsToggle("c249").first()).isTrue()
+    }
+
     // --- ConfigCacheDataStore ---
 
     @Test
@@ -393,5 +661,17 @@ class DataStoreRoundTripTest {
         assertThat(store.loadStartupConfig()).isNull()
         assertThat(store.loadEndpointConfigs()).isNull()
         assertThat(store.loadAvailableModels()).isNull()
+        assertThat(store.loadTokenConfig()).isNull()
+    }
+
+    @Test
+    fun configCacheDataStore_roundTrip_tokenConfig() = runTest(testDispatcher) {
+        val ds = createDataStore("config-token")
+        val json = Json { ignoreUnknownKeys = true; isLenient = true }
+        val store = ConfigCacheDataStore(ds, json, fakeServerUrlProvider)
+
+        store.saveTokenConfig(mapOf("openAI" to mapOf("gpt-4o" to ModelTokenomics(context = 128_000))))
+
+        assertThat(store.loadTokenConfig()?.get("openAI")?.get("gpt-4o")?.context).isEqualTo(128_000)
     }
 }

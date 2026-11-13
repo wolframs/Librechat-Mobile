@@ -15,9 +15,17 @@ data class Preset(
     val model: String? = null,
     @SerialName("agent_id") val agentId: String? = null,
     val temperature: Double? = null,
-    @SerialName("top_p") val topP: Double? = null,
+    // One field per upstream spelling (`tConversationSchema`): each provider's schema keeps only its own.
+    /** Top P as openAI, azure and custom spell it. */
+    @SerialName("top_p") val topPSnake: Double? = null,
+    /** Top P as google, anthropic and bedrock spell it. */
+    @SerialName("topP") val topPCamel: Double? = null,
     val topK: Int? = null,
-    @SerialName("max_tokens") val maxTokens: Int? = null,
+    /** Max output tokens as openAI, azure and custom spell it. */
+    @SerialName("max_tokens") val maxTokensSnake: Int? = null,
+    /** Max output tokens as bedrock spells it. */
+    @SerialName("maxTokens") val maxTokensCamel: Int? = null,
+    /** Max output tokens as google and anthropic spell it. */
     val maxOutputTokens: Int? = null,
     val maxContextTokens: Int? = null,
     @SerialName("frequency_penalty") val frequencyPenalty: Double? = null,
@@ -58,7 +66,13 @@ data class Preset(
     @SerialName("file_ids") val fileIds: List<String>? = null,
     val instructions: String? = null,
     @SerialName("additional_instructions") val additionalInstructions: String? = null,
-    val appendCurrentDatetime: Boolean? = null,
+    @SerialName("append_current_datetime") val appendCurrentDatetime: Boolean? = null,
+    /**
+     * A model spec preset's starting code approval mode (`ask` / `acceptEdits` / `fullAccess`,
+     * v0.8.9-rc1), which a new chat on the spec opens with, within the modes policy offers
+     * (`CodeWorkspaceDelegate`). Read from spec presets only; nothing writes it.
+     */
+    val codeApprovalMode: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
 )

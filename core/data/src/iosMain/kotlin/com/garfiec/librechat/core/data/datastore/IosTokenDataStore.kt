@@ -24,6 +24,8 @@ import platform.Foundation.dataUsingEncoding
 import platform.Security.SecItemAdd
 import platform.Security.SecItemCopyMatching
 import platform.Security.SecItemDelete
+import platform.Security.SecItemUpdate
+import platform.Security.errSecItemNotFound
 import platform.Security.errSecSuccess
 import platform.Security.kSecAttrAccessible
 import platform.Security.kSecAttrAccessibleAfterFirstUnlock
@@ -63,13 +65,10 @@ class IosTokenDataStore(
         }
     }
 
-    override fun removeServerUrl() {
-        keychainDelete(KEY_SERVER_URL)
-    }
-
     override fun onKeystoreCorruption() {
         // Keychain access rarely "corrupts" like the Android keystore (isKeystoreException stays false
         // on iOS, so this isn't reached); clear the bare token slots defensively if it ever is.
+        keychainDelete(KEY_SESSION)
         keychainDelete(KEY_ACCESS_TOKEN)
         keychainDelete(KEY_REFRESH_TOKEN)
     }
@@ -110,7 +109,6 @@ class IosTokenDataStore(
 
     @OptIn(ExperimentalForeignApi::class)
     private fun keychainSet(key: String, value: String) {
-        keychainDelete(key)
         val data = (value as NSString).dataUsingEncoding(NSUTF8StringEncoding) ?: run {
             Logger.e { "keychainSet($key): dataUsingEncoding returned null" }
             return
@@ -123,6 +121,19 @@ class IosTokenDataStore(
             CFDictionaryAddValue(query, kSecClass, kSecClassGenericPassword)
             CFDictionaryAddValue(query, kSecAttrService, cfService)
             CFDictionaryAddValue(query, kSecAttrAccount, cfKey)
+            val updates = CFDictionaryCreateMutable(null, 1, null, null) ?: return
+            val updateStatus = try {
+                CFDictionaryAddValue(updates, kSecValueData, cfData)
+                // Replacing a session must not delete the old record before the new one exists.
+                SecItemUpdate(query, updates)
+            } finally {
+                CFRelease(updates)
+            }
+            if (updateStatus == errSecSuccess) return
+            if (updateStatus != errSecItemNotFound) {
+                Logger.w { "keychainSet($key): SecItemUpdate failed with status=$updateStatus" }
+                return
+            }
             CFDictionaryAddValue(query, kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlock)
             CFDictionaryAddValue(query, kSecValueData, cfData)
 
@@ -159,5 +170,28 @@ class IosTokenDataStore(
     companion object {
         private const val SERVICE_NAME = "com.garfiec.librechat.tokens"
         private const val KEY_SERVER_URL = "server_url"
+
+        /**
+         * Deletes every item this store keeps (all accounts' tokens, the active binding, markers, the
+         * server URL fallback). For [resetKeychainLeftByPreviousInstall] only: it runs before any
+         * instance exists, so no cache can disagree with it.
+         */
+        @OptIn(ExperimentalForeignApi::class)
+        internal fun deleteAllKeychainItems() {
+            val cfService = CFBridgingRetain(SERVICE_NAME as NSString)
+            val query = CFDictionaryCreateMutable(null, 2, null, null) ?: return
+            try {
+                CFDictionaryAddValue(query, kSecClass, kSecClassGenericPassword)
+                CFDictionaryAddValue(query, kSecAttrService, cfService)
+                // Without kSecMatchLimit, SecItemDelete removes every match on iOS.
+                val status = SecItemDelete(query)
+                check(status == errSecSuccess || status == errSecItemNotFound) {
+                    "Keychain reset failed with status=$status"
+                }
+            } finally {
+                CFRelease(query)
+                cfService?.let { CFRelease(it) }
+            }
+        }
     }
 }

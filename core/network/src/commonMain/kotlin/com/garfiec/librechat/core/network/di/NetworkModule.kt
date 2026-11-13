@@ -1,5 +1,6 @@
 package com.garfiec.librechat.core.network.di
 
+import com.garfiec.librechat.core.common.AppInfo
 import com.garfiec.librechat.core.common.di.KoinQualifiers
 import com.garfiec.librechat.core.common.identity.ActiveAccountProvider
 import com.garfiec.librechat.core.network.api.AgentToolsApi
@@ -9,30 +10,42 @@ import com.garfiec.librechat.core.network.api.AuthApi
 import com.garfiec.librechat.core.network.api.BalanceApi
 import com.garfiec.librechat.core.network.api.BannerApi
 import com.garfiec.librechat.core.network.api.ChatApi
+import com.garfiec.librechat.core.network.api.CodeEnvironmentsApi
 import com.garfiec.librechat.core.network.api.ConfigApi
 import com.garfiec.librechat.core.network.api.ConversationsApi
 import com.garfiec.librechat.core.network.api.EndpointTokenApi
 import com.garfiec.librechat.core.network.api.FavoritesApi
 import com.garfiec.librechat.core.network.api.FilesApi
 import com.garfiec.librechat.core.network.api.FilesExtApi
+import com.garfiec.librechat.core.network.api.GitHubReleasesApi
 import com.garfiec.librechat.core.network.api.KeysApi
-import com.garfiec.librechat.core.network.api.MarketApi
 import com.garfiec.librechat.core.network.api.McpApi
+import com.garfiec.librechat.core.network.api.McpAppsApi
 import com.garfiec.librechat.core.network.api.MemoriesApi
 import com.garfiec.librechat.core.network.api.MessagesApi
+import com.garfiec.librechat.core.network.api.PasskeyApi
 import com.garfiec.librechat.core.network.api.PermissionsApi
 import com.garfiec.librechat.core.network.api.PresetsApi
 import com.garfiec.librechat.core.network.api.ProjectsApi
 import com.garfiec.librechat.core.network.api.PromptsApi
+import com.garfiec.librechat.core.network.api.PullRequestsApi
+import com.garfiec.librechat.core.network.api.QueuedTurnsApi
 import com.garfiec.librechat.core.network.api.RolesApi
+import com.garfiec.librechat.core.network.api.SchedulesApi
+import com.garfiec.librechat.core.network.api.SearchApi
 import com.garfiec.librechat.core.network.api.ShareApi
 import com.garfiec.librechat.core.network.api.SkillsApi
 import com.garfiec.librechat.core.network.api.SpeechApi
+import com.garfiec.librechat.core.network.api.SubagentsApi
 import com.garfiec.librechat.core.network.api.TagsApi
+import com.garfiec.librechat.core.network.api.TracesApi
 import com.garfiec.librechat.core.network.api.UserApi
 import com.garfiec.librechat.core.network.client.AuthInterceptorPlugin
+import com.garfiec.librechat.core.network.client.CertificateTrustRegistry
 import com.garfiec.librechat.core.network.client.GatewayDetectionPlugin
 import com.garfiec.librechat.core.network.client.LibreChatHttpClient
+import com.garfiec.librechat.core.network.client.OpenIdCookiePlugin
+import com.garfiec.librechat.core.network.client.RefreshCookieCredentials
 import com.garfiec.librechat.core.network.client.ServerHeadersPlugin
 import com.garfiec.librechat.core.network.client.ServerHeadersProvider
 import com.garfiec.librechat.core.network.client.ServerUrlProvider
@@ -48,8 +61,8 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
-import io.ktor.http.takeFrom
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 import org.koin.core.module.Module
@@ -75,6 +88,8 @@ val networkModule = module {
 
     single { librechatJson }
 
+    single { CertificateTrustRegistry() }
+
     // The switch barrier: one gate shared by both HTTP clients and (on iOS) the SSE transport, so a
     // single account switch flips URL + token key + identity atomically for all transports at once.
     single {
@@ -94,6 +109,7 @@ val networkModule = module {
             tokenManager = get(),
             serverUrlProvider = get(),
             redactor = get(),
+            refreshCookieCredentials = get<RefreshCookieCredentials>(),
             accountReadyGate = getOrNull(),
             switchGate = get(),
             serverHeadersProvider = get(),
@@ -112,6 +128,9 @@ val networkModule = module {
                 this.tokenManager = tokenManager
                 this.serverUrlProvider = serverUrlProvider
             }
+            install(OpenIdCookiePlugin) {
+                this.serverUrlProvider = serverUrlProvider
+            }
             install(ServerHeadersPlugin) {
                 this.serverHeadersProvider = serverHeadersProvider
                 this.serverUrlProvider = serverUrlProvider
@@ -128,7 +147,7 @@ val networkModule = module {
                 socketTimeoutMillis = Long.MAX_VALUE
             }
             defaultRequest {
-                applyBrowserDefaults(serverUrlProvider)
+                applyBrowserDefaults()
             }
         }
     }
@@ -150,8 +169,11 @@ val networkModule = module {
             // classifies as Retryable — it never routes to re-auth and never recovers, it just
             // silently stops working.
             //
-            // ServerUrlReadyPlugin could not host this: it intercepts before HttpRequestPipeline.Before,
-            // where `context.url.host` is still empty and no host-scoping is possible.
+            // Not folded into ServerUrlReadyPlugin, which now does set the host: the host-scoped,
+            // per-server header lookup belongs to ServerHeadersPlugin on all three clients.
+            install(OpenIdCookiePlugin) {
+                this.serverUrlProvider = serverUrlProvider
+            }
             install(ServerHeadersPlugin) {
                 this.serverHeadersProvider = serverHeadersProvider
                 this.serverUrlProvider = serverUrlProvider
@@ -164,11 +186,24 @@ val networkModule = module {
                 connectTimeoutMillis = 10_000
             }
             defaultRequest {
-                val baseUrl = serverUrlProvider.getBaseUrl()
-                if (baseUrl.isNotEmpty()) {
-                    url.takeFrom(baseUrl)
-                }
                 contentType(ContentType.Application.Json)
+            }
+        }
+    }
+
+    // Third-party hosts only (the GitHub update check). Deliberately carries none of the LibreChat
+    // plugins: the server's tokens, gateway headers and browser UA must never leave its own host.
+    single(KoinQualifiers.External) {
+        val appInfo = get<AppInfo>()
+        HttpClient(get<HttpClientEngineFactory<*>>()) {
+            expectSuccess = true
+            install(ContentNegotiation) { json(get<Json>()) }
+            install(HttpTimeout) {
+                requestTimeoutMillis = 15_000
+                connectTimeoutMillis = 10_000
+            }
+            defaultRequest {
+                headers.append(HttpHeaders.UserAgent, "Switchboard/${appInfo.versionName}")
             }
         }
     }
@@ -190,28 +225,37 @@ val networkModule = module {
     singleOf(::AgentToolsApi)
     singleOf(::ApiKeysApi)
     singleOf(::AuthApi)
-    singleOf(::MarketApi)
     singleOf(::BalanceApi)
     singleOf(::BannerApi)
     singleOf(::ChatApi)
+    singleOf(::CodeEnvironmentsApi)
+    singleOf(::PullRequestsApi)
     singleOf(::ConfigApi)
     singleOf(::ConversationsApi)
     singleOf(::EndpointTokenApi)
     singleOf(::FavoritesApi)
     singleOf(::FilesApi)
     singleOf(::FilesExtApi)
+    single { GitHubReleasesApi(get(KoinQualifiers.External)) }
     singleOf(::KeysApi)
     singleOf(::McpApi)
+    singleOf(::McpAppsApi)
     singleOf(::MemoriesApi)
     singleOf(::MessagesApi)
+    singleOf(::PasskeyApi)
     singleOf(::PermissionsApi)
     singleOf(::PresetsApi)
     singleOf(::ProjectsApi)
     singleOf(::PromptsApi)
+    singleOf(::QueuedTurnsApi)
     singleOf(::RolesApi)
+    singleOf(::SchedulesApi)
+    singleOf(::SearchApi)
     singleOf(::ShareApi)
     singleOf(::SkillsApi)
     singleOf(::SpeechApi)
+    singleOf(::SubagentsApi)
     singleOf(::TagsApi)
+    singleOf(::TracesApi)
     singleOf(::UserApi)
 }

@@ -1,6 +1,5 @@
 package com.garfiec.librechat.feature.chat.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,15 +8,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.LinearScale
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -30,7 +29,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.model.request.ForkOption
+import com.garfiec.librechat.core.ui.components.AdaptiveCheckbox
+import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
+import com.garfiec.librechat.core.ui.components.ListDragSelection
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
+import com.garfiec.librechat.core.ui.components.dragSelectRow
+import com.garfiec.librechat.core.ui.components.dragSelectRowIcon
+import com.garfiec.librechat.core.ui.components.listDragSelection
+import com.garfiec.librechat.core.ui.components.rememberListDragSelection
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import org.jetbrains.compose.resources.stringResource
@@ -39,20 +45,29 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun ForkOptionsBottomSheet(
     onDismiss: () -> Unit,
-    onFork: (option: String, splitAtTarget: Boolean) -> Unit,
+    onFork: (option: String, splitAtTarget: Boolean, excludeFiles: Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    /** The server can copy without files (v0.8.9-rc1); hides "Leave out files" otherwise. */
+    excludeFilesSupported: Boolean = false,
 ) {
     val sheetState = rememberModalBottomSheetState()
     var splitAtTarget by remember { mutableStateOf(false) }
+    // Never remembered across sheets, as on web: each fork decides afresh.
+    var excludeFiles by remember { mutableStateOf(false) }
+    val leaveOutFiles = excludeFiles && excludeFilesSupported
 
-    ModalBottomSheet(
+    AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
         dragHandle = { LowProfileDragHandle() },
         modifier = modifier,
         sheetState = sheetState,
     ) {
+        val dragSelection = rememberListDragSelection()
         Column(
-            modifier = Modifier.padding(bottom = 32.dp),
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .listDragSelection(dragSelection, holdOnly = true)
+                .padding(bottom = 32.dp),
         ) {
             Text(
                 text = stringResource(Res.string.fork_conversation),
@@ -65,49 +80,77 @@ fun ForkOptionsBottomSheet(
                 icon = Icons.Default.LinearScale,
                 label = stringResource(Res.string.fork_visible_messages),
                 description = stringResource(Res.string.fork_visible_messages_desc),
-                onClick = { onFork(ForkOption.DIRECT_PATH, splitAtTarget) },
+                onClick = { onFork(ForkOption.DIRECT_PATH, splitAtTarget, leaveOutFiles) },
+                dragSelection = dragSelection,
             )
 
             ForkOptionRow(
                 icon = Icons.AutoMirrored.Filled.CallSplit,
                 label = stringResource(Res.string.fork_include_branches),
                 description = stringResource(Res.string.fork_include_branches_desc),
-                onClick = { onFork(ForkOption.INCLUDE_BRANCHES, splitAtTarget) },
+                onClick = { onFork(ForkOption.INCLUDE_BRANCHES, splitAtTarget, leaveOutFiles) },
+                dragSelection = dragSelection,
             )
 
             ForkOptionRow(
                 icon = Icons.Default.AccountTree,
                 label = stringResource(Res.string.fork_all_to_target),
                 description = stringResource(Res.string.fork_all_to_target_desc),
-                onClick = { onFork(ForkOption.TARGET_LEVEL, splitAtTarget) },
+                onClick = { onFork(ForkOption.TARGET_LEVEL, splitAtTarget, leaveOutFiles) },
+                dragSelection = dragSelection,
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { splitAtTarget = !splitAtTarget }
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = splitAtTarget,
-                    onCheckedChange = { splitAtTarget = it },
+            ForkCheckboxRow(
+                checked = splitAtTarget,
+                onCheckedChange = { splitAtTarget = it },
+                label = stringResource(Res.string.fork_start_new),
+                description = stringResource(Res.string.fork_start_new_desc),
+                dragSelection = dragSelection,
+            )
+
+            if (excludeFilesSupported) {
+                ForkCheckboxRow(
+                    checked = excludeFiles,
+                    onCheckedChange = { excludeFiles = it },
+                    label = stringResource(Res.string.fork_exclude_files),
+                    description = stringResource(Res.string.fork_exclude_files_desc),
+                    dragSelection = dragSelection,
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = stringResource(Res.string.fork_start_new),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = stringResource(Res.string.fork_start_new_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
+        }
+    }
+}
+
+@Composable
+private fun ForkCheckboxRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    label: String,
+    description: String,
+    dragSelection: ListDragSelection,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .dragSelectRow(dragSelection) { onCheckedChange(!checked) }
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AdaptiveCheckbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.dragSelectRowIcon(),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column {
+            Text(text = label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -118,18 +161,19 @@ private fun ForkOptionRow(
     label: String,
     description: String,
     onClick: () -> Unit,
+    dragSelection: ListDragSelection,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .dragSelectRow(dragSelection, onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(24.dp).dragSelectRowIcon(),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.width(16.dp))

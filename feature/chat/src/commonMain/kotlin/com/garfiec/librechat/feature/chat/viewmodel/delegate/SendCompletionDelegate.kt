@@ -4,20 +4,28 @@ import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.common.identity.AccountId
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.common.result.getOrNull
+import com.garfiec.librechat.core.common.result.suspendRunCatching
 import com.garfiec.librechat.core.data.repository.ConversationRepository
 import com.garfiec.librechat.core.data.repository.DraftRepository
 import com.garfiec.librechat.core.data.repository.MessageRepository
 import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.StreamEvent
+import com.garfiec.librechat.core.model.content.LegacyThinking
+import com.garfiec.librechat.core.model.content.stripCitations
 import com.garfiec.librechat.feature.chat.util.NEW_CHAT_DRAFT_KEY
 import com.garfiec.librechat.feature.chat.util.resolvedResponseMessage
+import com.garfiec.librechat.feature.chat.viewmodel.ChatNotice
+import com.garfiec.librechat.feature.chat.viewmodel.NOTICE_TAG
 import com.garfiec.librechat.feature.chat.viewmodel.NewChatSelectionHandoff
-import com.garfiec.librechat.feature.chat.viewmodel.PLACEHOLDER_CONVERSATION_TITLE
 import com.garfiec.librechat.feature.chat.viewmodel.SendCompletionHandle
+import com.garfiec.librechat.feature.chat.viewmodel.isRealTitle
+import com.garfiec.librechat.feature.chat.viewmodel.noticeLabel
 import com.garfiec.librechat.feature.chat.viewmodel.shouldRequestTitleGeneration
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Owns what happens when a chat send reaches the server: the `created` and `final`
@@ -41,6 +49,9 @@ class SendCompletionDelegate(
     private val selectionHandoff: NewChatSelectionHandoff,
     /** Reloads the conversation from the server (VM-owned Room observer). */
     private val reloadConversation: (String) -> Unit,
+    private val newChatDraftKey: String = NEW_CHAT_DRAFT_KEY,
+    /** `SkillsToggleDelegate.carryToCreatedConversation`: the new chat's Skills toggle moves to its id. */
+    private val carrySkillsToggle: (conversationId: String, isTemporary: Boolean) -> Unit = { _, _ -> },
 ) {
 
     private var titleGenerationRequested = false
@@ -64,15 +75,15 @@ class SendCompletionDelegate(
         val isTemporary = handle.state.isTemporaryChat
         if (isNewConversation) {
             if (!isTemporary) {
+                // NonCancellable here and in the cache warm below: a project landing leaves the back
+                // stack as soon as its chat opens, clearing this ViewModel while these still run.
                 handle.scope.launch {
-                    val existingDraft = draftRepository.getDraftState(NEW_CHAT_DRAFT_KEY)
-                    if (existingDraft != null) {
-                        draftRepository.saveDraftState(
-                            conversationId = conversationId,
-                            text = existingDraft.text,
-                            stateJson = existingDraft.stateJson,
-                        )
-                        draftRepository.deleteDraft(NEW_CHAT_DRAFT_KEY)
+                    withContext(NonCancellable) {
+                        val existingDraft = draftRepository.getDraft(newChatDraftKey)
+                        if (existingDraft != null) {
+                            draftRepository.saveDraft(conversationId, existingDraft)
+                            draftRepository.deleteDraft(newChatDraftKey)
+                        }
                     }
                 }
             }
@@ -85,9 +96,27 @@ class SendCompletionDelegate(
             // can keep it on screen during the resumed stream — the server doesn't persist the
             // request message until the reply completes. See NewChatSelectionHandoff.
             val optimisticUserMessage = sent.messages.lastOrNull { it.isCreatedByUser }
-            selectionHandoff.put(conversationId, sent.selectedEndpoint, sent.selectedModel, optimisticUserMessage)
-            val snapshot = handle.state
-            if (snapshot.pendingNavigationConversationId == null && !snapshot.comparisonState.isEnabled) {
+            // Navigating now resets this landing, so chips still staged here move with the chat.
+            // A deferred nav (comparison) keeps the landing, and its chips stay on it.
+            val navigatesNow = sent.pendingNavigationConversationId == null && !sent.comparisonState.isEnabled
+            val staged = if (navigatesNow) sent.pendingManualSkills else emptyList()
+            selectionHandoff.put(
+                conversationId,
+                sent.selection.choice,
+                optimisticUserMessage,
+                skillsToggle = sent.skillsToggle.takeIf { sent.activeSpecSkills == null },
+                stagedManualSkills = staged,
+                skillsNotSentNotice = staged.isNotEmpty() && sent.error == ChatNotice.SKILLS_NOT_SENT.marker(),
+                sentWithoutWorkspaceNotice = navigatesNow && sent.error == ChatNotice.CODE_WORKSPACE_SENT_WITHOUT.marker(),
+                modelParameters = sent.modelParameters,
+                specTools = sent.selection.specTools,
+            )
+            Diag.d(
+                tag = NOTICE_TAG,
+                attrs = mapOf("navigatesNow" to navigatesNow.toString(), "notice" to noticeLabel(sent.error)),
+            ) { "handoff put for $conversationId" }
+            carrySkillsToggle(conversationId, isTemporary)
+            if (navigatesNow) {
                 handle.update {
                     conversation = conversation.copy(pendingNavigationConversationId = conversationId)
                 }
@@ -97,7 +126,7 @@ class SendCompletionDelegate(
         // conversation list even if the stream fails later — but never for temp chats (see guard).
         if (!isTemporary) {
             handle.scope.launch {
-                conversationRepository.getConversation(conversationId, originAccount)
+                withContext(NonCancellable) { conversationRepository.getConversation(conversationId, originAccount) }
             }
         }
     }
@@ -108,13 +137,14 @@ class SendCompletionDelegate(
      * temporary), drives the display (Room reload for normal chats, in-memory finalize for
      * temp chats), kicks off title generation, and auto-reads the response.
      *
-     * @param completedResponseText the streamed response text, for auto-read.
+     * @param completedResponseText the streamed answer text (no reasoning deltas), for auto-read.
      * @param shouldAutoRead false for edit/regenerate/continue (no auto-TTS).
      * @param aborted true when the stream ended because the turn was stopped. The frame is a
      *   deliberately poorer final (stub `conversation`, hardcoded `New Chat` title, no `text`),
      *   so the conversation save is skipped and the title is re-read from the server rather than
      *   generated — see the call sites below.
      */
+    @Suppress("LongParameterList") // debt: wide parameter list
     fun onFinal(
         event: StreamEvent.Final,
         conversationId: String?,
@@ -125,6 +155,8 @@ class SendCompletionDelegate(
         isComparison: Boolean,
         originAccount: AccountId?,
         aborted: Boolean = false,
+        /** This turn's optimistic user message, which the frame's request replaces. */
+        optimisticUserMessageId: String? = null,
     ) {
         val finalConversation = event.conversation
         // Belt-and-braces: if no handoff seeded the selection and the initial GET 404'd
@@ -148,8 +180,18 @@ class SendCompletionDelegate(
         // row (title included) with placeholder data, which the web client never notices because
         // it has no local store. Skip the save; the title refresh below re-reads the real one.
         if (finalConversation?.conversationId != null && !isTemporary && !aborted) {
+            // A completed frame can still carry the placeholder title: its conversation is the row
+            // as the reply's write returned it, which can predate the title's save. The web keeps
+            // a real title it already holds over that (final.ts); so does this client, in memory and in Room.
+            val knownTitle = handle.state.conversationTitle
+                .takeIf { finalConversation.conversationId == handle.state.conversationId }
+            val toSave = if (!isRealTitle(finalConversation.title) && isRealTitle(knownTitle)) {
+                finalConversation.copy(title = knownTitle)
+            } else {
+                finalConversation
+            }
             handle.scope.launch {
-                conversationRepository.saveConversation(finalConversation, originAccount)
+                conversationRepository.saveConversation(toSave, originAccount)
             }
         }
         if (conversationId != null) {
@@ -159,7 +201,7 @@ class SendCompletionDelegate(
                 // read-through (which would upsert the message rows to disk). Drive the
                 // display from the final event in memory instead. Title generation is
                 // also skipped server-side for temp chats, so there's nothing to refresh.
-                treeDelegate.finalizeChatDisplay(event)
+                treeDelegate.finalizeChatDisplay(event, optimisticUserMessageId)
             } else {
                 if (isComparison && !aborted) {
                     // A comparison persists as ONE response message whose content parts carry
@@ -184,7 +226,7 @@ class SendCompletionDelegate(
                     // applyAbortContract, so it is either genuinely persisted or absent; the
                     // frozen pane buffers (comparisonDelegate.onFinal) cover rendering, and
                     // reopen rehydration reads the cached attributed tail.
-                    val finalizedTurn = treeDelegate.finalizeChatDisplay(event)
+                    val finalizedTurn = treeDelegate.finalizeChatDisplay(event, optimisticUserMessageId)
                     // Cache unconditionally: applyAbortContract already dropped any response the
                     // server didn't persist, and on a non-early abort the request message IS
                     // server-persisted — caching it is required, since this is the only write
@@ -218,10 +260,25 @@ class SendCompletionDelegate(
                 }
             }
         }
-        if (shouldAutoRead && completedResponseText.isNotBlank()) {
-            tts.maybeAutoReadResponse(completedResponseText)
+        // Same rule as manual Read Aloud (speechTextOf): never speak the reasoning. The streamed
+        // text can still carry a legacy `:::thinking … :::` block inline.
+        val spokenText = LegacyThinking.split(completedResponseText)?.answer ?: completedResponseText
+        // A user already typing or dictating the next message isn't read over; the mic would hear it.
+        val composing = handle.state.inputText.isNotBlank() || handle.state.isRecording || handle.state.isTranscribing
+        if (shouldAutoRead && spokenText.isNotBlank() && !composing) {
+            val readingId = event.resolvedResponseMessage()?.messageId ?: AUTO_READ_ID
+            tts.maybeAutoReadResponse(readingId, stripCitations(spokenText))
         }
     }
+
+    /**
+     * The turn [cacheTurn] last wrote. A message fetch in flight while a turn finalizes reads the
+     * server before it saved that turn (it emits the final frame first, and a reply whose stream
+     * lost a subscriber sits there as an `unfinished` partial until then), and its upsert lands
+     * after this cache write. `ConversationLoadDelegate` writes this back over it.
+     */
+    var lastCachedTurn: CachedTurn? = null
+        private set
 
     /**
      * Records the just-finalized [turn] to the local cache only — no network. The optimistic
@@ -231,8 +288,9 @@ class SendCompletionDelegate(
      */
     private fun cacheTurn(turn: List<Message>, originAccount: AccountId?) {
         if (turn.isEmpty()) return
+        lastCachedTurn = CachedTurn(turn, originAccount)
         handle.scope.launch {
-            runCatching { messageRepository.cacheMessages(turn, originAccount) }
+            suspendRunCatching { messageRepository.cacheMessages(turn, originAccount) }
                 .onFailure { Logger.e(it) { "Failed to cache final messages for the completed turn" } }
         }
     }
@@ -260,7 +318,7 @@ class SendCompletionDelegate(
                 if (attempt > 0) delay(ABORT_TITLE_RETRY_DELAY_MS)
                 val title = conversationRepository.refreshConversation(conversationId, originAccount)
                     .getOrNull()?.title
-                if (!title.isNullOrBlank() && title != PLACEHOLDER_CONVERSATION_TITLE) {
+                if (isRealTitle(title)) {
                     handle.update { conversation = conversation.copy(conversationTitle = title) }
                     return@launch
                 }
@@ -268,11 +326,24 @@ class SendCompletionDelegate(
         }
     }
 
+    /**
+     * Cache-first: the row can still hold the placeholder (cached at `created`, before the title
+     * existed), so a placeholder read never replaces a title already shown, e.g. one TitleUpdate
+     * delivered. A real title, including one renamed elsewhere, still applies.
+     */
     private fun refreshConversationTitle(conversationId: String, originAccount: AccountId?) {
         handle.scope.launch {
             val fetched = conversationRepository.getConversation(conversationId, originAccount).getOrNull()
                 ?: return@launch
-            handle.update { conversation = conversation.copy(conversationTitle = fetched.title) }
+            applyFetchedTitle(fetched.title)
+        }
+    }
+
+    private fun applyFetchedTitle(title: String?) {
+        handle.update {
+            if (isRealTitle(title) || !isRealTitle(conversation.conversationTitle)) {
+                conversation = conversation.copy(conversationTitle = title)
+            }
         }
     }
 
@@ -280,7 +351,15 @@ class SendCompletionDelegate(
         handle.scope.launch {
             when (val result = conversationRepository.generateTitle(conversationId, originAccount)) {
                 is Result.Success -> {
-                    handle.update { conversation = conversation.copy(conversationTitle = result.data) }
+                    if (handle.state.conversation.titleSetByUser) {
+                        // Renamed while the title generated: the server kept the manual title, so
+                        // re-read it rather than show (and leave cached) the generated one.
+                        conversationRepository.refreshConversation(conversationId, originAccount).getOrNull()?.let { fetched ->
+                            applyFetchedTitle(fetched.title)
+                        }
+                    } else {
+                        handle.update { conversation = conversation.copy(conversationTitle = result.data) }
+                    }
                 }
                 is Result.Error -> {
                     Logger.d { "Title generation failed for $conversationId: ${result.message}" }
@@ -291,7 +370,7 @@ class SendCompletionDelegate(
                     // could never observe the title, and refreshConversation's upsert also
                     // propagates it to the Room-observing conversation list.
                     conversationRepository.refreshConversation(conversationId, originAccount).getOrNull()?.let { fetched ->
-                        handle.update { conversation = conversation.copy(conversationTitle = fetched.title) }
+                        applyFetchedTitle(fetched.title)
                     }
                 }
                 is Result.Loading -> { /* no-op */ }
@@ -307,5 +386,11 @@ class SendCompletionDelegate(
          */
         const val ABORT_TITLE_READ_ATTEMPTS = 3
         const val ABORT_TITLE_RETRY_DELAY_MS = 2_000L
+
+        /** Reading id for a final frame that names no reply. No row matches it, so no row shows Stop. */
+        const val AUTO_READ_ID = "auto_read"
     }
 }
+
+/** A finalized turn as cached, with the account it belongs to. Compared by identity: each finalize is a new one. */
+class CachedTurn(val messages: List<Message>, val originAccount: AccountId?)

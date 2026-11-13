@@ -2,6 +2,7 @@ package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,9 +17,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -36,7 +34,11 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.model.FeedbackRating
 import com.garfiec.librechat.core.model.FeedbackTag
+import com.garfiec.librechat.core.ui.components.AdaptiveModalBottomSheet
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.AdaptiveRadioButton
 import com.garfiec.librechat.core.ui.components.LowProfileDragHandle
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import org.jetbrains.compose.resources.stringResource
@@ -77,10 +79,10 @@ internal fun FeedbackTagSheet(
     var comment by rememberSaveable(rating) { mutableStateOf("") }
     val selectedTag = tags.firstOrNull { it.name == selectedTagName }
 
-    ModalBottomSheet(
+    AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
         dragHandle = { LowProfileDragHandle() },
-        modifier = modifier,
+        modifier = modifier.clearFocusOnTap(),
         sheetState = sheetState,
     ) {
         Column(
@@ -119,7 +121,7 @@ internal fun FeedbackTagSheet(
                             .padding(vertical = 8.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(selected = selectedTag == tag, onClick = null)
+                        AdaptiveRadioButton(selected = selectedTag == tag, onClick = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = feedbackTagLabel(tag),
@@ -140,7 +142,7 @@ internal fun FeedbackTagSheet(
                 )
             }
 
-            OutlinedTextField(
+            AdaptiveOutlinedTextField(
                 value = comment,
                 onValueChange = { if (it.length <= MAX_COMMENT_LENGTH) comment = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -150,25 +152,34 @@ internal fun FeedbackTagSheet(
                 maxLines = 5,
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(Res.string.cancel))
-                }
-                TextButton(
-                    // The server rejects a tagless submission, so an enabled button here would
-                    // just produce a 400 the user never sees.
-                    enabled = selectedTag != null && submitEnabled,
-                    onClick = {
-                        selectedTag?.let { onSubmit(it, comment.trim().ifBlank { null }) }
-                    },
-                ) {
-                    Text(stringResource(Res.string.action_submit))
-                }
-            }
+            FeedbackActions(
+                // The server rejects a tagless submission, so an enabled button here would
+                // just produce a 400 the user never sees.
+                submitEnabled = selectedTag != null && submitEnabled,
+                onCancel = onDismiss,
+                onSubmit = { selectedTag?.let { onSubmit(it, comment.trim().ifBlank { null }) } },
+            )
+        }
+    }
+}
+
+@Composable
+internal fun FeedbackActions(
+    submitEnabled: Boolean,
+    onCancel: () -> Unit,
+    onSubmit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FlowRow(
+        modifier = modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.End,
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = onCancel) {
+            Text(stringResource(Res.string.cancel))
+        }
+        TextButton(enabled = submitEnabled, onClick = onSubmit) {
+            Text(stringResource(Res.string.action_submit))
         }
     }
 }

@@ -15,12 +15,9 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +27,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveExposedDropdownMenu
+import com.garfiec.librechat.core.ui.components.AdaptiveExposedDropdownMenuBox
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.AdaptiveSwitch
 import com.garfiec.librechat.feature.agents.components.model.AgentSharingState
 import com.garfiec.librechat.feature.agents.components.model.AgentVisibility
 import com.garfiec.librechat.feature.agents.resources.*
@@ -65,6 +66,7 @@ fun AgentSharingSection(
             Text(
                 text = stringResource(Res.string.sharing_and_permissions),
                 style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
             )
             Icon(
                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -79,13 +81,13 @@ fun AgentSharingSection(
             ) {
                 // Visibility dropdown
                 var dropdownExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
+                AdaptiveExposedDropdownMenuBox(
                     expanded = dropdownExpanded,
                     onExpandedChange = { dropdownExpanded = it },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    OutlinedTextField(
-                        value = sharingState.visibility.label,
+                    AdaptiveOutlinedTextField(
+                        value = stringResource(sharingState.visibility.label),
                         onValueChange = {},
                         readOnly = true,
                         label = { Text(stringResource(Res.string.label_visibility)) },
@@ -96,13 +98,13 @@ fun AgentSharingSection(
                             .fillMaxWidth()
                             .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                     )
-                    ExposedDropdownMenu(
+                    AdaptiveExposedDropdownMenu(
                         expanded = dropdownExpanded,
                         onDismissRequest = { dropdownExpanded = false },
                     ) {
                         AgentVisibility.entries.forEach { visibility ->
                             DropdownMenuItem(
-                                text = { Text(visibility.label) },
+                                text = { Text(stringResource(visibility.label)) },
                                 onClick = {
                                     onSharingChange(sharingState.copy(visibility = visibility))
                                     dropdownExpanded = false
@@ -134,7 +136,7 @@ fun AgentSharingSection(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(
+                        AdaptiveSwitch(
                             checked = sharingState.isCollaborative,
                             onCheckedChange = {
                                 onSharingChange(sharingState.copy(isCollaborative = it))

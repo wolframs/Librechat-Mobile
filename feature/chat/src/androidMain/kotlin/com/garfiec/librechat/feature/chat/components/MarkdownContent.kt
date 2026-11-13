@@ -2,8 +2,8 @@ package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -21,14 +21,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -42,7 +39,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -52,15 +48,22 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.isSpecified
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.garfiec.librechat.core.model.content.stripCitations
+import com.garfiec.librechat.core.ui.components.AdaptiveDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveDivider
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBar
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBarSpec
+import com.garfiec.librechat.core.ui.components.topbar.BarIcons
+import com.garfiec.librechat.core.ui.components.topbar.BarNavigation
+import com.garfiec.librechat.core.ui.components.topbar.BarTitle
+import com.garfiec.librechat.core.ui.components.topbar.MaterialBarStyle
+import com.garfiec.librechat.core.ui.theme.chatColors
+import com.garfiec.librechat.core.ui.theme.isSurfaceDark
+import com.garfiec.librechat.core.ui.theme.themeShapes
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import com.mikepenz.markdown.m3.markdownColor
@@ -100,11 +103,12 @@ actual fun MarkdownContent(
     streaming: Boolean,
     trailingCursor: Boolean,
 ) {
-    val segments = rememberMarkdownSegments(text, streaming)
     val isSearchActive = !searchQuery.isNullOrBlank()
+    val segments = rememberCitedMarkdownSegments(text, streaming, withoutCitations = isSearchActive)
+    val spokenText = remember(text) { stripCitations(text) }
 
-    // Search rewrites text segments into HighlightedTextSegment, which builds its own AnnotatedString
-    // and never reaches the annotator — so an active query forces the block-level cursor too.
+    // Search draws text segments with its own components (SearchableMarkdown), which don't run the
+    // cursor's annotator — so an active query forces the block-level cursor too.
     val inlineCursor = trailingCursor && !isSearchActive &&
         segments.lastOrNull()?.let { canHostInlineCursor(it) } == true
 
@@ -112,7 +116,7 @@ actual fun MarkdownContent(
         modifier = modifier
             .fillMaxWidth()
             .semantics {
-                contentDescription = text
+                contentDescription = spokenText
             },
     ) {
         // Per-segment occurrence base offsets, advanced via countSegmentOccurrences so they stay
@@ -150,6 +154,7 @@ actual fun MarkdownContent(
                             searchFocusedOccurrence = focusedInSegment,
                             onFocusedMatchPosition = onFocusedOccurrencePosition,
                             streaming = streaming,
+                            run = rememberCodeRunTarget(segment, streaming),
                         )
                     }
                     if (index < segments.lastIndex) Spacer(modifier = Modifier.height(8.dp))
@@ -172,14 +177,18 @@ actual fun MarkdownContent(
                                 is InlineSegment.Text -> {
                                     if (inlineSegment.text.isNotBlank()) {
                                         if (isSearchActive) {
-                                            val runOccurrences = countOccurrences(inlineSegment.text, searchQuery)
-                                            val focusedInRun = focusedInSegment - inlineOffset
-                                            HighlightedTextSegment(
+                                            val runOccurrences =
+                                                countDisplayedOccurrences(inlineSegment.text, searchQuery)
+                                            MarkdownTextSegment(
                                                 content = inlineSegment.text,
-                                                searchQuery = searchQuery,
-                                                focusedOccurrence = focusedInRun,
                                                 fontSizeMultiplier = fontSizeMultiplier,
-                                                onFocusedMatchPosition = onFocusedOccurrencePosition,
+                                                immediate = immediate,
+                                                search = rememberMarkdownSearch(
+                                                    inlineSegment.text,
+                                                    searchQuery,
+                                                    focusedInSegment - inlineOffset,
+                                                    onFocusedOccurrencePosition,
+                                                ),
                                             )
                                             inlineOffset += runOccurrences
                                         } else {
@@ -221,31 +230,22 @@ actual fun MarkdownContent(
                 }
                 is MarkdownSegment.TextBlock -> {
                     if (isSearchActive) {
-                        HighlightedTextSegment(
+                        // Markdown stays rendered with find open; matches are marked in what it
+                        // displays. Citation pills are left out while finding.
+                        MarkdownTextSegment(
                             content = segment.text,
-                            searchQuery = searchQuery,
-                            focusedOccurrence = focusedInSegment,
                             fontSizeMultiplier = fontSizeMultiplier,
-                            onFocusedMatchPosition = onFocusedOccurrencePosition,
+                            immediate = immediate,
+                            search = rememberMarkdownSearch(segment.text, searchQuery, focusedInSegment, onFocusedOccurrencePosition),
                         )
                     } else {
-                        val hasCitations = remember(segment.text) {
-                            segment.text.contains(CITATION_DETECT_REGEX)
-                        }
-                        if (hasCitations) {
-                            CitationText(
-                                text = segment.text,
-                                fontSizeMultiplier = fontSizeMultiplier,
-                            )
-                        } else {
-                            MarkdownTextSegment(
-                                content = segment.text,
-                                fontSizeMultiplier = fontSizeMultiplier,
-                                immediate = immediate,
-                                streaming = streaming,
-                                trailingCursor = inlineCursor && index == segments.lastIndex,
-                            )
-                        }
+                        MarkdownTextSegment(
+                            content = segment.text,
+                            fontSizeMultiplier = fontSizeMultiplier,
+                            immediate = immediate,
+                            streaming = streaming,
+                            trailingCursor = inlineCursor && index == segments.lastIndex,
+                        )
                     }
                 }
             }
@@ -270,22 +270,25 @@ private fun MarkdownTextSegment(
     immediate: Boolean = false,
     streaming: Boolean = false,
     trailingCursor: Boolean = false,
+    search: MarkdownSearch? = null,
 ) {
+    val components = remember(search) { search?.let(::searchMarkdownComponents) ?: ChatMarkdownComponents }
+    val chat = chatColors()
     val colors = markdownColor(
-        text = MaterialTheme.colorScheme.onSurface,
-        codeBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
-        inlineCodeBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
-        dividerColor = MaterialTheme.colorScheme.outlineVariant,
+        text = chat.messageText,
+        codeBackground = chat.codeBody,
+        inlineCodeBackground = chat.inlineCode,
+        dividerColor = chat.rule,
     )
     val bodyLarge = MaterialTheme.typography.bodyLarge
     val bodyMedium = MaterialTheme.typography.bodyMedium
     val typography = markdownTypography(
-        h1 = MaterialTheme.typography.headlineLarge.scaleFontSize(fontSizeMultiplier),
-        h2 = MaterialTheme.typography.headlineMedium.scaleFontSize(fontSizeMultiplier),
-        h3 = MaterialTheme.typography.headlineSmall.scaleFontSize(fontSizeMultiplier),
-        h4 = MaterialTheme.typography.titleLarge.scaleFontSize(fontSizeMultiplier),
-        h5 = MaterialTheme.typography.titleMedium.scaleFontSize(fontSizeMultiplier),
-        h6 = MaterialTheme.typography.titleSmall.scaleFontSize(fontSizeMultiplier),
+        h1 = MaterialTheme.typography.headlineLarge.copy(color = chat.headingText).scaleFontSize(fontSizeMultiplier),
+        h2 = MaterialTheme.typography.headlineMedium.copy(color = chat.headingText).scaleFontSize(fontSizeMultiplier),
+        h3 = MaterialTheme.typography.headlineSmall.copy(color = chat.headingText).scaleFontSize(fontSizeMultiplier),
+        h4 = MaterialTheme.typography.titleLarge.copy(color = chat.headingText).scaleFontSize(fontSizeMultiplier),
+        h5 = MaterialTheme.typography.titleMedium.copy(color = chat.headingText).scaleFontSize(fontSizeMultiplier),
+        h6 = MaterialTheme.typography.titleSmall.copy(color = chat.headingText).scaleFontSize(fontSizeMultiplier),
         text = bodyLarge.scaleFontSize(fontSizeMultiplier),
         paragraph = bodyLarge.scaleFontSize(fontSizeMultiplier),
         quote = bodyLarge.copy(fontStyle = FontStyle.Italic).scaleFontSize(fontSizeMultiplier),
@@ -294,6 +297,7 @@ private fun MarkdownTextSegment(
         ordered = bodyLarge.scaleFontSize(fontSizeMultiplier),
         bullet = bodyLarge.scaleFontSize(fontSizeMultiplier),
         list = bodyLarge.scaleFontSize(fontSizeMultiplier),
+        textLink = proseLinkStyles(chat.linkInline),
     )
 
     // CachedMarkdown reads the ParsedMarkdownCache hoisted on ChatViewModel and
@@ -312,20 +316,22 @@ private fun MarkdownTextSegment(
             immediate = immediate,
             streaming = streaming,
             trailingCursor = trailingCursor,
+            components = components,
         )
     }
 }
 
 /**
- * Wraps a [MarkdownTable] in a [Box] with a fullscreen expand button overlaid on
- * the top-right corner. Tapping the button opens a [FullscreenTableDialog].
+ * A [MarkdownTable] under a fullscreen expand button, which sits above the table's end rather than
+ * over its corner, where a panning table would scroll its headers beneath it. Tapping the button
+ * opens a [FullscreenTableDialog].
  */
 @Composable
 private fun MarkdownTableWithFullscreen(
     headers: List<String>,
     alignments: List<TableCellAlignment>,
     rows: List<List<String>>,
-    modifier: Modifier,
+    modifier: Modifier = Modifier,
     fontSizeMultiplier: Float = 1.0f,
     searchQuery: String? = null,
     searchFocusedOccurrence: Int = -1,
@@ -333,21 +339,12 @@ private fun MarkdownTableWithFullscreen(
 ) {
     var showFullscreen by remember { mutableStateOf(false) }
 
-    Box(modifier = modifier) {
-        MarkdownTable(
-            headers = headers,
-            alignments = alignments,
-            rows = rows,
-            fontSizeMultiplier = fontSizeMultiplier,
-            searchQuery = searchQuery,
-            searchFocusedOccurrence = searchFocusedOccurrence,
-            onFocusedMatchPosition = onFocusedMatchPosition,
-        )
-
+    Column(modifier = modifier) {
         IconButton(
             onClick = { showFullscreen = true },
             modifier = Modifier
-                .align(Alignment.TopEnd)
+                .align(Alignment.End)
+                .padding(bottom = 4.dp)
                 .size(32.dp),
             colors = IconButtonDefaults.iconButtonColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
@@ -360,6 +357,15 @@ private fun MarkdownTableWithFullscreen(
                 modifier = Modifier.size(18.dp),
             )
         }
+        MarkdownTable(
+            headers = headers,
+            alignments = alignments,
+            rows = rows,
+            fontSizeMultiplier = fontSizeMultiplier,
+            searchQuery = searchQuery,
+            searchFocusedOccurrence = searchFocusedOccurrence,
+            onFocusedMatchPosition = onFocusedMatchPosition,
+        )
     }
 
     if (showFullscreen) {
@@ -375,7 +381,7 @@ private fun MarkdownTableWithFullscreen(
 
 /**
  * Fullscreen dialog that renders a markdown table inside a scrollable container
- * (both horizontal and vertical) with a [TopAppBar] for the title and close button.
+ * (both horizontal and vertical) with an adaptive top bar for the title and close button.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -386,7 +392,7 @@ private fun FullscreenTableDialog(
     fontSizeMultiplier: Float,
     onDismiss: () -> Unit,
 ) {
-    Dialog(
+    AdaptiveDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
@@ -395,19 +401,13 @@ private fun FullscreenTableDialog(
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface),
         ) {
-            TopAppBar(
-                title = { Text(stringResource(Res.string.dialog_table)) },
-                navigationIcon = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = stringResource(Res.string.cd_close),
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+            AdaptiveTopBar(
+                spec = AdaptiveTopBarSpec(
+                    navigation = BarNavigation(BarIcons.Close, stringResource(Res.string.cd_close), onDismiss),
+                    title = BarTitle(stringResource(Res.string.dialog_table)),
+                    actions = emptyList(),
                 ),
+                materialStyle = MaterialBarStyle(containerColor = MaterialTheme.colorScheme.surface),
             )
 
             val verticalScrollState = rememberScrollState()
@@ -423,6 +423,7 @@ private fun FullscreenTableDialog(
                         headers = headers,
                         alignments = alignments,
                         rows = rows,
+                        pan = true,
                         fontSizeMultiplier = fontSizeMultiplier,
                     )
                 }
@@ -432,12 +433,12 @@ private fun FullscreenTableDialog(
 }
 
 /**
- * Renders a markdown table with a header row and data rows. The table supports
- * horizontal scrolling for wide tables with many columns. Header cells are bold
+ * Renders a markdown table with a header row and data rows. Header cells are bold
  * with a bottom divider. Subtle row dividers and column dividers provide structure.
  *
- * Column widths are computed from the text content so that all cells in the same
- * column share a uniform width, giving a proper grid appearance.
+ * All cells in a column share one width, and the columns are fitted to the available
+ * width by [fitTableColumns], wrapping their text. The table pans horizontally only when
+ * it has too many columns to fit readably, or always when [pan] (the fullscreen view).
  */
 @Composable
 private fun MarkdownTable(
@@ -445,51 +446,61 @@ private fun MarkdownTable(
     alignments: List<TableCellAlignment>,
     rows: List<List<String>>,
     modifier: Modifier = Modifier,
+    pan: Boolean = false,
     fontSizeMultiplier: Float = 1.0f,
     searchQuery: String? = null,
     searchFocusedOccurrence: Int = -1,
     onFocusedMatchPosition: ((LayoutCoordinates, Rect) -> Unit)? = null,
 ) {
-    val isSearchActive = !searchQuery.isNullOrBlank()
-    val textColor = MaterialTheme.colorScheme.onSurface
-    val headerBackground = MaterialTheme.colorScheme.surfaceContainerHigh
-    val dividerColor = MaterialTheme.colorScheme.outlineVariant
     val bodyStyle = MaterialTheme.typography.bodyMedium.scaleFontSize(fontSizeMultiplier)
     val headerStyle = bodyStyle.copy(fontWeight = FontWeight.Bold)
     val cellPaddingH = 12.dp
+    val cells = rememberRenderedTableCells(headers, rows)
+
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val columnWidths =
+            rememberTableColumnWidths(cells, headerStyle, bodyStyle, cellPaddingH, constraints.maxWidth, pan)
+        MarkdownTableGrid(
+            headers = cells.headers,
+            alignments = alignments,
+            rows = cells.rows,
+            columnWidths = columnWidths,
+            bodyStyle = bodyStyle,
+            headerStyle = headerStyle,
+            cellPaddingH = cellPaddingH,
+            searchQuery = searchQuery,
+            searchFocusedOccurrence = searchFocusedOccurrence,
+            onFocusedMatchPosition = onFocusedMatchPosition,
+        )
+    }
+}
+
+@Composable
+private fun MarkdownTableGrid(
+    headers: List<AnnotatedString>,
+    alignments: List<TableCellAlignment>,
+    rows: List<List<AnnotatedString>>,
+    columnWidths: List<Dp>,
+    bodyStyle: TextStyle,
+    headerStyle: TextStyle,
+    cellPaddingH: Dp,
+    searchQuery: String?,
+    searchFocusedOccurrence: Int,
+    onFocusedMatchPosition: ((LayoutCoordinates, Rect) -> Unit)?,
+) {
+    val isSearchActive = !searchQuery.isNullOrBlank()
+    val chat = chatColors()
+    val textColor = chat.messageText
+    val headerTextColor = chat.onTableHeader
+    val headerBackground = chat.tableHeader
+    val dividerColor = chat.tableBorder
     val cellPaddingV = 8.dp
 
-    // Measure column widths from text content using TextMeasurer
-    val textMeasurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val columnCount = headers.size
-
-    val columnWidths = remember(headers, rows, fontSizeMultiplier) {
-        val cellPaddingPx = with(density) { (cellPaddingH * 2).roundToPx() }
-        List(columnCount) { col ->
-            var maxWidth = textMeasurer.measure(
-                text = headers[col],
-                style = headerStyle,
-            ).size.width
-            for (row in rows) {
-                val cellText = row.getOrElse(col) { "" }
-                val measured = textMeasurer.measure(
-                    text = cellText,
-                    style = bodyStyle,
-                ).size.width
-                if (measured > maxWidth) maxWidth = measured
-            }
-            with(density) { (maxWidth + cellPaddingPx).toDp() }
-        }
-    }
-
-    val scrollState = rememberScrollState()
-
     Box(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(scrollState)
-            .clip(MaterialTheme.shapes.small),
+            .horizontalScroll(rememberScrollState())
+            .clip(themeShapes().table),
     ) {
         Column {
             // Per-cell occurrence base offsets, headers-first then rows row-major — the same order
@@ -501,12 +512,12 @@ private fun MarkdownTable(
                     var acc = 0
                     headers.forEachIndexed { i, header ->
                         hOffsets[i] = acc
-                        acc += countOccurrences(header, searchQuery)
+                        acc += countOccurrences(header.text, searchQuery)
                     }
                     rows.forEachIndexed { r, row ->
                         row.forEachIndexed { c, cell ->
                             rOffsets[r][c] = acc
-                            acc += countOccurrences(cell, searchQuery)
+                            acc += countOccurrences(cell.text, searchQuery)
                         }
                     }
                 }
@@ -529,7 +540,7 @@ private fun MarkdownTable(
                     TableCell(
                         text = header,
                         style = headerStyle,
-                        color = textColor,
+                        color = headerTextColor,
                         alignment = alignments.getOrElse(colIndex) { TableCellAlignment.LEFT },
                         cellWidth = columnWidths[colIndex],
                         paddingH = cellPaddingH,
@@ -541,7 +552,7 @@ private fun MarkdownTable(
                 }
             }
 
-            HorizontalDivider(color = dividerColor, thickness = 1.dp)
+            AdaptiveDivider(color = dividerColor, thickness = 1.dp)
 
             // Data rows
             rows.forEachIndexed { rowIndex, row ->
@@ -570,7 +581,7 @@ private fun MarkdownTable(
                     }
                 }
                 if (rowIndex < rows.lastIndex) {
-                    HorizontalDivider(color = dividerColor, thickness = Dp.Hairline)
+                    AdaptiveDivider(color = dividerColor, thickness = Dp.Hairline)
                 }
             }
         }
@@ -583,7 +594,7 @@ private fun MarkdownTable(
  */
 @Composable
 private fun TableCell(
-    text: String,
+    text: AnnotatedString,
     style: TextStyle,
     color: Color,
     alignment: TableCellAlignment,
@@ -601,16 +612,16 @@ private fun TableCell(
         TableCellAlignment.RIGHT -> TextAlign.End
     }
 
-    val isDarkTheme = isSystemInDarkTheme()
+    val isDarkTheme = isSurfaceDark()
     val display = remember(text, searchQuery, searchFocusedOccurrence, isDarkTheme) {
         if (searchQuery.isNullOrBlank()) {
-            AnnotatedString(text)
+            text
         } else {
-            buildHighlightedString(text, searchQuery, searchFocusedOccurrence, isDarkTheme)
+            addSearchSpans(text, searchQuery, searchFocusedOccurrence, isDarkTheme)
         }
     }
     val focusedRange = remember(text, searchQuery, searchFocusedOccurrence) {
-        if (searchQuery.isNullOrBlank()) null else findOccurrenceRange(text, searchQuery, searchFocusedOccurrence)
+        if (searchQuery.isNullOrBlank()) null else findOccurrenceRange(text.text, searchQuery, searchFocusedOccurrence)
     }
     var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
@@ -629,12 +640,6 @@ private fun TableCell(
             style = style,
             color = color,
             textAlign = textAlign,
-            // Only the cell holding the focused match needs full layout so its wrapped-line rect
-            // reports accurately (getBoundingBox clamps to laid-out lines). Every other cell — even
-            // while search is open — keeps the 10-line clamp so opening search doesn't balloon whole
-            // tables. focusedRange is non-null exactly for the focused cell.
-            maxLines = if (focusedRange != null) Int.MAX_VALUE else 10,
-            overflow = TextOverflow.Ellipsis,
             onTextLayout = { layoutResult = it },
             modifier = Modifier.reportFocusedMatchPosition(layoutResult, focusedRange, onFocusedMatchPosition),
         )

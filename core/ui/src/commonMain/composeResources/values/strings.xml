@@ -4,6 +4,13 @@
     <string name="cd_drag_handle">Drag handle</string>
     <!-- Accessibility label for the close button on a server banner -->
     <string name="banner_dismiss">Dismiss banner</string>
+    <!-- Accessibility label for the close button on a toast message (Liquid Glass snackbar) -->
+    <string name="snackbar_dismiss">Dismiss</string>
+    <string name="error_banner_retry">Retry</string>
+    <string name="error_banner_dismiss">Dismiss</string>
+    <string name="error_banner_error">Error</string>
+    <string name="banner_show_more">Show more</string>
+    <string name="banner_show_less">Show less</string>
     <!-- Inline indicator for a PDF page that failed to render -->
     <string name="pdf_page_failed">Couldn't render this page</string>
     <!-- Custom per-server request headers (issue #287); shared by the pre-login
@@ -13,14 +20,442 @@
     <string name="server_headers_name">Header name</string>
     <string name="server_headers_value">Value</string>
     <string name="server_headers_add">Add header</string>
-    <string name="server_headers_load_error">Couldn\'t read your saved headers. Editing now may overwrite them.</string>
-    <string name="server_headers_save_error">Couldn\'t save — storage is unavailable.</string>
+    <string name="server_headers_load_error">Couldn't read your saved headers. Editing now may overwrite them.</string>
+    <string name="server_headers_save_error">Couldn't save — storage is unavailable.</string>
     <string name="server_headers_no_server">Couldn't save — no server is configured yet.</string>
-    <string name="server_headers_unverified_delete">Couldn\'t clear — your saved headers couldn\'t be read.</string>
+    <string name="server_headers_unverified_delete">Couldn't clear — your saved headers couldn't be read.</string>
     <string name="server_headers_remove">Remove header</string>
     <string name="server_headers_show_value">Show value</string>
     <string name="server_headers_hide_value">Hide value</string>
     <string name="server_headers_error_name">Not a valid header name.</string>
     <string name="server_headers_error_value">This value contains characters that can't be sent.</string>
     <string name="server_headers_error_reserved">This header is set by the app and can't be overridden.</string>
+    <!-- Password prompt for a PDF that needs one before upload (decrypted on-device) -->
+    <string name="pdf_password_title">Password-protected PDF</string>
+    <string name="pdf_password_explanation">“%1$s” needs a password to open. To send it to the AI model, Switchboard decrypts it on this device and uploads the decrypted copy. The password never leaves your device.</string>
+    <string name="pdf_password_sensitive_warning">Password-protected files often contain sensitive information. The decrypted copy is stored on your LibreChat server and shared with the AI provider. Only continue if you're comfortable sharing its contents.</string>
+    <string name="pdf_password_field">PDF password</string>
+    <string name="pdf_password_incorrect">Incorrect password. Try again.</string>
+    <string name="pdf_password_show">Show password</string>
+    <string name="pdf_password_hide">Hide password</string>
+    <string name="cd_show_secret">Show</string>
+    <string name="cd_hide_secret">Hide</string>
+    <string name="pdf_password_confirm">Decrypt and upload</string>
+    <string name="pdf_password_cancel">Cancel</string>
+    <!-- Description under the thinking toggle for Claude models whose thinking cannot be fully disabled (Sonnet 5.5+) -->
+    <string name="param_thinking_between_tools_description">Enables adaptive thinking controlled by the Effort parameter. This model cannot turn thinking off entirely: switching this off uses its lowest setting, which skips extended thinking and keeps only brief notes between tool calls. Effort is capped at High while off.</string>
+    <!-- Asked when leaving an editor that has unsaved edits -->
+    <string name="discard_changes_title">Discard changes?</string>
+    <string name="discard_changes_message">Your unsaved changes will be lost.</string>
+    <string name="discard_changes_confirm">Discard</string>
+    <string name="discard_changes_cancel">Cancel</string>
+    <!-- Context usage breakdown -->
+    <string name="context_compact">Compact conversation</string>
+    <string name="context_compacting">Compacting…</string>
+    <string name="context_compact_info">Summarizes everything so far into a shorter note the model keeps reading, freeing context for what comes next. Nothing is deleted.</string>
+    <string name="context_usage_label">Context</string>
+    <string name="context_usage_window">Context window</string>
+    <string name="context_usage_estimated">Estimated from message history</string>
+    <string name="context_usage_messages">Messages</string>
+    <string name="context_usage_tools">Tool schemas</string>
+    <string name="context_usage_summary">Summary</string>
+    <string name="context_usage_system">System prompt</string>
+    <string name="context_usage_free">Free space</string>
+    <string name="context_usage_input">Input</string>
+    <string name="context_usage_output">Output</string>
+    <string name="context_usage_estimated_row">Estimated</string>
+    <string name="context_usage_tool_calls">Tool calls</string>
+    <string name="context_usage_agent_instructions">Agent instructions</string>
+    <string name="context_usage_tools_system">System tools</string>
+    <string name="context_usage_tools_system_deferred">System tools (deferred)</string>
+    <string name="context_usage_tools_mcp">MCP tools</string>
+    <string name="context_usage_tools_mcp_deferred">MCP tools (deferred)</string>
+    <string name="context_usage_skills">Skills</string>
+    <string name="context_usage_subagents">Subagents</string>
+    <string name="context_usage_cached">Cached</string>
+    <string name="context_usage_cache_write">Cache write</string>
+    <string name="context_usage_by_tool">By tool</string>
+    <string name="context_usage_pressure_warn">Context window is filling up</string>
+    <string name="context_usage_pressure_danger">Context window is almost full</string>
+    <string name="context_usage_largest_tool">Largest tool: %1$s (%2$s)</string>
+    <string name="context_usage_reclaim">Summarizing now could reclaim ≈%1$s tokens</string>
+    <string name="context_usage_insights">Context insights</string>
+    <string name="context_usage_totals">Totals</string>
+    <string name="context_usage_cache_read">Cache read</string>
+    <string name="context_usage_subagents_all">Subagents (all branches)</string>
+    <string name="context_usage_cost">Cost</string>
+    <string name="context_usage_cost_branch">Cost (this branch)</string>
+    <string name="context_usage_cost_all">All branches</string>
+    <string name="context_usage_last_turn">Last turn</string>
+    <string name="context_usage_current_turn">Current turn (so far)</string>
+    <string name="context_usage_waiting">Waiting for model usage…</string>
+    <string name="context_usage_unavailable">Usage not available for this turn</string>
+    <string name="context_usage_this_branch">This branch</string>
+    <string name="context_usage_tools_all">Tools</string>
+    <string name="context_usage_used">Used</string>
+    <!-- Message and conversation timestamps (#445). Compact on purpose: they sit under a bubble or in a row subtitle -->
+    <string name="timestamp_just_now">Just now</string>
+    <plurals name="timestamp_minutes_ago">
+        <item quantity="one">%1$dm ago</item>
+        <item quantity="other">%1$dm ago</item>
+    </plurals>
+    <plurals name="timestamp_hours_ago">
+        <item quantity="one">%1$dh ago</item>
+        <item quantity="other">%1$dh ago</item>
+    </plurals>
+    <plurals name="timestamp_days_ago">
+        <item quantity="one">%1$dd ago</item>
+        <item quantity="other">%1$dd ago</item>
+    </plurals>
+    <plurals name="timestamp_weeks_ago">
+        <item quantity="one">%1$dw ago</item>
+        <item quantity="other">%1$dw ago</item>
+    </plurals>
+    <!-- %1$s is a clock time, already formatted, e.g. "20:58" -->
+    <string name="timestamp_yesterday_at">Yesterday %1$s</string>
+    <!-- Conversation list section headers -->
+    <string name="date_group_today">Today</string>
+    <string name="date_group_yesterday">Yesterday</string>
+    <string name="date_group_previous_7_days">Previous 7 Days</string>
+    <string name="date_group_previous_30_days">Previous 30 Days</string>
+    <string name="date_group_unknown">Unknown</string>
+    <!-- File type shown under a file's name and named by its colored tile. A code file shows its language instead of "Code". -->
+    <string name="file_kind_spreadsheet">Spreadsheet</string>
+    <string name="file_kind_document">Document</string>
+    <string name="file_kind_pdf">PDF</string>
+    <string name="file_kind_text">Text</string>
+    <string name="file_kind_code">Code</string>
+    <string name="file_kind_data">Data</string>
+    <string name="file_kind_image">Image</string>
+    <string name="file_kind_presentation">Presentation</string>
+    <string name="file_kind_archive">Archive</string>
+    <string name="file_kind_audio">Audio</string>
+    <string name="file_kind_video">Video</string>
+    <string name="file_kind_file">File</string>
+    <!-- A file's second line: its type, then its size ("Spreadsheet · 1.2 KB") -->
+    <string name="file_type_and_size">%1$s · %2$s</string>
+    <!-- Hands a file to another app to open it -->
+    <string name="open_in">Open in…</string>
+    <!-- Saves a file where the user picks on the device -->
+    <string name="save_to_device">Save to device</string>
+    <!-- Shares a file through the system share sheet -->
+    <string name="share">Share</string>
+    <!-- Where a generated file came from, after its type and size -->
+    <string name="from_code_sandbox">From the code sandbox</string>
+    <!-- Accessibility label of the menu holding Open in, Save and Share for a file -->
+    <string name="cd_file_actions">File actions</string>
+    <!-- Confirms a file was saved where the user picked -->
+    <string name="file_saved">File saved</string>
+    <!-- A file could not be saved where the user picked -->
+    <string name="file_save_failed">Couldn't save the file</string>
+    <string name="param_sheet_title">Model Parameters</string>
+    <string name="param_unset">Unset</string>
+    <string name="param_default">Default</string>
+    <string name="param_restore_default">Restore default</string>
+    <string name="param_reset_to_defaults">Reset to Defaults</string>
+    <string name="param_save_as_preset">Save As Preset</string>
+    <string name="param_add_stop_sequence">Add stop sequence…</string>
+    <string name="param_add_tag">Add tag…</string>
+    <string name="param_remove_tag">Remove %1$s</string>
+    <string name="param_slider_cd">%1$s slider, value %2$s</string>
+    <string name="param_custom_instructions_placeholder">Add a custom instruction to include in every message...</string>
+    <string name="param_placeholder_assistant">Assistant</string>
+    <string name="param_label_custom_instructions">Custom Instructions</string>
+    <string name="param_label_custom_name">Custom Name</string>
+    <string name="param_label_disable_streaming">Disable Streaming</string>
+    <string name="param_label_effort">Effort</string>
+    <string name="param_label_file_token_limit">File Token Limit</string>
+    <string name="param_label_frequency_penalty">Frequency Penalty</string>
+    <string name="param_label_google_grounding">Grounding with Google Search</string>
+    <string name="param_label_image_detail">Image Detail</string>
+    <string name="param_label_max_context_tokens">Max Context Tokens</string>
+    <string name="param_label_max_output_tokens">Max Output Tokens</string>
+    <string name="param_label_presence_penalty">Presence Penalty</string>
+    <string name="param_label_prompt_cache_duration">Prompt Cache Duration</string>
+    <string name="param_label_prompt_caching">Prompt Caching</string>
+    <string name="param_label_reasoning_effort">Reasoning Effort</string>
+    <string name="param_label_reasoning_summary">Reasoning Summary</string>
+    <string name="param_label_reasoning_mode">Reasoning Mode</string>
+    <string name="param_label_reasoning_context">Reasoning Context</string>
+    <string name="param_label_reasoning_visibility">Reasoning Visibility</string>
+    <string name="param_label_region">Region</string>
+    <string name="param_label_resend_files">Resend Files</string>
+    <string name="param_label_stop_sequences">Stop Sequences</string>
+    <string name="param_label_tags">Tags</string>
+    <string name="param_label_temperature">Temperature</string>
+    <string name="param_label_thinking">Thinking</string>
+    <string name="param_label_thinking_budget">Thinking Budget</string>
+    <string name="param_label_thinking_level">Thinking Level</string>
+    <string name="param_label_top_k">Top K</string>
+    <string name="param_label_top_p">Top P</string>
+    <string name="param_label_use_responses_api">Use Responses API</string>
+    <string name="param_label_use_url_context">Use URL Context</string>
+    <string name="param_label_verbosity">Verbosity</string>
+    <string name="param_label_web_search">Web Search</string>
+    <string name="param_option_none">None</string>
+    <string name="param_option_minimal">Minimal</string>
+    <string name="param_option_low">Low</string>
+    <string name="param_option_medium">Medium</string>
+    <string name="param_option_high">High</string>
+    <string name="param_option_xhigh">Extra high</string>
+    <string name="param_option_max">Max</string>
+    <string name="param_option_auto">Auto</string>
+    <string name="param_option_off">Off</string>
+    <string name="param_option_concise">Concise</string>
+    <string name="param_option_detailed">Detailed</string>
+    <string name="param_option_standard">Standard</string>
+    <string name="param_option_pro">Pro</string>
+    <string name="param_option_current_turn">Current turn</string>
+    <string name="param_option_all_turns">All turns</string>
+    <string name="param_option_summarized">Summarized</string>
+    <string name="param_option_omitted">Omitted</string>
+    <string name="param_option_updates">Updates</string>
+    <string name="param_desc_custom_name">Set a custom name for the AI.</string>
+    <string name="param_desc_custom_instructions">Set custom instructions to include in System Message.</string>
+    <string name="param_desc_resend_files">Resend previously attached files with every message.</string>
+    <string name="param_desc_top_p">Nucleus sampling. Controls diversity via cumulative probability cutoff.</string>
+    <string name="param_desc_file_token_limit">Maximum number of tokens from attached files.</string>
+    <string name="param_desc_max_context_tokens">Max context tokens for this conversation.</string>
+    <string name="param_desc_temperature">Controls randomness. Lower values are more focused and deterministic.</string>
+    <string name="param_desc_effort">Controls the overall effort level of the response.</string>
+    <string name="param_desc_max_output_tokens">Max tokens in the response.</string>
+    <string name="param_desc_top_k">Limits token selection to the top K most likely tokens.</string>
+    <string name="param_desc_web_search">Enable web search to get up-to-date information.</string>
+    <string name="param_desc_thinking">Enable extended thinking.</string>
+    <string name="param_desc_stop_sequences">Up to 4 sequences where the model will stop generating.</string>
+    <string name="param_desc_prompt_caching">Enable prompt caching to reduce latency and cost.</string>
+    <string name="param_desc_image_detail">Detail level for image inputs.</string>
+    <string name="param_desc_reasoning_visibility">Controls whether reasoning tokens are streamed to the client (Claude Opus 4.7+).</string>
+    <string name="param_desc_disable_streaming">Wait for the full response instead of streaming tokens.</string>
+    <string name="param_desc_tags">Tags for organizing presets and conversations.</string>
+    <string name="param_desc_use_responses_api">Route requests through OpenAI's Responses API.</string>
+    <string name="param_desc_presence_penalty">Penalizes tokens based on whether they appear in the text so far.</string>
+    <string name="param_desc_frequency_penalty">Penalizes tokens based on their frequency in the text so far.</string>
+    <string name="param_desc_url_context">Let the model fetch and ground on URLs (and YouTube) you reference.</string>
+    <string name="param_desc_reasoning_summary">How reasoning summary is exposed in the response.</string>
+    <string name="param_desc_reasoning_mode">Responses API only: selects the reasoning mode. Pro turns on extended reasoning on models that support it.</string>
+    <string name="param_desc_reasoning_context">Responses API only: how much earlier reasoning the model reuses.</string>
+    <string name="param_desc_prompt_cache_duration">How long prompt caches persist (Anthropic). Applies when prompt caching is on.</string>
+    <string name="param_desc_thinking_level">Controls how much thinking the model performs.</string>
+    <string name="param_desc_reasoning_effort">Controls how much reasoning the model performs.</string>
+    <string name="param_desc_verbosity">Controls how concise or verbose responses are.</string>
+    <string name="param_desc_region">AWS region used for this conversation.</string>
+    <string name="param_desc_max_output_tokens_range">Max tokens in the response (%1$s-%2$s).</string>
+    <string name="param_desc_thinking_budget_range">Max tokens for thinking (%1$s-%2$s).</string>
+    <string name="param_desc_thinking_budget_dynamic_max">Max tokens for thinking (-1 = dynamic, up to %1$s).</string>
+    <string name="param_desc_thinking_budget_dynamic_range">Max tokens for thinking (-1 = dynamic, or %1$s-%2$s).</string>
+    <string name="cd_loading">Loading</string>
+    <string name="topbar_back">Back</string>
+    <string name="topbar_menu">Menu</string>
+    <string name="artifact_type_mermaid">Mermaid Diagram</string>
+    <string name="artifact_type_react">React Component</string>
+    <string name="artifact_type_svg">SVG Image</string>
+    <string name="artifact_type_markdown">Markdown Document</string>
+    <string name="artifact_type_html">HTML Page</string>
+    <string name="artifact_type_plain_text">Plain Text</string>
+    <string name="artifact_type_code">Code</string>
+    <string name="media_storage_permission_required">Storage permission is required to save images</string>
+    <string name="media_image_load_failed">Failed to load image</string>
+    <string name="media_image_saved">Image saved to gallery</string>
+    <string name="media_image_save_failed">Failed to save image</string>
+    <string name="media_share_file_failed">Failed to share file</string>
+    <string name="saver_data_lost">Export data was lost — please try again</string>
+    <string name="saver_prepare_failed">Could not prepare export file</string>
+    <string name="saver_write_failed">Could not write export file</string>
+    <string name="saver_open_failed">Could not open the selected file for writing</string>
+    <string name="saver_share_sheet_failed">Could not present share sheet</string>
+
+    <!-- Share sheet -->
+    <string name="share_sheet_title">Share chat</string>
+    <string name="share_sheet_snapshot_note">The link shows this chat as it was when you shared or last updated it. Update to include newer messages.</string>
+    <string name="share_sheet_reduced_note">Manage this link's settings on the web.</string>
+    <string name="share_sheet_copy">Copy link</string>
+    <string name="share_sheet_copied">Copied</string>
+    <string name="share_sheet_share">Share…</string>
+    <string name="share_sheet_show_qr">Show QR code</string>
+    <string name="share_sheet_hide_qr">Hide QR code</string>
+    <string name="share_sheet_qr_description">QR code for this chat's link</string>
+    <string name="share_sheet_include_files">Include files</string>
+    <string name="share_sheet_include_files_description">Images and files in this chat are visible to viewers only when this is on.</string>
+    <string name="share_sheet_include_files_on_update">Takes effect when you update the link.</string>
+    <string name="share_sheet_update">Update link</string>
+    <string name="share_sheet_delete">Delete link</string>
+    <string name="share_sheet_create">Create link</string>
+    <string name="share_sheet_audience_anyone">This server lets anyone with the link view the chat.</string>
+    <string name="share_sheet_audience_signed_in">This server lets only people signed in to it view the chat.</string>
+    <string name="share_sheet_audience_people_added">Only you and the people you add can open this link.</string>
+    <string name="share_sheet_cannot_create">Your account can't create shared links on this server.</string>
+    <string name="share_sheet_preview">Preview</string>
+    <string name="share_sheet_manage_access">Manage access</string>
+    <string name="share_sheet_confirm_update_title">Update link?</string>
+    <string name="share_sheet_confirm_update_keeps_url">This republishes the chat as it is now. The link stays the same, so anyone who already has it will see the updated content.</string>
+    <string name="share_sheet_confirm_update_new_url">This republishes the chat as it is now. This server issues a new link, so anyone who already has the old one will lose access.</string>
+    <string name="share_sheet_confirm_delete_title">Delete link?</string>
+    <string name="share_sheet_confirm_delete_message">Anyone with the link will no longer be able to open it.</string>
+    <string name="share_sheet_cancel">Cancel</string>
+    <string name="share_sheet_error_network">Couldn't reach the server. Check your connection and try again.</string>
+    <string name="share_sheet_error_forbidden">You don't have permission to do that.</string>
+    <string name="share_sheet_error_not_found">This link no longer exists.</string>
+    <string name="share_sheet_error_rate_limited">Too many shared link requests. Wait a moment and try again.</string>
+    <string name="share_sheet_error_target_not_saved">The latest message hasn't finished saving. Try again in a moment.</string>
+    <string name="share_sheet_error_no_messages">This chat has no saved messages to share yet.</string>
+    <string name="share_sheet_error_content_blocked">Your server blocked sharing this content.</string>
+    <string name="share_sheet_error_generic">Something went wrong. Try again.</string>
+    <string name="acl_back">Back</string>
+    <string name="acl_public_anyone">Anyone with the link</string>
+    <string name="acl_public_signed_in">Anyone signed in to this server</string>
+    <string name="acl_public_off_hint">When this is off, only the people added below can open it.</string>
+    <string name="acl_people_title">People with access</string>
+    <string name="acl_people_empty">No one else has been added.</string>
+    <string name="acl_search_label">Add people or groups</string>
+    <string name="acl_search_no_matches">No matches</string>
+    <string name="acl_search_failed">Couldn't search. Try again.</string>
+    <string name="acl_remove">Remove %1$s</string>
+    <string name="acl_role_label">Role</string>
+    <string name="acl_role_viewer">Viewer</string>
+    <string name="acl_role_editor">Editor</string>
+    <string name="acl_role_owner">Owner</string>
+    <string name="acl_type_user">Person</string>
+    <string name="acl_type_group">Group</string>
+    <string name="acl_type_role">Role</string>
+    <string name="acl_error_forbidden">You don't have permission to change who has access.</string>
+    <string name="acl_error_not_found">This was deleted, or you no longer have access to it.</string>
+    <string name="acl_error_owner_protected">The owner's access can't be changed.</string>
+    <string name="acl_error_generic">Couldn't update access. Try again.</string>
+    <string name="acl_error_busy">Another change to this access is in progress. Try again in a moment.</string>
+    <string name="acl_error_unavailable">Access can't be changed right now. Try again shortly.</string>
+    <string name="acl_error_audit_unavailable">Access wasn't changed because the server couldn't record the change. Try again shortly.</string>
+    <string name="acl_error_load">Couldn't load who has access.</string>
+    <string name="bookmarks">Bookmarks</string>
+    <string name="bookmark_new">New bookmark</string>
+    <string name="bookmark_edit">Edit bookmark</string>
+    <string name="bookmark_name">Name</string>
+    <string name="bookmark_description">Description</string>
+    <string name="bookmark_description_hint">Optional</string>
+    <string name="bookmark_add_to_chat">Add to this chat</string>
+    <string name="bookmark_create">Create</string>
+    <string name="bookmark_save">Save</string>
+    <string name="bookmark_saving">Saving…</string>
+    <string name="bookmark_cancel">Cancel</string>
+    <string name="bookmark_error_blank">Enter a name</string>
+    <string name="bookmark_error_duplicate">You already have a bookmark with this name</string>
+    <string name="bookmark_error_reserved">“Saved” is kept for favorites. Pick another name.</string>
+    <string name="bookmark_char_counter">%1$d/%2$d</string>
+    <string name="bookmarks_none_yet">No bookmarks yet</string>
+    <string name="bookmarks_no_match">No bookmarks match “%1$s”</string>
+    <string name="search_bookmarks">Search bookmarks</string>
+    <string name="cd_bookmarked">Bookmarked</string>
+    <string name="cd_not_bookmarked">Not bookmarked</string>
+    <plurals name="bookmark_chat_count">
+        <item quantity="one">%1$d chat</item>
+        <item quantity="other">%1$d chats</item>
+    </plurals>
+    <plurals name="bookmark_error_too_long">
+        <item quantity="one">Use %1$d character or fewer</item>
+        <item quantity="other">Use %1$d characters or fewer</item>
+    </plurals>
+    <!-- Title of the in-app page where the user signs in to an MCP server's provider. %1$s is the server's name -->
+    <string name="mcp_oauth_sign_in_title">Sign in to %1$s</string>
+    <!-- Accessibility label for the button that closes the MCP sign-in page without finishing -->
+    <string name="mcp_oauth_sign_in_close">Close sign-in</string>
+    <!-- Accessibility label for the lock beside the MCP sign-in page's address: the page arrived over HTTPS -->
+    <string name="mcp_oauth_connection_secure">Secure connection</string>
+    <!-- Accessibility label for the warning beside the MCP sign-in page's address: the page arrived over plain HTTP -->
+    <string name="mcp_oauth_connection_not_secure">Not secure</string>
+    <!-- Conversation pull requests: the pull request a code chat opened on its repository host -->
+    <!-- Noun for a pull request (GitHub, Bitbucket), as in the sheet title -->
+    <string name="pull_request">Pull request</string>
+    <!-- GitLab's name for a pull request -->
+    <string name="merge_request">Merge request</string>
+    <!-- Short label for a pull request. %1$d is its number, e.g. "PR #482" -->
+    <string name="pr_label">PR #%1$d</string>
+    <!-- Short label for a GitLab merge request. %1$d is its number, e.g. "MR !482" -->
+    <string name="pr_label_gitlab">MR !%1$d</string>
+    <!-- Pull request state: open -->
+    <string name="pr_state_open">Open</string>
+    <!-- Pull request state: a draft -->
+    <string name="pr_state_draft">Draft</string>
+    <!-- Pull request state: merged -->
+    <string name="pr_state_merged">Merged</string>
+    <!-- Pull request state: closed without merging -->
+    <string name="pr_state_closed">Closed</string>
+    <!-- Pull request state: open but has merge conflicts -->
+    <string name="pr_state_conflicts">Conflicts</string>
+    <!-- CI checks on the pull request all passed -->
+    <string name="pr_checks_passing">Passing</string>
+    <!-- CI checks on the pull request failed -->
+    <string name="pr_checks_failing">Failing</string>
+    <!-- CI checks on the pull request are still running -->
+    <string name="pr_checks_running">Running</string>
+    <!-- The repository reports no CI checks -->
+    <string name="pr_checks_none">None</string>
+    <!-- Badge with the pull request's state. %1$s is a state, e.g. "Open" -->
+    <string name="pr_state">State: %1$s</string>
+    <!-- Badge with the pull request's checks. %1$s is a checks value, e.g. "Running" -->
+    <string name="pr_checks">Checks: %1$s</string>
+    <!-- Second line of the chat menu's pull request item. %1$s is the state, %2$s the checks in lowercase, e.g. "Open · Checks running" -->
+    <string name="pr_menu_subtitle">%1$s · Checks %2$s</string>
+    <!-- Second line of the chat menu's pull request item when the repository has no checks. %1$s is the state -->
+    <string name="pr_menu_subtitle_no_checks">%1$s · No checks</string>
+    <!-- Button that opens the pull request on GitHub -->
+    <string name="pr_open_in_github">Open in GitHub</string>
+    <!-- Button that opens the merge request on GitLab -->
+    <string name="pr_open_in_gitlab">Open in GitLab</string>
+    <!-- Button that opens the pull request on Bitbucket -->
+    <string name="pr_open_in_bitbucket">Open in Bitbucket</string>
+    <!-- Shown under the pull request when a later lookup failed; the last known state stays -->
+    <string name="pr_refresh_failed">Couldn't refresh the pull request</string>
+    <!-- Retry the pull request lookup -->
+    <string name="pr_retry">Retry</string>
+    <!-- Accessibility label for the added-lines count. %1$d is the number of lines -->
+    <string name="pr_additions_cd">%1$d lines added</string>
+    <!-- Accessibility label for the removed-lines count. %1$d is the number of lines -->
+    <string name="pr_deletions_cd">%1$d lines removed</string>
+    <!-- MCP server status (the MCP servers page, the chat's settings chips and "+" sheet) -->
+    <string name="mcp_status_connected">Connected</string>
+    <string name="mcp_status_connecting">Connecting…</string>
+    <string name="mcp_status_needs_sign_in">Sign-in needed</string>
+    <string name="mcp_status_needs_setup">Needs setup</string>
+    <string name="mcp_status_on_demand">Connects when you chat</string>
+    <string name="mcp_status_disconnected">Not connected</string>
+    <string name="mcp_status_failed">Can't connect</string>
+    <!-- The MCP variables sheet: values a server needs from each user (a personal token), from the chat's "+" sheet and the MCP servers page. %1$s is the server's name -->
+    <string name="mcp_vars_title">Set up %1$s</string>
+    <string name="mcp_vars_body">%1$s needs these before it can connect. They're saved to your account on the server, not on this phone.</string>
+    <string name="mcp_vars_keep_hint">Leave a field empty to keep what's saved.</string>
+    <string name="mcp_vars_set">Set</string>
+    <string name="mcp_vars_not_set">Not set</string>
+    <string name="mcp_vars_save_connect">Save and connect</string>
+    <string name="mcp_vars_connect">Connect</string>
+    <string name="mcp_vars_cancel">Cancel</string>
+    <string name="mcp_vars_remove">Remove</string>
+    <string name="mcp_vars_remove_confirm">Remove your values for %1$s? This also signs you out of it.</string>
+    <string name="mcp_vars_keep">Keep</string>
+    <string name="mcp_vars_save_failed">Couldn't save. Check your connection and try again.</string>
+    <string name="mcp_vars_remove_failed">Couldn't remove your values. Try again.</string>
+    <string name="web_search_keys_title">Search keys</string>
+    <string name="web_search_keys_body">LibreChat search runs with your own keys. They're stored on your LibreChat server.</string>
+    <string name="web_search_keys_keep_hint">Leave a field empty to keep the key you saved.</string>
+    <string name="web_search_keys_section_providers">Search provider</string>
+    <string name="web_search_keys_section_scrapers">Page reader</string>
+    <string name="web_search_keys_section_rerankers">Reranker</string>
+    <string name="web_search_keys_pinned">Chosen by your server</string>
+    <string name="web_search_keys_none">None</string>
+    <string name="web_search_keys_api_key">%1$s API key</string>
+    <string name="web_search_keys_api_key_optional">%1$s API key (optional)</string>
+    <string name="web_search_keys_url">%1$s URL</string>
+    <string name="web_search_keys_url_optional">%1$s URL (optional)</string>
+    <string name="web_search_keys_remove">Remove keys</string>
+    <string name="web_search_keys_save_failed">Couldn't save your keys. Try again.</string>
+    <string name="web_search_keys_remove_failed">Couldn't remove your keys. Try again.</string>
+    <string name="web_search_keys_cancel">Cancel</string>
+    <string name="web_search_keys_save">Save</string>
+    <string name="artifacts_mode_title">Artifact style</string>
+    <string name="artifacts_mode_intro">Artifacts are documents, diagrams, web pages and small apps the AI makes for you to open and try. This sets what the AI is taught about making them while Artifacts is on.</string>
+    <string name="artifacts_mode_default">Standard</string>
+    <string name="artifacts_mode_default_desc">Works well for most things you'll ask for. Recommended.</string>
+    <string name="artifacts_mode_shadcnui">Polished apps</string>
+    <string name="artifacts_mode_shadcnui_desc">Also teaches the AI a set of ready-made buttons, forms and cards (shadcn/ui) for better-looking interactive apps. Every message gets longer for the AI to read, so replies can be slower.</string>
+    <string name="artifacts_mode_custom">Only my instructions</string>
+    <string name="artifacts_mode_custom_desc">Turns off the built-in guidance, so the AI follows only the custom instructions you've written. It may not make artifacts unless your instructions explain how.</string>
 </resources>

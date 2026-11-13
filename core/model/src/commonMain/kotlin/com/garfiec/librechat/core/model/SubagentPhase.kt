@@ -10,10 +10,16 @@ object SubagentPhase {
     const val RUN_STEP = "run_step"
     const val RUN_STEP_DELTA = "run_step_delta"
     const val RUN_STEP_COMPLETED = "run_step_completed"
+
+    /** v0.8.8-rc2. Closes a STEP, not the child run — the run terminals stay [STOP] / [ERROR]. */
+    const val RUN_STEP_CLOSED = "run_step_closed"
     const val MESSAGE_DELTA = "message_delta"
     const val REASONING_DELTA = "reasoning_delta"
     const val STOP = "stop"
     const val ERROR = "error"
+
+    /** v0.8.9-rc1: guidance (a steer) entered the child run; `data` is `{index, part}` with a `steer` part. */
+    const val STEER_APPLIED = "steer_applied"
 
     /** Phases after which the child run is done and folding should stop. */
     val TERMINAL = setOf(STOP, ERROR)

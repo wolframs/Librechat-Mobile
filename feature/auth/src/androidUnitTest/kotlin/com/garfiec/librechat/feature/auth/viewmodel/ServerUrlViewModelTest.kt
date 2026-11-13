@@ -1,17 +1,22 @@
 package com.garfiec.librechat.feature.auth.viewmodel
 
+import com.garfiec.librechat.core.common.result.FailureKind
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.common.result.message
+import com.garfiec.librechat.core.data.datastore.AccountEntry
+import com.garfiec.librechat.core.data.datastore.AccountRoster
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
-import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.HeaderWriteFailure
 import com.garfiec.librechat.core.data.repository.HeaderWriteResult
 import com.garfiec.librechat.core.data.repository.ServerRepository
+import com.garfiec.librechat.core.data.repository.ServerResolution
 import com.garfiec.librechat.core.model.config.StartupConfig
 import com.garfiec.librechat.core.network.client.HeaderRejection
 import com.garfiec.librechat.core.ui.components.CustomHeaderRow
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
@@ -19,7 +24,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -32,8 +37,8 @@ import org.junit.Test
 /**
  * The add-account mode contract: validating a server being ADDED must never touch the live
  * account's state — no global URL write (the bearer-to-wrong-host leak) and no config
- * publish/cache (that's the srv:-key poisoning) — while the normal mode keeps its original
- * set-then-validate behavior.
+ * publish/cache (that's the srv:-key poisoning). In both modes nothing is stored until the server
+ * has been found, and what is stored is the address that answered.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ServerUrlViewModelTest {
@@ -44,7 +49,8 @@ class ServerUrlViewModelTest {
     private val serverRepository = mockk<ServerRepository>(relaxed = true)
     private val configRepository = mockk<ConfigRepository>(relaxed = true)
     private val accountSwitcher = mockk<AccountSwitcher>(relaxed = true)
-    private val settingsDataStore = mockk<SettingsDataStore>(relaxed = true)
+    private val rosterEntries = MutableStateFlow<List<AccountEntry>>(emptyList())
+    private val accountRoster = mockk<AccountRoster> { every { entriesFlow() } returns rosterEntries }
 
     private val pendingUrl = "https://b.example.com"
     private val config = StartupConfig(serverDomain = pendingUrl)
@@ -55,17 +61,14 @@ class ServerUrlViewModelTest {
     @Before
     fun setup() {
         Dispatchers.setMain(testDispatcher)
-        every { serverDataStore.rememberedServers } returns flowOf(emptyList())
-        every { serverDataStore.httpWarningSuppressedServers } returns flowOf(emptySet())
-        coEvery { serverDataStore.awaitBaseUrl() } returns ""
-        coEvery { serverDataStore.isHttpWarningSuppressed(any()) } returns false
         // A relaxed default is not HeaderWriteResult.Saved, and Connect stops on anything else —
         // reading it as "the credential never reached disk". Default to a store that works; the
         // tests about failure say so.
         coEvery { serverRepository.setHeaders(any(), any()) } returns HeaderWriteResult.Saved
-        // Pass block-running calls through so the probe actually executes.
-        coEvery { accountSwitcher.withPendingIdentity(any<suspend () -> Result<StartupConfig>>()) } coAnswers {
-            firstArg<suspend () -> Result<StartupConfig>>().invoke()
+        // The typed address answers unless a test says otherwise. A relaxed mock can't make up a
+        // sealed result.
+        coEvery { configRepository.resolveServer(any(), any()) } coAnswers {
+            ServerResolution.Resolved(firstArg<List<String>>().first(), config)
         }
     }
 
@@ -74,29 +77,36 @@ class ServerUrlViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun createViewModel(addAccount: Boolean) = ServerUrlViewModel(
-        serverDataStore = serverDataStore,
-        serverRepository = serverRepository,
-        configRepository = configRepository,
-        accountSwitcher = accountSwitcher,
-        settingsDataStore = settingsDataStore,
-        addAccount = addAccount,
-    )
+    private fun createViewModel(addAccount: Boolean, cleartextBlockedForDomainNames: Boolean = false) =
+        ServerUrlViewModel(
+            serverDataStore = serverDataStore,
+            serverRepository = serverRepository,
+            configRepository = configRepository,
+            accountSwitcher = accountSwitcher,
+            accountRoster = accountRoster,
+            addAccount = addAccount,
+            cleartextBlockedForDomainNames = cleartextBlockedForDomainNames,
+        )
 
     @Test
-    fun `remembered server selection loads only that servers gateway headers`() = runTest(testDispatcher) {
-        coEvery { serverRepository.headersForServer("https://picked.example") } returns mapOf("X-Gateway" to "picked")
+    fun `normal mode does not publish config when detaching the old session fails`() = runTest(testDispatcher) {
+        coEvery { accountSwitcher.prepareForSignIn(any()) } throws IllegalStateException("storage unavailable")
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
-        viewModel.selectServer("https://picked.example")
+
+        viewModel.onUrlChanged(pendingUrl)
+        viewModel.validateAndConnect()
         advanceUntilIdle()
-        assertThat(viewModel.uiState.value.url).isEqualTo("https://picked.example")
-        assertThat(viewModel.uiState.value.customHeaders.map { it.value }).containsExactly("picked")
+
+        assertThat(viewModel.uiState.value.isValidated).isFalse()
+        assertThat(viewModel.uiState.value.isLoading).isFalse()
+        assertThat(viewModel.uiState.value.error).isNotNull()
+        coVerify(exactly = 0) { configRepository.publishStartupConfig(any()) }
+        coVerify(exactly = 0) { serverDataStore.setServerUrl(any()) }
     }
 
     @Test
-    fun `add mode probes under the pending identity and never touches the global URL`() = runTest(testDispatcher) {
-        coEvery { configRepository.probeServerUrl() } returns Result.Success(config)
+    fun `add mode starts a pending session and never touches the global URL`() = runTest(testDispatcher) {
         val viewModel = createViewModel(addAccount = true)
         advanceUntilIdle()
 
@@ -107,8 +117,9 @@ class ServerUrlViewModelTest {
         assertThat(viewModel.uiState.value.isValidated).isTrue()
         coVerify(exactly = 1) { accountSwitcher.beginAdd(pendingUrl) }
         coVerify(exactly = 1) { accountSwitcher.attachPendingConfig(config) }
+        coVerify(exactly = 0) { accountSwitcher.prepareForSignIn(any()) }
         coVerify(exactly = 0) { serverDataStore.setServerUrl(any()) }
-        coVerify(exactly = 0) { configRepository.validateServerUrl(any()) }
+        coVerify(exactly = 0) { configRepository.publishStartupConfig(any()) }
     }
 
     /**
@@ -120,7 +131,6 @@ class ServerUrlViewModelTest {
      */
     @Test
     fun `the validated signal is consumable so back does not bounce forward`() = runTest(testDispatcher) {
-        coEvery { configRepository.probeServerUrl() } returns Result.Success(config)
         val viewModel = createViewModel(addAccount = true)
         advanceUntilIdle()
 
@@ -137,7 +147,6 @@ class ServerUrlViewModelTest {
     /** Consuming must not wedge the screen: a second Connect has to navigate again. */
     @Test
     fun `connecting again after a consume re-raises the signal`() = runTest(testDispatcher) {
-        coEvery { configRepository.probeServerUrl() } returns Result.Success(config)
         val viewModel = createViewModel(addAccount = true)
         advanceUntilIdle()
 
@@ -155,7 +164,8 @@ class ServerUrlViewModelTest {
     @Test
     fun `add mode validation failure cancels the pending session and surfaces the error`() =
         runTest(testDispatcher) {
-            coEvery { configRepository.probeServerUrl() } returns Result.Error(message = "not librechat")
+            coEvery { configRepository.resolveServer(any(), any()) } returns
+                ServerResolution.Failed(Result.Error(message = "not librechat"))
             val viewModel = createViewModel(addAccount = true)
             advanceUntilIdle()
 
@@ -166,6 +176,8 @@ class ServerUrlViewModelTest {
             assertThat(viewModel.uiState.value.isValidated).isFalse()
             assertThat(viewModel.uiState.value.error).isEqualTo("not librechat")
             coVerify(exactly = 1) { accountSwitcher.cancelAdd() }
+            coVerify(exactly = 0) { accountSwitcher.beginAdd(any()) }
+            coVerify(exactly = 0) { accountSwitcher.prepareForSignIn(any()) }
             coVerify(exactly = 0) { serverDataStore.setServerUrl(any()) }
         }
 
@@ -184,10 +196,9 @@ class ServerUrlViewModelTest {
     }
 
     @Test
-    fun `normal mode restores the previous URL when validation fails`() = runTest(testDispatcher) {
-        val previousUrl = "https://working.example.com"
-        coEvery { serverDataStore.awaitBaseUrl() } returns previousUrl
-        coEvery { configRepository.validateServerUrl(pendingUrl) } returns Result.Error(message = "nope")
+    fun `normal mode never stores a URL that failed to resolve`() = runTest(testDispatcher) {
+        coEvery { configRepository.resolveServer(any(), any()) } returns
+            ServerResolution.Failed(Result.Error(message = "nope"))
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
 
@@ -195,68 +206,49 @@ class ServerUrlViewModelTest {
         viewModel.validateAndConnect()
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { serverDataStore.setServerUrl(pendingUrl) }
-        coVerify(exactly = 1) { serverDataStore.setServerUrl(previousUrl) }
-        coVerify(exactly = 0) { serverDataStore.clearServerUrl() }
+        assertThat(viewModel.uiState.value.error).isEqualTo("nope")
+        coVerify(exactly = 0) { accountSwitcher.prepareForSignIn(any()) }
+        coVerify(exactly = 0) { serverDataStore.setServerUrl(any()) }
+        coVerify(exactly = 0) { configRepository.publishStartupConfig(any()) }
         coVerify(exactly = 0) { accountSwitcher.beginAdd(any()) }
     }
 
+    /** The config's cache key derives from the live URL, so the URL has to be stored first. */
     @Test
-    fun `suppressed HTTP warning connects without showing the dialog`() = runTest(testDispatcher) {
-        val httpUrl = "http://local.example.com"
-        coEvery { serverDataStore.isHttpWarningSuppressed(httpUrl) } returns true
-        coEvery { configRepository.validateServerUrl(httpUrl) } returns Result.Success(config)
+    fun `normal mode stores the resolved URL, then publishes its config`() = runTest(testDispatcher) {
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
 
-        viewModel.onUrlChanged(httpUrl)
+        viewModel.onUrlChanged(pendingUrl)
         viewModel.validateAndConnect()
         advanceUntilIdle()
 
-        assertThat(viewModel.uiState.value.showHttpWarning).isFalse()
-        assertThat(viewModel.uiState.value.isValidated).isTrue()
-        coVerify(exactly = 1) { serverDataStore.rememberServer(httpUrl) }
-    }
-
-    @Test
-    fun `HTTP warning preference is saved only after a successful connection`() = runTest(testDispatcher) {
-        val httpUrl = "http://local.example.com"
-        coEvery { configRepository.validateServerUrl(httpUrl) } returns Result.Success(config)
-        val viewModel = createViewModel(addAccount = false)
-        advanceUntilIdle()
-
-        viewModel.onUrlChanged(httpUrl)
-        viewModel.validateAndConnect()
-        advanceUntilIdle()
-        assertThat(viewModel.uiState.value.showHttpWarning).isTrue()
-
-        viewModel.setSuppressHttpWarning(true)
-        viewModel.confirmHttpConnection()
-        advanceUntilIdle()
-
-        coVerify(exactly = 1) {
-            serverDataStore.setHttpWarningSuppressed(httpUrl, suppressed = true)
+        coVerifyOrder {
+            configRepository.resolveServer(listOf(pendingUrl), any())
+            accountSwitcher.prepareForSignIn(pendingUrl)
+            configRepository.publishStartupConfig(config)
         }
+        assertThat(viewModel.uiState.value.isValidated).isTrue()
     }
+
     /**
-     * Add mode prefills the ACTIVE server's URL by design, and must not prefill its headers with it.
-     * A gateway header is a credential: showing it on a screen the user believes is configuring a new
-     * server invites an edit that silently rewrites the live server's credential instead.
+     * Add mode starts empty: the live server is a known-server row instead. Its headers are a
+     * credential and must never be read into a screen about a different account.
      */
     @Test
-    fun `add mode prefills the active URL but never the active server's headers`() = runTest(testDispatcher) {
-        coEvery { serverDataStore.awaitBaseUrl() } returns liveUrl
-        coEvery { serverRepository.headersForServer(any()) } returns liveHeaders
+    fun `add mode starts with an empty field and never reads the active server's headers`() =
+        runTest(testDispatcher) {
+            coEvery { serverDataStore.awaitBaseUrl() } returns liveUrl
+            coEvery { serverRepository.headersForServer(any()) } returns liveHeaders
 
-        val viewModel = createViewModel(addAccount = true)
-        advanceUntilIdle()
+            val viewModel = createViewModel(addAccount = true)
+            advanceUntilIdle()
 
-        assertThat(viewModel.uiState.value.url).isEqualTo(liveUrl)
-        assertThat(viewModel.uiState.value.customHeaders).isEmpty()
-        assertThat(viewModel.uiState.value.showAdvanced).isFalse()
-        // Not merely absent from the state — never read, so it cannot leak via a later copy() either.
-        coVerify(exactly = 0) { serverRepository.headersForServer(any()) }
-    }
+            assertThat(viewModel.uiState.value.url).isEmpty()
+            assertThat(viewModel.uiState.value.customHeaders).isEmpty()
+            assertThat(viewModel.uiState.value.showAdvanced).isFalse()
+            coVerify(exactly = 0) { serverRepository.headersForServer(any()) }
+        }
 
     /** The same prefill in normal mode DOES restore the headers — that's what makes logout survivable. */
     @Test
@@ -279,7 +271,6 @@ class ServerUrlViewModelTest {
      */
     @Test
     fun `normal mode persists the headers before probing the server`() = runTest(testDispatcher) {
-        coEvery { configRepository.validateServerUrl(pendingUrl) } returns Result.Success(config)
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
 
@@ -294,8 +285,8 @@ class ServerUrlViewModelTest {
 
         coVerifyOrder {
             serverRepository.setHeaders(pendingUrl, mapOf("CF-Access-Client-Id" to "id-value"))
-            serverDataStore.setServerUrl(pendingUrl)
-            configRepository.validateServerUrl(pendingUrl)
+            configRepository.resolveServer(listOf(pendingUrl), mapOf("CF-Access-Client-Id" to "id-value"))
+            accountSwitcher.prepareForSignIn(pendingUrl)
         }
     }
 
@@ -305,7 +296,6 @@ class ServerUrlViewModelTest {
      */
     @Test
     fun `add mode persists the headers before beginAdd mints the pending identity`() = runTest(testDispatcher) {
-        coEvery { configRepository.probeServerUrl() } returns Result.Success(config)
         val viewModel = createViewModel(addAccount = true)
         advanceUntilIdle()
 
@@ -318,6 +308,7 @@ class ServerUrlViewModelTest {
 
         coVerifyOrder {
             serverRepository.setHeaders(pendingUrl, mapOf("CF-Access-Client-Id" to "id-value"))
+            configRepository.resolveServer(listOf(pendingUrl), mapOf("CF-Access-Client-Id" to "id-value"))
             accountSwitcher.beginAdd(pendingUrl)
         }
     }
@@ -329,19 +320,20 @@ class ServerUrlViewModelTest {
      * live session's gateway credential, which is plaintext-only and has no second copy.
      */
     @Test
-    fun `add mode with an untouched editor never writes over the active server's headers`() =
+    fun `add mode tapping a signed-in server never writes over its headers`() =
         runTest(testDispatcher) {
-            coEvery { serverDataStore.awaitBaseUrl() } returns liveUrl
-            coEvery { configRepository.probeServerUrl() } returns Result.Success(config)
+            coEvery { serverRepository.headersForServer(liveUrl) } returns liveHeaders
 
             val viewModel = createViewModel(addAccount = true)
             advanceUntilIdle()
 
-            // Connect on the unchanged prefill — no header row touched.
-            viewModel.validateAndConnect()
+            viewModel.connectTo(liveUrl)
             advanceUntilIdle()
 
             coVerify(exactly = 0) { serverRepository.setHeaders(any(), any()) }
+            // The stored credential still rides the probe and the pending session.
+            coVerify { configRepository.resolveServer(listOf(liveUrl), liveHeaders) }
+            coVerify { accountSwitcher.beginAdd(liveUrl) }
         }
 
     /**
@@ -352,12 +344,10 @@ class ServerUrlViewModelTest {
      */
     @Test
     fun `add mode with a touched but blank editor still writes nothing`() = runTest(testDispatcher) {
-        coEvery { serverDataStore.awaitBaseUrl() } returns liveUrl
-        coEvery { configRepository.probeServerUrl() } returns Result.Success(config)
-
         val viewModel = createViewModel(addAccount = true)
         advanceUntilIdle()
 
+        viewModel.onUrlChanged(liveUrl)
         viewModel.addHeaderRow()
         viewModel.validateAndConnect()
         advanceUntilIdle()
@@ -368,9 +358,6 @@ class ServerUrlViewModelTest {
     /** Typing a credential in add mode is a real edit and must still reach the store. */
     @Test
     fun `add mode still saves headers the user actually typed`() = runTest(testDispatcher) {
-        coEvery { serverDataStore.awaitBaseUrl() } returns liveUrl
-        coEvery { configRepository.probeServerUrl() } returns Result.Success(config)
-
         val viewModel = createViewModel(addAccount = true)
         advanceUntilIdle()
 
@@ -416,7 +403,6 @@ class ServerUrlViewModelTest {
     fun `normal mode with an untouched editor does not rewrite stored headers`() = runTest(testDispatcher) {
         coEvery { serverDataStore.awaitBaseUrl() } returns liveUrl
         coEvery { serverRepository.headersForServer(liveUrl) } returns liveHeaders
-        coEvery { configRepository.validateServerUrl(any()) } returns Result.Success(config)
 
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
@@ -432,7 +418,6 @@ class ServerUrlViewModelTest {
     fun `removing the last row persists the clear`() = runTest(testDispatcher) {
         coEvery { serverDataStore.awaitBaseUrl() } returns liveUrl
         coEvery { serverRepository.headersForServer(liveUrl) } returns liveHeaders
-        coEvery { configRepository.validateServerUrl(any()) } returns Result.Success(config)
 
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
@@ -482,7 +467,7 @@ class ServerUrlViewModelTest {
             .isEqualTo(HeaderFieldError(index = 0, reason = HeaderRejection.ReservedName))
         assertThat(viewModel.uiState.value.showAdvanced).isTrue()
         coVerify(exactly = 0) { serverRepository.setHeaders(any(), any()) }
-        coVerify(exactly = 0) { configRepository.validateServerUrl(any()) }
+        coVerify(exactly = 0) { configRepository.resolveServer(any(), any()) }
     }
 
     /**
@@ -494,7 +479,6 @@ class ServerUrlViewModelTest {
     fun `a header write the store refuses stops the connect instead of probing`() = runTest(testDispatcher) {
         coEvery { serverRepository.setHeaders(any(), any()) } returns
             HeaderWriteResult.Refused(HeaderWriteFailure.StorageUnavailable)
-        coEvery { configRepository.validateServerUrl(any()) } returns Result.Success(config)
 
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
@@ -510,7 +494,7 @@ class ServerUrlViewModelTest {
             .isEqualTo(HeaderWriteFailure.StorageUnavailable)
         assertThat(viewModel.uiState.value.showAdvanced).isTrue()
         assertThat(viewModel.uiState.value.isLoading).isFalse()
-        coVerify(exactly = 0) { configRepository.validateServerUrl(any()) }
+        coVerify(exactly = 0) { configRepository.resolveServer(any(), any()) }
     }
 
     /**
@@ -524,7 +508,6 @@ class ServerUrlViewModelTest {
         coEvery { serverRepository.headersForServer(liveUrl) } returns null
         coEvery { serverRepository.setHeaders(any(), any()) } returns
             HeaderWriteResult.Refused(HeaderWriteFailure.UnverifiedDelete)
-        coEvery { configRepository.validateServerUrl(any()) } returns Result.Success(config)
 
         val viewModel = createViewModel(addAccount = false)
         advanceUntilIdle()
@@ -539,7 +522,7 @@ class ServerUrlViewModelTest {
         assertThat(viewModel.uiState.value.showAdvanced).isTrue()
         assertThat(viewModel.uiState.value.isLoading).isFalse()
         // Probing anyway would blame the URL for a credential that was never written.
-        coVerify(exactly = 0) { configRepository.validateServerUrl(any()) }
+        coVerify(exactly = 0) { configRepository.resolveServer(any(), any()) }
     }
 
     @Test
@@ -554,4 +537,273 @@ class ServerUrlViewModelTest {
         // Expanded, so the warning isn't hidden behind a collapsed section.
         assertThat(viewModel.uiState.value.showAdvanced).isTrue()
     }
+
+    /**
+     * The web UI's login redirect, pasted from a browser. Stored as typed it would validate —
+     * `/api/config` resolves against the origin — and every hand-built URL would then carry
+     * `/login?redirect_to=…` in front of its path. The deployment address is what gets stored and
+     * shown.
+     */
+    @Test
+    fun `a pasted web login URL is stored as the deployment address`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged("$pendingUrl/login?redirect_to=%2Fc%2Fnew")
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { accountSwitcher.prepareForSignIn(pendingUrl) }
+        // The cleaned address has no path left, so there is nothing to fall back from.
+        coVerify(exactly = 1) { configRepository.resolveServer(listOf(pendingUrl), any()) }
+        assertThat(viewModel.uiState.value.url).isEqualTo(pendingUrl)
+        assertThat(viewModel.uiState.value.isValidated).isTrue()
+    }
+
+    /** The http warning's confirm path goes through the same cleaning as the main path. */
+    @Test
+    fun `confirming an http URL cleans it the same way`() = runTest(testDispatcher) {
+        val httpUrl = "http://10.0.0.5:3080"
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged("$httpUrl/c/new")
+        viewModel.validateAndConnect()
+        assertThat(viewModel.uiState.value.showHttpWarning).isTrue()
+        viewModel.confirmHttpConnection()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { accountSwitcher.prepareForSignIn(httpUrl) }
+        assertThat(viewModel.uiState.value.url).isEqualTo(httpUrl)
+    }
+
+    @Test
+    fun `where cleartext to a domain name is blocked, an http domain is refused before the prompt`() =
+        runTest(testDispatcher) {
+            val viewModel = createViewModel(addAccount = false, cleartextBlockedForDomainNames = true)
+            advanceUntilIdle()
+
+            viewModel.onUrlChanged("http://chat.example.com:3080")
+            viewModel.validateAndConnect()
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.showHttpWarning).isFalse()
+            assertThat(viewModel.uiState.value.error).isEqualTo(FailureKind.CleartextBlocked.message())
+            coVerify(exactly = 0) { configRepository.resolveServer(any(), any()) }
+        }
+
+    @Test
+    fun `where cleartext to a domain name is blocked, a local http address still gets the prompt`() =
+        runTest(testDispatcher) {
+            val viewModel = createViewModel(addAccount = false, cleartextBlockedForDomainNames = true)
+            advanceUntilIdle()
+
+            for (url in listOf("http://192.168.1.5:3080", "http://nas", "http://nas.local:3080", "http://[fd00::1]:3080")) {
+                viewModel.dismissHttpWarning()
+                viewModel.onUrlChanged(url)
+                viewModel.validateAndConnect()
+
+                assertWithMessage(url).that(viewModel.uiState.value.showHttpWarning).isTrue()
+                assertWithMessage(url).that(viewModel.uiState.value.error).isNull()
+            }
+        }
+
+    @Test
+    fun `where cleartext is allowed, an http domain gets the prompt`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged("http://chat.example.com:3080")
+        viewModel.validateAndConnect()
+
+        assertThat(viewModel.uiState.value.showHttpWarning).isTrue()
+        assertThat(viewModel.uiState.value.error).isNull()
+    }
+
+    @Test
+    fun `a dotted DNS name other than local is a qualified domain name, an address or bare name is not`() {
+        val qualified = listOf(
+            "http://chat.example.com", "http://librechat.lan:3080", "http://host.home.arpa/librechat",
+            "http://user@chat.example.com", "http://CHAT.Example.COM.", "http://box.tail1234.ts.net:8080",
+        )
+        val notQualified = listOf(
+            "http://192.168.1.5", "http://10.0.0.5:3080", "http://[::1]:3080", "http://[fd00::1]",
+            "http://nas", "http://nas:3080", "http://nas.local", "http://NAS.LOCAL.:3080", "http://localhost",
+        )
+        for (url in qualified) assertWithMessage(url).that(hostIsQualifiedDomainName(url)).isTrue()
+        for (url in notQualified) assertWithMessage(url).that(hostIsQualifiedDomainName(url)).isFalse()
+    }
+
+    // --- Subpath or origin ----------------------------------------------------------------------
+
+    private val origin = "https://example.com"
+    private val pastedPage = "https://example.com/some/page"
+    private val typedHeaders = mapOf("CF-Access-Client-Id" to "id-value")
+
+    private fun originAnswers() {
+        coEvery { configRepository.resolveServer(any(), any()) } returns ServerResolution.Resolved(origin, config)
+    }
+
+    @Test
+    fun `an address with a path offers the origin as the fallback candidate`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged(pastedPage)
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { configRepository.resolveServer(listOf(pastedPage, origin), any()) }
+    }
+
+    /** A deployment under a path is a different server from its host; it answered, so it stays. */
+    @Test
+    fun `a subpath that answers is stored as typed`() = runTest(testDispatcher) {
+        val subpath = "https://example.com/librechat"
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged(subpath)
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { accountSwitcher.prepareForSignIn(subpath) }
+        assertThat(viewModel.uiState.value.url).isEqualTo(subpath)
+    }
+
+    @Test
+    fun `when only the origin answers, the origin is stored and shown`() = runTest(testDispatcher) {
+        originAnswers()
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged(pastedPage)
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { accountSwitcher.prepareForSignIn(origin) }
+        coVerify(exactly = 0) { accountSwitcher.prepareForSignIn(pastedPage) }
+        coVerify(exactly = 0) { serverDataStore.setServerUrl(pastedPage) }
+        assertThat(viewModel.uiState.value.url).isEqualTo(origin)
+        assertThat(viewModel.uiState.value.isValidated).isTrue()
+    }
+
+    /**
+     * The serverId that keys gateway headers hashes the stored URL. Left under the typed address, the
+     * credential would be filed under a server the app never contacts, and every request after the
+     * probe would go out without it.
+     */
+    @Test
+    fun `typed headers follow the origin, before the add session reads them`() = runTest(testDispatcher) {
+        originAnswers()
+        val viewModel = createViewModel(addAccount = true)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged(pastedPage)
+        viewModel.addHeaderRow()
+        viewModel.onHeaderNameChanged(0, "CF-Access-Client-Id")
+        viewModel.onHeaderValueChanged(0, "id-value")
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+
+        coVerifyOrder {
+            serverRepository.setHeaders(pastedPage, typedHeaders)
+            configRepository.resolveServer(listOf(pastedPage, origin), typedHeaders)
+            serverRepository.setHeaders(origin, typedHeaders)
+            serverRepository.setHeaders(pastedPage, emptyMap())
+            accountSwitcher.beginAdd(origin)
+        }
+    }
+
+    /** Headers stored earlier under the typed address are carried to the probe, and to the origin. */
+    @Test
+    fun `stored headers for the typed address ride the probe`() = runTest(testDispatcher) {
+        coEvery { serverRepository.headersForServer(pastedPage) } returns typedHeaders
+        originAnswers()
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged(pastedPage)
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { configRepository.resolveServer(any(), typedHeaders) }
+        coVerify(exactly = 1) { serverRepository.setHeaders(origin, typedHeaders) }
+        // Not this attempt's to delete: the entry may belong to another account's server.
+        coVerify(exactly = 0) { serverRepository.setHeaders(pastedPage, any()) }
+    }
+
+    @Test
+    fun `a refused re-key stops before anything is stored`() = runTest(testDispatcher) {
+        coEvery { serverRepository.setHeaders(origin, any()) } returns
+            HeaderWriteResult.Refused(HeaderWriteFailure.StorageUnavailable)
+        originAnswers()
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+
+        viewModel.onUrlChanged(pastedPage)
+        viewModel.addHeaderRow()
+        viewModel.onHeaderNameChanged(0, "CF-Access-Client-Id")
+        viewModel.onHeaderValueChanged(0, "id-value")
+        viewModel.validateAndConnect()
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.headersSaveFailure).isEqualTo(HeaderWriteFailure.StorageUnavailable)
+        assertThat(viewModel.uiState.value.isValidated).isFalse()
+        coVerify(exactly = 0) { accountSwitcher.prepareForSignIn(any()) }
+        coVerify(exactly = 0) { serverDataStore.setServerUrl(any()) }
+    }
+
+    @Test
+    fun `known servers group accounts by server, most recently used first`() {
+        val servers = knownServersOf(
+            listOf(
+                entry("a", "https://chat.example.com", lastActiveAt = 10),
+                entry("b", "https://host.example.net/librechat/", lastActiveAt = 30),
+                entry("c", "https://chat.example.com", lastActiveAt = 50),
+            ),
+        )
+
+        assertThat(servers).containsExactly(
+            KnownServer("https://chat.example.com", "chat.example.com", "chat.example.com", accountCount = 2),
+            KnownServer(
+                "https://host.example.net/librechat/",
+                "host.example.net/librechat",
+                "host.example.net",
+                accountCount = 1,
+            ),
+        ).inOrder()
+    }
+
+    @Test
+    fun `known servers follow the roster`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(addAccount = false)
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.knownServers).isEmpty()
+
+        rosterEntries.value = listOf(entry("a", liveUrl, lastActiveAt = 1))
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.knownServers.map { it.url }).containsExactly(liveUrl)
+    }
+
+    @Test
+    fun `a known server tap drops rows typed for another server`() = runTest(testDispatcher) {
+        coEvery { serverRepository.headersForServer(liveUrl) } returns liveHeaders
+        val viewModel = createViewModel(addAccount = true)
+        advanceUntilIdle()
+
+        viewModel.addHeaderRow()
+        viewModel.onHeaderNameChanged(0, "CF-Access-Client-Id")
+        viewModel.onHeaderValueChanged(0, "other-server-token")
+        viewModel.connectTo(liveUrl)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { serverRepository.setHeaders(any(), any()) }
+        coVerify { configRepository.resolveServer(listOf(liveUrl), liveHeaders) }
+        assertThat(viewModel.uiState.value.customHeaders).isEmpty()
+    }
+
+    private fun entry(id: String, serverUrl: String, lastActiveAt: Long) =
+        AccountEntry(accountId = id, serverUrl = serverUrl, displayLabel = id, lastActiveAt = lastActiveAt)
 }

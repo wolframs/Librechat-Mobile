@@ -10,13 +10,14 @@ import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
-import kotlin.time.Clock
-import kotlin.time.Duration.Companion.days
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class KeyRepositoryImplTest {
@@ -162,7 +163,8 @@ class KeyRepositoryImplTest {
 
         val result = sut.fetchKeyState("openAI")
 
-        assertThat((result as Result.Success).data).isEqualTo(KeyState.Expired)
+        assertThat((result as Result.Success).data)
+            .isEqualTo(KeyState.Expired(expiresAt = Instant.parse(past), wire = past))
     }
 
     @Test

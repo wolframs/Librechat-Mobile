@@ -14,18 +14,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,6 +31,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveExposedDropdownMenu
+import com.garfiec.librechat.core.ui.components.AdaptiveExposedDropdownMenuBox
+import com.garfiec.librechat.core.ui.components.AdaptiveInputChip
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedButton
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.agents.AgentHandoffDisplayData
 import com.garfiec.librechat.feature.agents.resources.*
 import com.garfiec.librechat.feature.agents.resources.Res
@@ -69,6 +71,7 @@ fun AgentChainSection(
             Text(
                 text = stringResource(Res.string.chain_agents_count, chainAgentIds.size),
                 style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
             )
             Icon(
                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -99,7 +102,7 @@ fun AgentChainSection(
                 chainAgentIds.forEach { agentId ->
                     val agentDisplay = availableAgents.find { it.id == agentId }
                     val displayName = agentDisplay?.name ?: agentId
-                    InputChip(
+                    AdaptiveInputChip(
                         selected = false,
                         onClick = {},
                         label = { Text(displayName) },
@@ -123,7 +126,7 @@ fun AgentChainSection(
                     )
                 }
 
-                OutlinedButton(
+                AdaptiveOutlinedButton(
                     onClick = { showAddDialog = true },
                     enabled = !atCap,
                     modifier = Modifier.fillMaxWidth(),
@@ -161,7 +164,8 @@ private fun AddChainAgentDialog(
     var dropdownExpanded by remember { mutableStateOf(false) }
     var selectedAgent by remember { mutableStateOf<AgentHandoffDisplayData?>(null) }
 
-    AlertDialog(
+    AdaptiveAlertDialog(
+        modifier = Modifier.clearFocusOnTap(),
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.add_chain_agent)) },
         text = {
@@ -173,12 +177,12 @@ private fun AddChainAgentDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    ExposedDropdownMenuBox(
+                    AdaptiveExposedDropdownMenuBox(
                         expanded = dropdownExpanded,
                         onExpandedChange = { dropdownExpanded = it },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        OutlinedTextField(
+                        AdaptiveOutlinedTextField(
                             value = selectedAgent?.name ?: "",
                             onValueChange = {},
                             readOnly = true,
@@ -190,7 +194,7 @@ private fun AddChainAgentDialog(
                                 .fillMaxWidth()
                                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                         )
-                        ExposedDropdownMenu(
+                        AdaptiveExposedDropdownMenu(
                             expanded = dropdownExpanded,
                             onDismissRequest = { dropdownExpanded = false },
                         ) {

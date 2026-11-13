@@ -1,53 +1,42 @@
 package com.garfiec.librechat.core.ui.components
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBar
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBarSpec
+import com.garfiec.librechat.core.ui.components.topbar.BarAction
+import com.garfiec.librechat.core.ui.components.topbar.BarIcons
+import com.garfiec.librechat.core.ui.components.topbar.BarNavigation
+import com.garfiec.librechat.core.ui.components.topbar.BarTitle
+import com.garfiec.librechat.core.ui.components.topbar.BarTitleAlignment
+import com.garfiec.librechat.core.ui.components.topbar.MaterialBarStyle
+import com.garfiec.librechat.core.ui.resources.Res
+import com.garfiec.librechat.core.ui.resources.topbar_back
+import com.garfiec.librechat.core.ui.resources.topbar_menu
+import org.jetbrains.compose.resources.stringResource
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** A centred-title top bar with a back or menu button, in the current interface style. */
 @Composable
 fun LibreChatTopBar(
     title: String,
     modifier: Modifier = Modifier,
     onMenuClick: (() -> Unit)? = null,
     onNavigateBack: (() -> Unit)? = null,
-    actions: @Composable () -> Unit = {},
+    actions: List<BarAction> = emptyList(),
 ) {
-    CenterAlignedTopAppBar(
-        title = { Text(text = title) },
-        modifier = modifier,
-        navigationIcon = {
-            when {
-                onNavigateBack != null -> {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                        )
-                    }
-                }
-                onMenuClick != null -> {
-                    IconButton(onClick = onMenuClick) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = "Menu",
-                        )
-                    }
-                }
-            }
-        },
-        actions = { actions() },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
+    val navigation = when {
+        onNavigateBack != null -> BarNavigation(BarIcons.Back, stringResource(Res.string.topbar_back), onNavigateBack)
+        onMenuClick != null -> BarNavigation(BarIcons.Menu, stringResource(Res.string.topbar_menu), onMenuClick)
+        else -> null
+    }
+    AdaptiveTopBar(
+        spec = AdaptiveTopBarSpec(
+            navigation = navigation,
+            title = BarTitle(text = title, alignment = BarTitleAlignment.CENTER),
+            actions = actions,
         ),
+        modifier = modifier,
+        materialStyle = MaterialBarStyle(containerColor = MaterialTheme.colorScheme.surface),
     )
 }

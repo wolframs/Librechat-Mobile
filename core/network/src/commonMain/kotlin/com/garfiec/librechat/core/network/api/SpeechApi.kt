@@ -4,8 +4,10 @@ import com.garfiec.librechat.core.model.speech.SpeechConfig
 import com.garfiec.librechat.core.model.speech.SpeechToTextResponse
 import com.garfiec.librechat.core.model.speech.TextToSpeechRequest
 import com.garfiec.librechat.core.model.speech.TtsVoice
+import com.garfiec.librechat.core.model.speech.TtsVoiceListSerializer
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.retry
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.get
@@ -16,9 +18,12 @@ import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.path
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 
 class SpeechApi constructor(
     private val client: HttpClient,
+    private val json: Json,
 ) {
     suspend fun speechToText(audioData: ByteArray, mimeType: String): SpeechToTextResponse {
         val extension = mimeTypeToExtension(mimeType)
@@ -52,10 +57,20 @@ class SpeechApi constructor(
             setBody(request)
         }.body()
 
+    /**
+     * The server answers with plain names (`["alloy","echo"]`); the serializer also accepts voice objects.
+     *
+     * Never retried: a server without `speech.tts` answers this route with a 500 every time, so the
+     * shared 5xx retry would only triple the failing calls.
+     */
     suspend fun getVoices(): List<TtsVoice> =
-        client.get {
-            url { path("api/files/speech/tts/voices") }
-        }.body()
+        json.decodeFromJsonElement(
+            TtsVoiceListSerializer,
+            client.get {
+                url { path("api/files/speech/tts/voices") }
+                retry { noRetry() }
+            }.body<JsonElement>(),
+        )
 
     suspend fun getSpeechConfig(): SpeechConfig =
         client.get {

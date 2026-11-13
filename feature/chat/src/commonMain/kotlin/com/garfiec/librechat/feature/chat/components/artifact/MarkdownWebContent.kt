@@ -12,6 +12,7 @@ package com.garfiec.librechat.feature.chat.components.artifact
  */
 object MarkdownWebContent {
 
+    @Suppress("LongMethod") // debt: 122 lines
     fun buildHtml(markdownContent: String, isDarkTheme: Boolean, inline: Boolean = false): String {
         val bgColor = if (isDarkTheme) "#1C1B1F" else "#FFFBFE"
         val fgColor = if (isDarkTheme) "#E6E1E5" else "#1C1B1F"
@@ -24,6 +25,9 @@ object MarkdownWebContent {
             .replace("\\", "\\\\")
             .replace("`", "\\`")
             .replace("$", "\\$")
+            // `</script>` in the content would otherwise end this inline script and run the rest
+            // as page markup. `\u003c` is the same character once the template literal is read.
+            .replace("<", "\\u003c")
 
         return """
             <!DOCTYPE html>

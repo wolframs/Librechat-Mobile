@@ -3,6 +3,10 @@ package com.garfiec.librechat.core.logging
 import com.garfiec.librechat.core.logging.io.LogSink
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import kotlin.time.Clock
+
+/** File name for an exported copy of the buffer; the timestamp keeps successive exports apart. */
+fun diagnosticLogFileName(): String = "switchboard-logs-${Clock.System.now().toEpochMilliseconds()}.log"
 
 /**
  * Read/clear access to the persistent diagnostic buffer, for the Settings → Data export/clear UI.
@@ -11,9 +15,6 @@ import kotlinx.coroutines.withContext
 interface DiagnosticLogRepository {
     /** Full buffer (previous ++ active segment) as JSONL text. */
     suspend fun exportText(): String
-
-    /** Same content as UTF-8 bytes, for the platform share sheet. */
-    suspend fun exportBytes(): ByteArray
 
     /** Deletes both segments. */
     suspend fun clear()
@@ -30,8 +31,6 @@ internal class DiagnosticLogRepositoryImpl(
     // All operations run on the same single-thread dispatcher as the writer's drain, so reads/clears
     // never race in-flight appends or rotation.
     override suspend fun exportText(): String = withContext(dispatcher) { sink.readAll() }
-
-    override suspend fun exportBytes(): ByteArray = withContext(dispatcher) { sink.readAll().encodeToByteArray() }
 
     override suspend fun clear() = withContext(dispatcher) { sink.clear() }
 

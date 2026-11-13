@@ -6,16 +6,21 @@ import com.garfiec.librechat.core.common.lifecycle.ForegroundSignal
 import com.garfiec.librechat.core.common.network.PrefetchMarker
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.data.datastore.AppPreferences
+import com.garfiec.librechat.core.data.datastore.PreferenceStore
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.db.dao.ConversationDao
 import com.garfiec.librechat.core.data.db.dao.MessageDao
 import com.garfiec.librechat.core.data.db.dao.PrefetchCandidate
 import com.garfiec.librechat.core.data.db.dao.PrefetchWatermarkDao
 import com.garfiec.librechat.core.data.db.entity.PrefetchWatermarkEntity
+import com.garfiec.librechat.core.data.mapper.toModels
 import com.garfiec.librechat.core.data.repository.AgentRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.ConversationRepository
 import com.garfiec.librechat.core.data.repository.MessageRepository
+import com.garfiec.librechat.core.data.repository.ToolCallPartRef
+import com.garfiec.librechat.core.data.search.SearchIndexMaintenance
 import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.model.Message
 import com.garfiec.librechat.core.model.media.resolveAttachmentUrl
@@ -55,6 +60,7 @@ import kotlin.time.TimeSource
  * 3. **Warm ancillary reference data** — endpoints, models, agents — once per account per process.
  * 4. **Prune** message rows for conversations that have aged out of the warm set.
  */
+@Suppress("LongParameterList") // debt: constructor dependencies
 class PrefetchEngine(
     private val conversationDao: ConversationDao,
     private val messageDao: MessageDao,
@@ -67,6 +73,7 @@ class PrefetchEngine(
     private val openConversationRegistry: OpenConversationRegistry,
     private val attachmentWarmer: AttachmentWarmer,
     private val settingsDataStore: SettingsDataStore,
+    private val preferenceStore: PreferenceStore,
     private val serverUrlProvider: ServerUrlProvider,
     private val foregroundSignal: ForegroundSignal,
     private val ioDispatcher: CoroutineDispatcher,
@@ -75,6 +82,8 @@ class PrefetchEngine(
     // genuinely unresolvable dependencies.
     private val timeSource: TimeSource = TimeSource.Monotonic,
     private val nowMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    /** Merges the search index after a big prune; null in tests that don't exercise it. */
+    private val searchIndexMaintenance: SearchIndexMaintenance? = null,
 ) {
 
     /**
@@ -89,6 +98,25 @@ class PrefetchEngine(
 
     /** Accounts whose slow-moving reference data has been warmed once this process. */
     private val ancillaryWarmed = mutableSetOf<String>()
+
+    /**
+     * Per account, the full tool calls this process already asked for, by conversation and ref,
+     * whatever became of them. A call the stored-part table would not keep (over its per-call cap,
+     * or pruned by its account budget since) or one the server refused is not asked again until
+     * the process restarts: without this every re-warm downloaded it again and spent the pass's
+     * budget on it. The chat screen still fetches it online when its card opens.
+     */
+    private val toolPartsAsked = mutableMapOf<String, MutableSet<Pair<String, ToolCallPartRef>>>()
+
+    /**
+     * Per account, the conversations whose messages are cached and watermarked but whose previewed
+     * tool calls a pass did not finish (a budget, the time or a rate limit stopped it). The next
+     * pass warms their calls from the cached messages, without downloading the messages again.
+     *
+     * In memory, per process: after a restart the calls left over are fetched by the chat screen
+     * when a card opens, or by the next warm once the conversation changes on the server.
+     */
+    private val toolPartsPending = mutableMapOf<String, MutableSet<String>>()
 
     private val _runState = MutableStateFlow(
         PrefetchAccountRunState(accountId = null, state = PrefetchRunState.Idle),
@@ -113,7 +141,7 @@ class PrefetchEngine(
             // deadlocks — silently, since a closed gate is indistinguishable from a busy user.
             withContext(PrefetchMarker) {
                 // Read once: a depth re-read mid-pass would select rows the list refresh never fetched.
-                val depth = settingsDataStore.prefetchDepth.first()
+                val depth = preferenceStore.observe(AppPreferences.PrefetchDepthSetting).first()
                 val pass = Pass(accountId)
 
                 if (!pass.warmConversationList(depth)) return@withContext
@@ -166,10 +194,13 @@ class PrefetchEngine(
      * the very stage that discovers new conversations. Clearing only some of them leaves "Warm now"
      * unable to recover the thing it advertises. Reached only from the manual run, so a retry is
      * always a deliberate user action rather than an automatic loop against a failing server.
+     * The asked-for tool calls are forgotten too, so they are tried again; the pending ones
+     * ([toolPartsPending]) are kept, being work still to do rather than a reason to skip it.
      */
     suspend fun resetForManualRun(accountId: AccountId) {
         resetBreaker(accountId)
         ancillaryWarmed.remove(accountId.value)
+        toolPartsAsked.remove(accountId.value)
         settingsDataStore.clearPrefetchListRefreshed(accountId.value)
     }
 
@@ -190,8 +221,8 @@ class PrefetchEngine(
 
     /**
      * One pass's mutable bookkeeping. Held here rather than on the engine so a cancelled pass leaves
-     * nothing behind — only the breaker and the ancillary set outlive a pass, and both are keyed by
-     * account deliberately.
+     * nothing behind — only the breaker, the ancillary set and the tool-call memos outlive a pass,
+     * and all are keyed by account deliberately.
      */
     private inner class Pass(private val accountId: AccountId) {
 
@@ -298,29 +329,65 @@ class PrefetchEngine(
                 watermarks = watermarks,
                 openConversationId = openConversationRegistry.openConversationId.value,
             )
+            val pending = toolPartsPending.getOrPut(accountId.value) { mutableSetOf() }
+            val eligibleIds = eligible.mapTo(HashSet()) { it.conversationId }
+            // One that left the warm set is let go; one being re-warmed below is refetched anyway.
+            // The open chat stays pending: its screen fetches its own cards' calls.
+            pending.retainAll(eligibleIds)
+            val workIds = work.mapTo(HashSet()) { it.conversationId }
+            val openId = openConversationRegistry.openConversationId.value
+            val leftOver = pending.filter { it !in workIds && it != openId }
+            val total = leftOver.size + work.size
             Diag.d(
                 "Prefetch",
-                attrs = mapOf("eligible" to eligible.size.toString(), "stale" to work.size.toString()),
+                attrs = mapOf(
+                    "eligible" to eligible.size.toString(),
+                    "stale" to work.size.toString(),
+                    "pendingCalls" to leftOver.size.toString(),
+                ),
             ) { "warming messages" }
+
+            // Left-over calls first: they were ranked ahead when their pass selected them, and
+            // finishing them costs no message download.
+            leftOver.forEachIndexed { index, conversationId ->
+                if (outstayedWelcome()) return true
+                publish(accountId, PrefetchRunState.WarmingMessages(completed = index, total = total))
+                val cached = withContext(ioDispatcher) {
+                    messageDao.messagesForAccount(conversationId, accountId.value).toModels()
+                }
+                if (warmToolPartsTracked(conversationId, cached) == ToolPartWarm.TRIPPED) return false
+            }
 
             work.forEachIndexed { index, candidate ->
                 if (outstayedWelcome()) return true
                 publish(
                     accountId,
-                    PrefetchRunState.WarmingMessages(completed = index, total = work.size),
+                    PrefetchRunState.WarmingMessages(completed = leftOver.size + index, total = total),
                 )
                 val start = timeSource.markNow()
                 val result = messageRepository.refreshMessages(
                     candidate.conversationId,
                     originAccount = accountId,
+                    // Warming exists so chats open fast, and full tool output is the bulk previews
+                    // remove. It also matches what the chat's own load caches, so rows don't flip.
+                    // The full calls go to the stored-part table instead, within a budget
+                    // ([warmToolParts]), so a prefetched card still opens offline.
+                    toolPreviews = true,
                 )
                 val elapsed = start.elapsedNow()
 
                 when (val outcome = outcomeOf(result)) {
                     is StepOutcome.Ok -> {
                         consecutiveFailures = 0
+                        val messages = (result as Result.Success).data
+                        // The messages are cached, so the watermark goes down now, whatever becomes
+                        // of the calls: calls left over are tracked as pending and finished from the
+                        // cache next pass, rather than by downloading the messages again.
                         recordWatermark(candidate)
-                        warmAttachments((result as Result.Success).data)
+                        if (warmToolPartsTracked(candidate.conversationId, messages) == ToolPartWarm.TRIPPED) {
+                            return false
+                        }
+                        warmAttachments(messages)
                     }
                     // Rate limiting means "slower", not "broken", so it deliberately does not count
                     // toward the breaker — the server is answering, it is just asking us to wait.
@@ -342,6 +409,99 @@ class PrefetchEngine(
                 delay(paceAfter(elapsed))
             }
             return true
+        }
+
+        /**
+         * [warmToolParts], keeping [toolPartsPending] in step. Marked pending before the warm starts,
+         * so a pass cancelled partway (the gate closing) leaves it marked; cleared only when done.
+         */
+        private suspend fun warmToolPartsTracked(conversationId: String, messages: List<Message>): ToolPartWarm {
+            val pending = toolPartsPending.getOrPut(accountId.value) { mutableSetOf() }
+            pending += conversationId
+            val outcome = warmToolParts(conversationId, messages)
+            if (outcome == ToolPartWarm.DONE) pending -= conversationId
+            return outcome
+        }
+
+        /** Full tool calls this pass has fetched, by count and by stored size. */
+        private var toolPartsFetched = 0
+        private var toolPartChars = 0L
+
+        /**
+         * Fetches the full content of [conversationId]'s previewed tool calls into the stored-part
+         * table, so a card in a chat only ever prefetched can still open offline. Newest finished
+         * messages first; skips calls already stored, calls whose preview says they are larger than
+         * [MAX_PREFETCHED_PART_CHARS], and stops at the per-conversation and per-pass budgets. Each
+         * fetch is paced like any other request. Returns false when the breaker tripped.
+         *
+         * A stored call is skipped by identity, without checking it still matches the preview: the
+         * chat screen checks that on open, and refetches online when it does not. So is a call this
+         * process already asked for ([toolPartsAsked]), and a subagent call whose transcript was
+         * left out: its size is not declared and is unbounded, so it is left for its card.
+         */
+        suspend fun warmToolParts(conversationId: String, messages: List<Message>): ToolPartWarm {
+            val asked = toolPartsAsked.getOrPut(accountId.value) { mutableSetOf() }
+            if (asked.size > MAX_TOOL_PARTS_REMEMBERED) asked.clear()
+            val previewed = messages.asSequence()
+                .filter { !it.unfinished }
+                .sortedByDescending { it.createdAt.orEmpty() }
+                .flatMap { message ->
+                    message.content.orEmpty().withIndex().mapNotNull { (index, part) ->
+                        val call = part.toolCall?.takeIf { it.isPreview } ?: return@mapNotNull null
+                        val id = call.id?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                        if (call.subagentContentOmitted == true) return@mapNotNull null
+                        val declared = (call.outputLength ?: 0).toLong() + (call.argsLength ?: 0)
+                        if (declared > MAX_PREFETCHED_PART_CHARS) return@mapNotNull null
+                        ToolCallPartRef(message.messageId, id, call.stepId, part.agentId).normalized() to index
+                    }
+                }
+                .filter { (ref, _) -> (conversationId to ref) !in asked }
+                .toList()
+            if (previewed.isEmpty()) return ToolPartWarm.DONE
+            val stored = messageRepository.storedToolCallPartSizes(conversationId, accountId).keys
+            val pending = previewed.filter { (ref, _) -> ref !in stored }
+            var fetchedHere = 0
+            for ((ref, index) in pending) {
+                if (fetchedHere >= MAX_TOOL_PARTS_PER_CONVERSATION || toolPartsFetched >= MAX_TOOL_PARTS_PER_PASS) {
+                    return ToolPartWarm.CUT_SHORT
+                }
+                if (toolPartChars >= MAX_TOOL_PART_CHARS_PER_PASS || outstayedWelcome()) return ToolPartWarm.CUT_SHORT
+                val start = timeSource.markNow()
+                val result = messageRepository.getToolCallPart(
+                    conversationId = conversationId,
+                    messageId = ref.messageId,
+                    partIndex = index,
+                    toolCallId = ref.toolCallId,
+                    stepId = ref.stepId,
+                    agentId = ref.agentId,
+                )
+                val elapsed = start.elapsedNow()
+                fetchedHere++
+                toolPartsFetched++
+                when (val outcome = outcomeOf(result)) {
+                    is StepOutcome.Ok -> {
+                        consecutiveFailures = 0
+                        asked += conversationId to ref
+                        val full = (result as Result.Success).data
+                        toolPartChars += (full.output?.length ?: 0) + full.serializedArgs().length +
+                            full.subagentContent.orEmpty().sumOf { it.toString().length }
+                        messageRepository.storeToolCallParts(conversationId, mapOf(ref to full), accountId)
+                    }
+                    is StepOutcome.RateLimited -> {
+                        publish(accountId, PrefetchRunState.RateLimited(outcome.backoff.inWholeMilliseconds))
+                        delay(outcome.backoff)
+                        return ToolPartWarm.CUT_SHORT
+                    }
+                    // A 404 is a call the server no longer holds as previewed; it costs a step, and
+                    // counts toward the breaker like any other failure. Not asked again this process.
+                    StepOutcome.Failed -> {
+                        asked += conversationId to ref
+                        if (tripBreaker()) return ToolPartWarm.TRIPPED
+                    }
+                }
+                delay(paceAfter(elapsed))
+            }
+            return ToolPartWarm.DONE
         }
 
         /**
@@ -385,15 +545,19 @@ class PrefetchEngine(
 
             // Chunked because SQLite binds at most ~999 variables per statement, and the first prune
             // on a long-lived install is exactly where that limit is met.
+            var deletedMessages = 0
             prunable.chunked(PRUNE_CHUNK).forEach { chunk ->
                 withContext(NonCancellable) {
-                    messageDao.deleteForConversations(accountId.value, chunk)
+                    deletedMessages += messageDao.deleteForConversations(accountId.value, chunk)
                     // Together, always: a watermark left behind reports its conversation as warm, so
                     // the rows just deleted would never be fetched again.
                     watermarkDao.deleteFor(accountId.value, chunk)
                 }
             }
             Diag.d("Prefetch", attrs = mapOf("pruned" to prunable.size.toString())) { "pruned stale message cache" }
+            // A big prune leaves the search index as many small segments full of deletion markers;
+            // merge them while the prefetch window is still open, a bounded step at a time.
+            if (deletedMessages >= MERGE_AFTER_PRUNED_MESSAGES) searchIndexMaintenance?.mergeUntilDone()
         }
 
         /**
@@ -403,7 +567,7 @@ class PrefetchEngine(
          */
         private suspend fun warmAttachments(messages: List<Message>) {
             if (!attachmentWarmer.isSupported) return
-            if (!settingsDataStore.prefetchAttachmentsEnabled.first()) return
+            if (!preferenceStore.observe(AppPreferences.PrefetchAttachments).first()) return
 
             val baseUrl = serverUrlProvider.getBaseUrl()
             if (baseUrl.isBlank()) return
@@ -539,6 +703,20 @@ class PrefetchEngine(
         private const val HTTP_TOO_MANY_REQUESTS = 429
         private const val PRUNE_CHUNK = 400
 
+        /** Pruned messages past which the search index is worth merging. */
+        private const val MERGE_AFTER_PRUNED_MESSAGES = 1_000
+
+        /** Full tool calls fetched per warmed conversation, per pass, and their stored size per pass. */
+        private const val MAX_TOOL_PARTS_PER_CONVERSATION = 12
+        private const val MAX_TOOL_PARTS_PER_PASS = 48
+        private const val MAX_TOOL_PART_CHARS_PER_PASS = 4_000_000L
+
+        /** Past this many remembered asks an account's memo starts over, so it stays small. */
+        private const val MAX_TOOL_PARTS_REMEMBERED = 20_000
+
+        /** A call whose preview declares more than this (output plus args) is left for the chat to fetch. */
+        private const val MAX_PREFETCHED_PART_CHARS = 256_000L
+
         /** Ceiling per conversation. A single thread of screenshots must not become the whole pass. */
         private const val MAX_ATTACHMENTS_PER_CONVERSATION = 20
         private const val DATA_URI_PREFIX = "data:"
@@ -557,4 +735,16 @@ class PrefetchEngine(
          */
         private val OFF_SCREEN_BUDGET = 2.minutes
     }
+}
+
+/** How warming one conversation's previewed tool calls ended. */
+internal enum class ToolPartWarm {
+    /** Every call it could keep is stored, asked for, or left for its card. */
+    DONE,
+
+    /** A budget, the time or a rate limit stopped it first; the next pass finishes it from the cache. */
+    CUT_SHORT,
+
+    /** The breaker tripped. */
+    TRIPPED,
 }

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 9,
-    "identityHash": "db52af4a879ea5c31d0e3ead615d3d20",
+    "identityHash": "bede2f5dc847e04493f7264df196df71",
     "entities": [
       {
         "tableName": "conversations",
@@ -130,7 +130,7 @@
       },
       {
         "tableName": "messages",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `parentMessageId` TEXT, `sender` TEXT, `text` TEXT, `content` TEXT, `isCreatedByUser` INTEGER NOT NULL, `model` TEXT, `endpoint` TEXT, `iconURL` TEXT, `unfinished` INTEGER NOT NULL, `error` INTEGER NOT NULL, `finishReason` TEXT, `tokenCount` INTEGER, `feedback` TEXT, `files` TEXT, `attachments` TEXT, `metadata` TEXT, `cacheTTL` TEXT, `quotes` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `accountId` TEXT, PRIMARY KEY(`messageId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `parentMessageId` TEXT, `sender` TEXT, `text` TEXT, `content` TEXT, `isCreatedByUser` INTEGER NOT NULL, `model` TEXT, `endpoint` TEXT, `iconURL` TEXT, `unfinished` INTEGER NOT NULL, `error` INTEGER NOT NULL, `finishReason` TEXT, `tokenCount` INTEGER, `feedback` TEXT, `files` TEXT, `attachments` TEXT, `metadata` TEXT, `quotes` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `accountId` TEXT, PRIMARY KEY(`messageId`))",
         "fields": [
           {
             "fieldPath": "messageId",
@@ -225,11 +225,6 @@
           {
             "fieldPath": "metadata",
             "columnName": "metadata",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "cacheTTL",
-            "columnName": "cacheTTL",
             "affinity": "TEXT"
           },
           {
@@ -509,7 +504,7 @@
       },
       {
         "tableName": "drafts",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`conversation_id` TEXT NOT NULL, `text` TEXT NOT NULL, `state_json` TEXT, `updated_at` INTEGER NOT NULL, `accountId` TEXT, PRIMARY KEY(`conversation_id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`conversation_id` TEXT NOT NULL, `text` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, `accountId` TEXT, PRIMARY KEY(`conversation_id`))",
         "fields": [
           {
             "fieldPath": "conversationId",
@@ -522,11 +517,6 @@
             "columnName": "text",
             "affinity": "TEXT",
             "notNull": true
-          },
-          {
-            "fieldPath": "stateJson",
-            "columnName": "state_json",
-            "affinity": "TEXT"
           },
           {
             "fieldPath": "updatedAt",
@@ -616,11 +606,72 @@
             "id"
           ]
         }
+      },
+      {
+        "tableName": "servers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_id` TEXT NOT NULL, `custom_headers` TEXT NOT NULL, PRIMARY KEY(`server_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverId",
+            "columnName": "server_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "customHeaders",
+            "columnName": "custom_headers",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_id"
+          ]
+        }
+      },
+      {
+        "tableName": "prefetch_watermarks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`accountId` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `warmedConversationUpdatedAt` INTEGER NOT NULL, `warmedAt` INTEGER NOT NULL, PRIMARY KEY(`accountId`, `conversationId`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "conversationId",
+            "columnName": "conversationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "warmedConversationUpdatedAt",
+            "columnName": "warmedConversationUpdatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "warmedAt",
+            "columnName": "warmedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "accountId",
+            "conversationId"
+          ]
+        }
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'db52af4a879ea5c31d0e3ead615d3d20')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'bede2f5dc847e04493f7264df196df71')"
     ]
   }
 }

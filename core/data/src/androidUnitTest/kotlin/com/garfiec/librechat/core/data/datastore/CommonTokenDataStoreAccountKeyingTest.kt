@@ -1,5 +1,8 @@
 package com.garfiec.librechat.core.data.datastore
 
+import com.garfiec.librechat.core.model.auth.AuthCookies
+import com.garfiec.librechat.core.model.auth.OpenIdMarkers
+import com.garfiec.librechat.core.model.auth.SessionCredentials
 import com.garfiec.librechat.core.network.client.RefreshResult
 import com.google.common.truth.Truth.assertThat
 import io.ktor.client.HttpClient
@@ -17,18 +20,21 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.Test
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
+import kotlin.time.Clock
 
 /**
  * Verifies the account-keying of [CommonTokenDataStore]: keys are namespaced by the active account,
  * the sync mirror seeds the right bearer at construction, and the identity hooks migrate/clear the
  * keyed slots. Uses a plain in-memory key/value store so no `EncryptedSharedPreferences`/Keychain.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, ExperimentalEncodingApi::class)
 class CommonTokenDataStoreAccountKeyingTest {
 
     private val noRefresh: Lazy<HttpClient> = lazy { error("refresh client not expected in this test") }
-
 
     @Test
     fun `init seeds cached bearer from the mirror's keyed slot`() = runTest {
@@ -68,8 +74,8 @@ class CommonTokenDataStoreAccountKeyingTest {
 
         store.onAccountResolved("acctA")
 
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access")
-        assertThat(store.store[refreshKeyOf("acctA")]).isEqualTo("A-refresh")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access")
+        assertThat(store.persistedRefresh("acctA")).isEqualTo("A-refresh")
         assertThat(store.store["active_account_id"]).isEqualTo("acctA")
         assertThat(store.store).doesNotContainKey("access_token")
         assertThat(store.store).doesNotContainKey("refresh_token")
@@ -93,7 +99,7 @@ class CommonTokenDataStoreAccountKeyingTest {
 
         // The keyed slot is NOT overwritten from the torn pair, and the cached bearer matches storage
         // (the keyed value), never the unpersisted staged token.
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access")
         assertThat(store.getAccessToken()).isEqualTo("A-access")
         // Bare staging keys are cleared regardless.
         assertThat(store.store).doesNotContainKey("access_token")
@@ -109,7 +115,7 @@ class CommonTokenDataStoreAccountKeyingTest {
         store.onAccountResolved("acctA")
 
         assertThat(store.getAccessToken()).isEqualTo("A-access")
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access")
     }
 
     @Test
@@ -128,11 +134,11 @@ class CommonTokenDataStoreAccountKeyingTest {
 
         store.onAccountResolved("acctB")
 
-        assertThat(store.store[accessKeyOf("acctB")]).isEqualTo("B-access")
-        assertThat(store.store[refreshKeyOf("acctB")]).isEqualTo("B-refresh")
+        assertThat(store.persistedAccess("acctB")).isEqualTo("B-access")
+        assertThat(store.persistedRefresh("acctB")).isEqualTo("B-refresh")
         // A's tokens are RETAINED (multi-account) — a switch back needs no re-login.
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access")
-        assertThat(store.store[refreshKeyOf("acctA")]).isEqualTo("A-refresh")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access")
+        assertThat(store.persistedRefresh("acctA")).isEqualTo("A-refresh")
         assertThat(store.store).doesNotContainKey("access_token")
         assertThat(store.store).doesNotContainKey("refresh_token")
         assertThat(store.store["active_account_id"]).isEqualTo("acctB")
@@ -160,8 +166,8 @@ class CommonTokenDataStoreAccountKeyingTest {
         assertThat(store.getStagedAccessToken()).isNull()
         assertThat(store.store).doesNotContainKey("access_token")
         assertThat(store.store).doesNotContainKey("refresh_token")
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access")
-        assertThat(store.store[refreshKeyOf("acctA")]).isEqualTo("A-refresh")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access")
+        assertThat(store.persistedRefresh("acctA")).isEqualTo("A-refresh")
     }
 
     @Test
@@ -202,9 +208,9 @@ class CommonTokenDataStoreAccountKeyingTest {
         assertThat(store.store["active_account_id"]).isEqualTo("acctB")
         assertThat(store.getAccessToken()).isEqualTo("B-access")
         // Neither slot is written or deleted; no bare staging keys appear.
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access")
-        assertThat(store.store[refreshKeyOf("acctA")]).isEqualTo("A-refresh")
-        assertThat(store.store[accessKeyOf("acctB")]).isEqualTo("B-access")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access")
+        assertThat(store.persistedRefresh("acctA")).isEqualTo("A-refresh")
+        assertThat(store.persistedAccess("acctB")).isEqualTo("B-access")
         assertThat(store.store).doesNotContainKey("access_token")
 
         // Switch back is cold-free.
@@ -298,14 +304,14 @@ class CommonTokenDataStoreAccountKeyingTest {
         // until the establish hook re-homes it.
         store.setTokens("A-access-2", "A-refresh-2")
 
-        assertThat(store.store["access_token"]).isEqualTo("A-access-2")
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("bootstrap")
+        assertThat(store.persistedAccess()).isEqualTo("A-access-2")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("bootstrap")
         assertThat(store.getAccessToken()).isEqualTo("A-access-2")
 
         // Re-home overwrites the account's slot with the freshly-staged pair.
         store.onAccountResolved("acctA")
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access-2")
-        assertThat(store.store[refreshKeyOf("acctA")]).isEqualTo("A-refresh-2")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access-2")
+        assertThat(store.persistedRefresh("acctA")).isEqualTo("A-refresh-2")
         assertThat(store.store).doesNotContainKey("access_token")
     }
 
@@ -325,9 +331,9 @@ class CommonTokenDataStoreAccountKeyingTest {
             store.setTokens("B-access", "B-refresh")
 
             assertThat(store.store).doesNotContainKey("active_account_id")
-            assertThat(store.store["access_token"]).isEqualTo("B-access")
+            assertThat(store.persistedAccess()).isEqualTo("B-access")
             // A's keyed tokens are still retained for a later switch back.
-            assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access")
+            assertThat(store.persistedAccess("acctA")).isEqualTo("A-access")
         }
 
     @Test
@@ -385,7 +391,7 @@ class CommonTokenDataStoreAccountKeyingTest {
         val ok = store.refreshAccessToken()
 
         assertThat(ok).isEqualTo(RefreshResult.Refreshed)
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access-refreshed")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access-refreshed")
         assertThat(store.getAccessToken()).isEqualTo("A-access-refreshed")
     }
 
@@ -426,7 +432,7 @@ class CommonTokenDataStoreAccountKeyingTest {
 
         assertThat(ok).isEqualTo(RefreshResult.Refreshed)
         assertThat(requestedUrl).startsWith("https://b.example.com/api/auth/refresh")
-        assertThat(store.store[accessKeyOf("acctB")]).isEqualTo("B-access-refreshed")
+        assertThat(store.persistedAccess("acctB")).isEqualTo("B-access-refreshed")
         // acctB is not the active account, so the cached bearer (A's) is untouched.
         assertThat(store.getAccessToken()).isEqualTo("A-access")
     }
@@ -468,5 +474,56 @@ class CommonTokenDataStoreAccountKeyingTest {
 
         assertThat(emissions).isEqualTo(0)
         job.cancel()
+    }
+
+    private fun jwt(secondsFromNow: Long): String {
+        val exp = Clock.System.now().toEpochMilliseconds() / 1000 + secondsFromNow
+        val encoder = Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT)
+        val header = encoder.encode("""{"alg":"HS256"}""".encodeToByteArray())
+        val payload = encoder.encode("""{"id":"u1","exp":$exp}""".encodeToByteArray())
+        return "$header.$payload.sig"
+    }
+
+    private fun session(access: String, refresh: String, openId: OpenIdMarkers? = null): String =
+        Json.encodeToString(SessionCredentials(access, AuthCookies(refresh, openId)))
+
+    @Test
+    fun `a slot whose refresh token has passed its exp holds no live session`() = runTest {
+        val store = FakeTokenStore(
+            noRefresh,
+            seed = mapOf(
+                ACTIVE_ACCOUNT_KEY to "acctA",
+                sessionKeyOf("acctA") to session(jwt(900), refresh = jwt(3_600)),
+                sessionKeyOf("lapsed") to session(jwt(-900), refresh = jwt(-60)),
+                accessKeyOf("legacy") to jwt(-900),
+                refreshKeyOf("legacy") to jwt(-60),
+            ),
+        )
+
+        assertThat(store.hasLiveSession("acctA")).isTrue()
+        assertThat(store.hasLiveSession("lapsed")).isFalse()
+        assertThat(store.hasLiveSession("legacy")).isFalse()
+        assertThat(store.hasLiveSession("missing")).isFalse()
+        // Read-only: the slot stays, so a wrong device clock never signs anyone out for good.
+        assertThat(store.persistedRefresh("lapsed")).isNotNull()
+    }
+
+    @Test
+    fun `a slot whose session end is unknown or still ahead stays live`() = runTest {
+        val store = FakeTokenStore(
+            noRefresh,
+            seed = mapOf(
+                ACTIVE_ACCOUNT_KEY to "acctA",
+                sessionKeyOf("acctA") to session(jwt(900), refresh = jwt(3_600)),
+                sessionKeyOf("opaque") to session(jwt(-900), refresh = "opaque-refresh"),
+                sessionKeyOf("openid") to session(jwt(-900), refresh = jwt(-60), openId = OpenIdMarkers("marker")),
+                // The last refresh before the session's end mints an access token that outlives it.
+                sessionKeyOf("lastAccess") to session(jwt(600), refresh = jwt(-60)),
+            ),
+        )
+
+        assertThat(store.hasLiveSession("opaque")).isTrue()
+        assertThat(store.hasLiveSession("openid")).isTrue()
+        assertThat(store.hasLiveSession("lastAccess")).isTrue()
     }
 }

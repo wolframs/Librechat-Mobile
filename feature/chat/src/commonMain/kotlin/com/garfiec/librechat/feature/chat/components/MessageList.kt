@@ -1,33 +1,27 @@
 package com.garfiec.librechat.feature.chat.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButtonDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,40 +30,46 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.garfiec.librechat.core.common.ChatLayoutConstants
 import com.garfiec.librechat.core.model.Attachment
 import com.garfiec.librechat.core.model.MinimalFeedback
 import com.garfiec.librechat.core.model.PendingAction
-import com.garfiec.librechat.core.model.request.ToolApprovalResolution
+import com.garfiec.librechat.core.model.media.IconSource
+import com.garfiec.librechat.core.ui.glass.LocalGlassBackdrop
+import com.garfiec.librechat.core.ui.glass.glassBackdropSource
 import com.garfiec.librechat.core.ui.theme.isSurfaceDark
-import com.garfiec.librechat.feature.chat.components.artifact.ArtifactType
+import com.garfiec.librechat.feature.chat.components.sendflight.LocalSendFlight
 import com.garfiec.librechat.feature.chat.resources.*
-import com.garfiec.librechat.feature.chat.resources.Res
-import com.garfiec.librechat.feature.chat.util.AskAnswerDraft
 import com.garfiec.librechat.feature.chat.util.MessageNode
+import com.garfiec.librechat.feature.chat.util.attachmentRecoveries
+import com.garfiec.librechat.feature.chat.util.hasEditablePart
+import com.garfiec.librechat.feature.chat.util.withLiveSubagentFilesAdopted
+import com.garfiec.librechat.feature.chat.util.withPreviews
 import com.garfiec.librechat.feature.chat.viewmodel.ActiveToolCall
+import com.garfiec.librechat.feature.chat.viewmodel.JumpFlash
+import com.garfiec.librechat.feature.chat.viewmodel.MessageEditingState
+import com.garfiec.librechat.feature.chat.viewmodel.OwnerTextState
 import com.garfiec.librechat.feature.chat.viewmodel.SearchFocusRequest
 import com.garfiec.librechat.feature.chat.viewmodel.SearchMatch
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import org.jetbrains.compose.resources.stringResource
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,9 +83,15 @@ fun MessageList(
     onRegenerateMessage: (messageId: String) -> Unit,
     onCopyMessage: (messageId: String) -> Unit,
     modifier: Modifier = Modifier,
+    /** The live reply's reasoning, shown collapsed above its text. See [StreamingMessageBubble]. */
+    streamingThinking: String = "",
     activeToolCalls: List<ActiveToolCall> = emptyList(),
+    /** Calls whose sandbox is cold-booting; see `MessagesState.sandboxStartingToolCallIds`. */
+    sandboxStartingToolCallIds: Set<String> = emptySet(),
     streamingAttachments: List<Attachment> = emptyList(),
     onFeedback: (messageId: String, feedback: MinimalFeedback?) -> Unit = { _, _ -> },
+    /** `interface.feedback`. Gated here rather than at each caller so every list inherits it. */
+    feedbackEnabled: Boolean = true,
     /**
      * The response that just took over from the streaming bubble, from `ChatUiState`. Read from
      * state rather than derived here from `isStreaming`: a UI-side derivation can only run in an
@@ -93,15 +99,42 @@ fun MessageList(
      * then its activity groups have already chosen to collapse and nothing re-opens them.
      */
     justSettledMessageId: String? = null,
-    onContinue: (messageId: String) -> Unit = {},
+    /**
+     * False hides the actions that start a run (edit, regenerate, continue): Compare setup sends
+     * nothing until it ends, so they would do nothing.
+     */
+    canResubmit: Boolean = true,
+    /** The cut-short reply's chip ([StoppedReplyFooter]), under that reply; null shows none. */
+    stoppedReply: StoppedReplyAction? = null,
+    /**
+     * Hides every message action except Copy and branch switching, whatever callbacks are passed.
+     */
+    readOnly: Boolean = false,
     onReadAloud: (messageId: String) -> Unit = {},
     onFork: (messageId: String) -> Unit = {},
+    /**
+     * Retry / branch without files under a reply the branch's files may have failed (v0.8.9-rc1).
+     * Off unless the caller allows it (an Assistants chat keeps its files upstream, so neither
+     * leaves them behind). [recoveryBranchSupported] is the server's `excludeFiles` gate.
+     */
+    recoveryAllowed: Boolean = false,
+    recoveryBranchSupported: Boolean = false,
+    recoveryBusy: Boolean = false,
+    onRetryWithoutFiles: (failedReplyId: String) -> Unit = {},
+    onBranchWithoutFiles: (failedReplyId: String) -> Unit = {},
+    /** The originals of redacted user turns (v0.8.9-rc1), for their authors' eyes only. */
+    ownerTexts: Map<String, OwnerTextState> = emptyMap(),
+    onRetryOwnerTexts: () -> Unit = {},
     currentlyReadingMessageId: String? = null,
-    editingMessageId: String? = null,
-    editingText: String = "",
+    /**
+     * Which message is being edited, with its drafts and their baselines. One value rather than an
+     * id beside them, so the two cannot disagree about which row the drafts belong to.
+     */
+    editing: MessageEditingState = MessageEditingState(),
     onEditTextChange: (String) -> Unit = {},
-    onEditSaveAndSubmit: () -> Unit = {},
-    onEditSaveOnly: () -> Unit = {},
+    onEditPartTextChange: (Int, String) -> Unit = { _, _ -> },
+    onEditSave: () -> Unit = {},
+    onEditRerun: () -> Unit = {},
     onEditCancel: () -> Unit = {},
     baseUrl: String = "",
     fontSizeMultiplier: Float = 1.0f,
@@ -109,7 +142,8 @@ fun MessageList(
     onRefresh: () -> Unit = {},
     userAvatarUrl: String? = null,
     userName: String? = null,
-    selectedEndpoint: String? = null,
+    /** The streaming reply's avatar, resolved like each node's [MessageNode.avatar]. */
+    streamingAvatar: IconSource? = null,
     streamingSenderName: String = "Assistant",
     showImageDescriptions: Boolean = true,
     chatLayoutStyle: String = ChatLayoutConstants.THREAD,
@@ -121,12 +155,20 @@ fun MessageList(
     currentSearchMatchIndex: Int = 0,
     searchFocusRequest: SearchFocusRequest? = null,
     onSearchScrollHandle: () -> Unit = {},
+    /** A jumped-to message with nothing to highlight in it flashes instead. */
+    jumpFlash: JumpFlash? = null,
+    /** A jump to a message is under way: the first scroll waits for it rather than going to the bottom. */
+    jumpPending: Boolean = false,
     // Scrollable bottom inset that keeps the latest content clear of the overlaid input bar. The
     // caller measures the actual bar height (which grows as queued ghost rows stack above the
     // composer) so streaming text rests above the ghosts rather than behind them. It's a
     // LazyColumn contentPadding, not a solid spacer: content still scrolls up *behind* the
     // translucent ghosts. Defaults to the single-line bar's reserve.
     bottomContentPadding: Dp = 160.dp,
+    // Where the scroll-to-bottom button floats above the list's bottom edge. A caller with
+    // something at the bottom (the chat's measured composer, the shared-chat viewer's Continue FAB)
+    // passes a value that clears it; null floats it 30dp into [bottomContentPadding].
+    scrollToBottomPadding: Dp? = null,
     // Scrollable top inset mirroring [bottomContentPadding] for the floating top bar: the first
     // message rests below the bar yet still scrolls up *behind* its translucent scrim. The caller
     // measures the bar's actual height (status bar + chips). Defaults to 0 for callers without an
@@ -134,30 +176,53 @@ fun MessageList(
     topContentPadding: Dp = 0.dp,
     /**
      * The live human-review pause, or null. Rendered at the tail of the streaming section — the
-     * run is unfinished, so it belongs to the reply in progress, not after it. Only the callers
-     * that can resolve one pass it; the comparison panes leave it null.
+     * run is unfinished, so it belongs to the reply in progress, not after it: a tool approval as
+     * its resolve card, a question as a one-line marker pointing at the panel docked above the
+     * composer. Only the callers that can resolve one pass it; the comparison panes leave it null.
      */
     pendingAction: PendingAction? = null,
-    isResolvingPendingAction: Boolean = false,
-    onSubmitToolDecisions: (List<ToolApprovalResolution>) -> Unit = {},
-    onSubmitPendingAnswer: (String) -> Unit = {},
-    onSubmitPendingAnswers: (Map<String, String>) -> Unit = {},
-    askAnswerDrafts: Map<String, AskAnswerDraft> = emptyMap(),
-    onAskAnswerDraftChange: (String, AskAnswerDraft) -> Unit = { _, _ -> },
+    /**
+     * Whether this list records itself into the screen's glass backdrop. Comparison mode shows two
+     * lists, and two sources writing one backdrop would overwrite each other, so its panes opt out.
+     */
+    recordsGlassBackdrop: Boolean = true,
+    /**
+     * Hoisted by a caller that swaps one list for another showing the same thread (the single list
+     * and Compare's pane A), so the swap keeps the reader's place.
+     */
+    listState: LazyListState = rememberLazyListState(),
+    /** Compare's scroll sync is holding this pane level with the other; its tail follower stands down. */
+    syncHold: () -> Boolean = { false },
+    /**
+     * Reading room past the last line, so a reader can scroll the end of a reply up to where they
+     * read. Automatic scrolls stop short of it (see [scrollToTail]).
+     */
+    extraEndSpace: Dp = 0.dp,
+    /** Reports whether the list rests near its tail, by the same measure its tail follower uses. */
+    onNearBottomChange: ((Boolean) -> Unit)? = null,
 ) {
-    val listState = rememberLazyListState()
+    val extraEndPx = with(LocalDensity.current) { extraEndSpace.toPx() }
     val coroutineScope = rememberCoroutineScope()
-    // Stands the follower down while a finger rests on the list. Deliberately NOT a scroll-away
-    // signal on its own — see the detector below.
-    var isTouching by remember { mutableStateOf(false) }
-    val nearBottomThresholdPx = with(LocalDensity.current) { NEAR_BOTTOM_BUFFER.toPx() }
+    val follower = rememberTailFollowerState()
+    // The send animation claims the row a send adds, the frame it first composes, before it draws.
+    val sendFlight = LocalSendFlight.current
+    val tailUserIndex = displayMessages.indexOfLast { it.message.isCreatedByUser }
+    if (sendFlight != null) {
+        val tailUser = displayMessages.getOrNull(tailUserIndex)
+        SideEffect { sendFlight.observeTail(tailUser?.message, tailUser?.treeParentKey) }
+    }
+    // The sent message is the user tail, found by position: its id can change (server copy) in a
+    // composition that runs before the rebind.
+    val holdsReply = sendFlight?.holdsReply == true
+    val sentIndex = if (holdsReply) tailUserIndex else -1
     // Height (px) of the floating top bar occluding the list's top edge. The search fine-tune adds
     // this so a focused match settles below the bar rather than flush against (or under) it. Zero
     // for callers without an overlaid bar (e.g. comparison panes), leaving their behavior unchanged.
     val topContentPaddingPx = with(LocalDensity.current) { topContentPadding.toPx() }
     var lastNavigatedParentKey by remember { mutableStateOf<String?>(null) }
 
-    // A live `ask_user_question` pause is rendered by PendingActionCard, not as a tool card.
+    // A live `ask_user_question` pause is rendered by the docked AskUserQuestionPanel, not as a
+    // tool card.
     // Attribution is by the pause's own tool_call_id where the server sends one, so a sibling ask
     // call that is genuinely still running keeps its card instead of being hidden by association.
     val pausedAskToolCallId = pendingAction?.payload?.toolCallId
@@ -169,84 +234,32 @@ fun MessageList(
     val renderedToolCalls = remember(activeToolCalls, pausedAskToolCallId, pausedAskQuestion) {
         activeToolCalls.withoutUnansweredQuestions(pausedAskToolCallId, pausedAskQuestion)
     }
+    // One "Running X" row per skill the streaming turn picked, until the final message brings
+    // the real cards. The turn's user message is the last displayed node (fresh send, regenerate
+    // and edit alike), and a resync that already carries a skill's card retires its row.
+    val pendingSkills = remember(isStreaming, displayMessages, renderedToolCalls) {
+        if (!isStreaming) {
+            emptyList()
+        } else {
+            pendingSkillRows(
+                manualSkills = displayMessages.lastOrNull()?.message?.takeIf { it.isCreatedByUser }?.manualSkills,
+                liveSkillNames = renderedToolCalls.filter { isSkillToolCall(it.name) }.mapNotNull { parseSkillName(it.input) },
+            )
+        }
+    }
     val streamingToolCallCount = if (isStreaming) renderedToolCalls.size else 0
     val totalItemCount = displayMessages.size + streamingToolCallCount + if (isStreaming) 1 else 0
 
-    // Track whether user has deliberately scrolled away from the bottom.
-    // Reset when user scrolls back to bottom (via FAB or manual scroll).
-    var userScrolledUp by remember { mutableStateOf(false) }
-
-    // True only while an auto-scroll of ours is running. Load-bearing: isScrollInProgress cannot
-    // tell our scroll from the user's, so without this the scroll-away detector below scores the
-    // follower's own mid-growth scroll as intent and latches, silently killing the follow.
-    var programmaticScroll by remember { mutableStateOf(false) }
-
-    // True while the focus sits on something inside the list — an answer field on a pause card.
+    // True while the focus sits on something inside the list — an inline message edit.
     // The keyboard handler below stands down for those; foundation brings a focused node into
     // view on its own, and unlike this file it knows which node that is.
     var listHasFocus by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
 
-    // Read through updated state, not the captured parameter: the follower below runs for a whole
-    // run inside one LaunchedEffect, so a plain capture would keep reporting whatever was true on
-    // the frame the run started — which is always "no pause".
-    val isAwaitingHumanReview by rememberUpdatedState(pendingAction != null)
-
-    // Keyed on the threshold, which is derived from LocalDensity: a keyless remember holds the
-    // first composition's pixel value while the layout numbers it is compared against stay live,
-    // so the buffer is measured in stale units after a density or font-scale change.
-    val isNearBottom by remember(nearBottomThresholdPx) {
-        derivedStateOf {
-            val info = listState.layoutInfo
-            val lastItem = info.visibleItemsInfo.lastOrNull()
-            val itemCount = info.totalItemsCount
-            if (lastItem == null || itemCount == 0) {
-                true
-            } else {
-                // Measured from the follower's OWN rest target, not from viewportEndOffset: that
-                // baseline sits a whole bottom reserve below where the list can actually rest
-                // (composer height plus the reading gap — 184dp at the floor, more once queued
-                // ghost rows stack). Measure from it and the effective slack becomes
-                // [NEAR_BOTTOM_BUFFER] PLUS that reserve, so the pin re-grabs the list after a
-                // scroll-up of a quarter screen.
-                val restOffset = info.viewportEndOffset - info.afterContentPadding
-                lastItem.index >= itemCount - 2 &&
-                    (lastItem.offset + lastItem.size - restOffset) < nearBottomThresholdPx
-            }
-        }
-    }
-
-    // Detect user scroll-away: when the user drags or flings away from the bottom, set the flag.
-    // When they return to the bottom (manually or via FAB), clear it.
-    //
-    // Intent is a SCROLL, not a touch — do not add [isTouching] back to this term. A bare
-    // pointer-down moves nothing, but the follower stands down for as long as a finger is on the
-    // list, so the tail runs away on its own at streaming speed under a resting finger; that drift
-    // would score as scroll-away, and a long-press to select text would end the follow for the
-    // rest of the run. A drag holds the scroll session for its whole duration, mid-drag pauses
-    // included, so gesture latching loses nothing without the touch term.
-    LaunchedEffect(Unit) {
-        snapshotFlow {
-            (listState.isScrollInProgress && !programmaticScroll) to isNearBottom
-        }
-            .collect { (userIsScrolling, nearBottom) ->
-                if (userIsScrolling && !nearBottom) {
-                    userScrolledUp = true
-                } else if (!userIsScrolling && nearBottom) {
-                    userScrolledUp = false
-                }
-            }
-    }
-
-    val showScrollToBottom by remember {
-        derivedStateOf {
-            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            // The LIST's own count, not the hand-computed [totalItemCount] above: that one omits
-            // the trailing office-preview and human-review-pause items, so with one of those off
-            // screen the last visible index equals it and the FAB — the only cue that the thread
-            // scrolls further — is suppressed exactly when it is needed.
-            val rendered = listState.layoutInfo.totalItemsCount
-            rendered > 0 && lastVisibleItem < rendered - 1
-        }
+    val isNearBottom = rememberIsNearBottom(listState, extraEndPx)
+    if (onNearBottomChange != null) {
+        val report by rememberUpdatedState(onNearBottomChange)
+        LaunchedEffect(isNearBottom.value) { report(isNearBottom.value) }
     }
 
     // ── Auto-scroll behavior ──────────────────────────────────────────
@@ -261,8 +274,8 @@ fun MessageList(
     //    frame from live layout. It is deliberately NOT driven off
     //    streamingContent. It yields to the user on a finger-down
     //    (isTouching), once the scroll-away latch is set, or while the
-    //    run is paused for human review; see the loop itself for the
-    //    invariants it rests on.
+    //    run is paused for human review; see the loop itself
+    //    (TailFollower.kt) for the invariants it rests on.
     //
     // 4. POST-STREAMING — When streaming ends, a 300ms delay lets the
     //    Room observer replace the streaming bubble with the real AI
@@ -276,13 +289,20 @@ fun MessageList(
     // Two-phase, race-free jump to the focused search occurrence:
     //   Phase 1: scrollToItem composes the target message (a LazyColumn item
     //            composes fully even when taller than the viewport), like a
-    //            browser's instant find-in-page jump.
+    //            browser's instant find-in-page jump. It lands the target itself
+    //            first in view: the list holds its first visible item fixed, and
+    //            messages render asynchronously (markdown, code highlighting), so
+    //            landing with the message above first would let that message grow and
+    //            push the target out of view.
     //   Phase 2: the focused segment reports its live LayoutCoordinates plus
     //            the match's rect within it on every position pass (keyed
     //            state, never a consumable flag — reports for a stale target
-    //            are simply ignored). Once a report matching the CURRENT
-    //            request exists, one animateScrollBy places the match on the
-    //            browser-style anchor line (~1/3 down the usable viewport).
+    //            are simply ignored). From the latest report for the CURRENT
+    //            request the match is placed on the browser-style anchor line
+    //            (~1/3 down the usable viewport): a far move instantly and
+    //            relative to the target message (so growth above can't carry it
+    //            off), a short one animated. That repeats a few times while the
+    //            messages around it finish rendering.
     var listCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var focusedMatchReport by remember { mutableStateOf<FocusedSearchMatchReport?>(null) }
     val currentOnSearchScrollHandled by rememberUpdatedState(onSearchScrollHandle)
@@ -296,32 +316,51 @@ fun MessageList(
         val request = searchFocusRequest ?: return@LaunchedEffect
         if (request.messageIndex !in displayMessages.indices) return@LaunchedEffect
 
+        // A jump that opens a chat issues its request before the list's first layout, when the
+        // viewport still reads 0 and the anchor line would sit at the very top.
+        snapshotFlow { listState.layoutInfo.viewportSize.height }.first { it > 0 }
         val viewportHeight = listState.layoutInfo.viewportSize.height.toFloat()
         val anchorLine = topContentPaddingPx + (viewportHeight - topContentPaddingPx) / 3f
 
-        // Only jump when the target message isn't laid out yet; a far jump is expected to be
-        // instant. When it's already composed (next/prev within the same or a visible message),
-        // skip the jump so phase 2 animates straight to the match with no teleport-then-reverse.
+        // Only jump when the target message isn't laid out yet. When it's already composed
+        // (next/prev within the same or a visible message), phase 2 moves straight to the match
+        // with no teleport-then-reverse.
         val alreadyLaidOut = listState.layoutInfo.visibleItemsInfo.any { it.index == request.messageIndex }
-        if (!alreadyLaidOut) {
-            listState.scrollToItem(request.messageIndex, scrollOffset = -anchorLine.toInt())
-        }
+        if (!alreadyLaidOut) listState.scrollToItem(request.messageIndex)
 
-        val report = withTimeoutOrNull(SEARCH_FOCUS_REPORT_TIMEOUT_MS) {
-            snapshotFlow { focusedMatchReport }
-                .first { it != null && it.matches(request) && it.coordinates.isAttached }
-        }
-
-        val listCoords = listCoordinates
-        if (report != null && listCoords != null && listCoords.isAttached && report.coordinates.isAttached) {
-            val matchTop = listCoords.localPositionOf(
-                report.coordinates,
-                Offset(0f, report.matchRect.top),
-            ).y
+        var placed = false
+        for (pass in 0 until SEARCH_FOCUS_SETTLE_PASSES) {
+            val report = withTimeoutOrNull(SEARCH_FOCUS_REPORT_TIMEOUT_MS) {
+                snapshotFlow { focusedMatchReport }
+                    .first { it != null && it.matches(request) && it.coordinates.isAttached }
+            } ?: break
+            val listCoords = listCoordinates?.takeIf { it.isAttached } ?: break
+            placed = true
+            val matchTop = listCoords.localPositionOf(report.coordinates, Offset(0f, report.matchRect.top)).y
             val delta = matchTop - anchorLine
-            if (abs(delta) > 1f) {
-                listState.animateScrollBy(delta, SearchFocusScrollSpec)
+            val tolerance = if (pass == 0) 1f else SEARCH_FOCUS_SETTLE_TOLERANCE_PX
+            if (abs(delta) <= tolerance) {
+                if (pass > 0) break
+            } else {
+                val target = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == request.messageIndex }
+                if (target != null && abs(delta) > viewportHeight / 2) {
+                    // Relative to the target, which stays first in view when the match is near its top.
+                    val withinTarget = matchTop - target.offset
+                    listState.scrollToItem(request.messageIndex, (withinTarget - anchorLine).toInt().coerceAtLeast(0))
+                } else {
+                    listState.animateScrollBy(delta, SearchFocusScrollSpec)
+                }
             }
+            delay(SEARCH_FOCUS_SETTLE_MS)
+        }
+        // No match to place (folded away, or a jump's flash-only fallback): keep the target first in
+        // view, in case something above it moved while waiting. Also when it was already laid out but
+        // starts above the viewport: a chat that opened at its bottom shows only a long target's tail.
+        val targetStartsAbove = listState.layoutInfo.visibleItemsInfo
+            .firstOrNull { it.index == request.messageIndex }
+            ?.let { it.offset < listState.layoutInfo.viewportStartOffset + topContentPaddingPx } == true
+        if (!placed && (!alreadyLaidOut || targetStartsAbove)) {
+            listState.scrollToItem(request.messageIndex)
         }
         currentOnSearchScrollHandled()
     }
@@ -344,128 +383,69 @@ fun MessageList(
     // full-screen artifact route disposes the chat entry); otherwise the initial
     // scroll re-fires on return and overrides the restored scroll position.
     var hasScrolledToBottom by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(displayMessages.size) {
-        if (!hasScrolledToBottom && displayMessages.isNotEmpty()) {
-            listState.scrollToItem(totalItemCount - 1, scrollOffset = Int.MAX_VALUE)
+    // Whether the list holds its tail until the reader takes over (see [nextTailPin]). Not saveable:
+    // a list restored on return from another route keeps the place it was left at.
+    var pinnedToTail by remember { mutableStateOf(false) }
+    // A press anywhere on the list hands it to the reader: a tap that expands a card at the end
+    // would otherwise be scrolled out from under their finger as the card grows.
+    val unpinTail = remember { { pinnedToTail = false } }
+    LaunchedEffect(displayMessages.size, jumpPending) {
+        if (!hasScrolledToBottom && displayMessages.isNotEmpty() && !jumpPending) {
+            // A chat opened by a jump to one message starts there, not at the bottom: the jump is
+            // waited out, and only one that gave up without a message to focus lands at the bottom,
+            // and only if the user hasn't scrolled the list while it waited.
+            val untouched = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+            if (searchFocusRequest == null && untouched) {
+                follower.programmaticScroll = true
+                try {
+                    listState.scrollToTail(totalItemCount - 1, extraEndPx)
+                } finally {
+                    follower.programmaticScroll = false
+                }
+                // The open lands on the tail before the thread and the bottom chrome are done
+                // measuring: messages above the tail settle taller and the composer's rows measure in
+                // a few frames later, each pushing the tail down. The pin keeps it there.
+                pinnedToTail = true
+            }
             hasScrolledToBottom = true
         }
     }
 
     // A run pausing for human review changes NOTHING the other scroll effects key on:
     // displayMessages.size, streamingContent and isStreaming are all unchanged. Without this the
-    // card is appended below the viewport and the user is left looking at a live cursor on a run
-    // that will never produce another token.
+    // waiting marker is appended below the viewport and the user is left looking at a live cursor
+    // on a run that will never produce another token.
     LaunchedEffect(pendingAction?.actionId) {
         if (pendingAction?.actionId != null) {
-            userScrolledUp = false
+            follower.userScrolledUp = false
             val total = listState.layoutInfo.totalItemsCount
             // Flagged like the follower's own scrolls: this one animates from above the tail, so
             // every frame of it reads to the scroll-away detector as a user dragging away from
             // the bottom — the one thing that would latch the follower off for the rest of the run.
             if (total > 0) {
-                programmaticScroll = true
+                follower.programmaticScroll = true
                 try {
-                    listState.animateScrollToItem(total - 1, scrollOffset = Int.MAX_VALUE)
+                    listState.animateScrollToTail(total - 1, extraEndPx)
                 } finally {
-                    programmaticScroll = false
+                    follower.programmaticScroll = false
                 }
             }
         }
     }
 
-    var wasStreaming by remember { mutableStateOf(false) }
-    LaunchedEffect(isStreaming) {
-        if (isStreaming) {
-            wasStreaming = true
-            // Reset scroll-away flag — user just sent a message, start at bottom
-            userScrolledUp = false
-            // Jump to bottom immediately (user just sent a message)
-            val total = listState.layoutInfo.totalItemsCount
-            if (total > 0) {
-                listState.scrollToItem(total - 1, scrollOffset = Int.MAX_VALUE)
-            }
-            // Rule 3: streaming follow (see block comment above). ONE continuous follower for the
-            // whole run, driven per frame — not a scroll per text flush, which at the buffer's
-            // STREAMING_UI_UPDATE_INTERVAL_MS means ~20 instant scrollToItem jumps a second.
-            try {
-                while (isActive) {
-                    withFrameNanos { }
-                    // A finger down, or a deliberate scroll away, hands control back to the user.
-                    // isScrollInProgress is NOT consulted: our own scroll below sets it, so gating
-                    // on it would stop the follower on its own first frame.
-                    //
-                    // A pause for human review hands it back too. The run stays open across the
-                    // pause, so isStreaming alone keeps this loop pinning the tail every frame
-                    // while the one thing it exists to follow — output — has stopped. The card is
-                    // brought into view once by its own effect above; after that the list is the
-                    // user's, to read a long question or reach a field, and a follower still
-                    // running would undo every scroll the instant their finger lifts.
-                    if (isTouching || userScrolledUp || isAwaitingHumanReview) {
-                        programmaticScroll = false
-                        continue
-                    }
+    ClearExpansionStatesAfterReply(isStreaming, ExpansionPane.PRIMARY)
 
-                    val info = listState.layoutInfo
-                    val itemCount = info.totalItemsCount
-                    val lastItem = info.visibleItemsInfo.lastOrNull()
-                    if (itemCount == 0 || lastItem == null) {
-                        programmaticScroll = false
-                        continue
-                    }
-
-                    // Held for as long as the follower is driving, not toggled per frame:
-                    // isScrollInProgress stays true for a moment after a scroll call returns, and a
-                    // per-frame false exposes that tail to the detector as a user scroll.
-                    programmaticScroll = true
-                    try {
-                        if (lastItem.index < itemCount - 1) {
-                            // The tail is off screen — a card was appended below the viewport (a
-                            // tool call, an office preview, a review pause), so there is no
-                            // on-screen distance to ease along; jump instead. Once per appended
-                            // item, not per flush.
-                            listState.scrollToItem(itemCount - 1, scrollOffset = Int.MAX_VALUE)
-                        } else {
-                            // Rest the tail against the bottom reserve, NOT viewportEndOffset: that
-                            // is the layout size minus *before*-content-padding, so it sits below
-                            // where the list can actually rest and inflates every step by the whole
-                            // reserve — the ease then never decelerates, it runs full speed into
-                            // the scroll clamp.
-                            val restOffset = info.viewportEndOffset - info.afterContentPadding
-                            val distance = (lastItem.offset + lastItem.size - restOffset).toFloat()
-                            if (distance > FOLLOW_SETTLE_PX) {
-                                val step = (distance * FOLLOW_FRACTION)
-                                    .coerceIn(FOLLOW_MIN_STEP_PX, distance)
-                                listState.scrollBy(step)
-                            }
-                        }
-                    } catch (e: CancellationException) {
-                        // A user gesture takes the scroll mutex at UserInput priority, cancelling
-                        // ours. That must not escape: this loop IS the follower, so letting it
-                        // through ends auto-scroll for the whole run with no way to re-arm it. Only
-                        // a cancellation of the effect itself may propagate.
-                        programmaticScroll = false
-                        if (!isActive) throw e
-                    }
-                }
-            } finally {
-                programmaticScroll = false
-            }
-        } else if (wasStreaming) {
-            // Streaming just ended. The final messages are now in displayMessages
-            // synchronously (finalizeChatDisplay swaps the streaming bubble for the real
-            // AI message in the same state update that clears isStreaming), so we only need
-            // a brief layout-settle before scrolling to show the complete response.
-            // Only auto-scroll if user hasn't scrolled away.
-            wasStreaming = false
-            if (!userScrolledUp) {
-                delay(50)
-                val total = listState.layoutInfo.totalItemsCount
-                if (total > 0) {
-                    listState.scrollToItem(total - 1, scrollOffset = Int.MAX_VALUE)
-                }
-            }
-        }
-    }
+    TailFollowEffects(
+        listState = listState,
+        state = follower,
+        isNearBottom = isNearBottom,
+        isStreaming = isStreaming,
+        // A run paused for human review holds the follower: the marker is brought into view
+        // once by its own effect above, and after that the list is the user's.
+        holdFollow = pendingAction != null,
+        syncHold = syncHold,
+        extraEndPx = extraEndPx,
+    )
 
     // ── Keyboard scroll ────────────────────────────────────────────
     // When the soft keyboard (IME) opens, the Scaffold's imePadding()
@@ -477,8 +457,8 @@ fun MessageList(
     // It runs ONLY while nothing inside the list holds focus. This
     // exists for the composer, which sits outside the list, so the
     // list learns about the keyboard from nothing but its own
-    // shrinking viewport. A field INSIDE the list — an answer field
-    // on a pause card — needs no help: foundation scrolls a newly
+    // shrinking viewport. A field INSIDE the list — an inline message
+    // edit — needs no help: foundation scrolls a newly
     // focused node into view by itself, and it knows where the focus
     // is, which this does not. Both running means this one wins and
     // jumps to the tail of the last item, scrolling the user off the
@@ -493,28 +473,85 @@ fun MessageList(
     //  - It naturally handles any cause of viewport shrinkage, not
     //    just keyboard appearance.
     // ───────────────────────────────────────────────────────────────
+    // Not while a find or jump scroll is placing a match: opening the find bar shrinks the
+    // viewport too, and a scroll to the bottom then would interrupt that scroll and cancel it.
+    val currentFocusRequest by rememberUpdatedState(searchFocusRequest)
+    //
+    // A list pinned to its tail (see [nextTailPin]) is put back on it whenever anything pushes the
+    // tail down: messages settling taller, the bottom chrome measuring in (code workspace rows, a
+    // wrapped chip row, a taller composer), the keyboard. Not during a run: the follower already
+    // rests the tail against the live bottom padding, and an instant jump here would cut its easing
+    // short. Not while Compare's sync holds this pane level with the other.
+    val currentIsStreaming by rememberUpdatedState(isStreaming)
+    val currentIsNearBottom by rememberUpdatedState(isNearBottom)
+    val currentSyncHold by rememberUpdatedState(syncHold)
     LaunchedEffect(Unit) {
-        var previousViewportEnd = 0
+        var wasScrolling = false
         snapshotFlow {
-            listState.layoutInfo.viewportEndOffset
-        }.collect { viewportEnd ->
-            if (previousViewportEnd > 0 && viewportEnd < previousViewportEnd && !listHasFocus) {
-                // Viewport shrank (e.g., keyboard opened). If user was
-                // near the bottom, scroll to keep them there.
+            Triple(
+                follower.isTouching || currentFocusRequest != null,
+                listState.isScrollInProgress && !follower.programmaticScroll,
+                currentIsNearBottom.value,
+            )
+        }.collect { (touching, scrolling, nearTail) ->
+            pinnedToTail = nextTailPin(pinnedToTail, touching, scrolling, wasScrolling, nearTail)
+            wasScrolling = scrolling
+        }
+    }
+    LaunchedEffect(Unit) {
+        var previous: TailRest? = null
+        snapshotFlow {
+            val info = listState.layoutInfo
+            TailRest(
+                viewportEnd = info.viewportEndOffset,
+                restLine = info.viewportEndOffset - info.afterContentPadding,
+                nearTail = currentIsNearBottom.value,
+                overhang = info.tailOverhang(extraEndPx),
+            ) to pinnedToTail
+        }.collect { (rest, pinned) ->
+            if (!listHasFocus && currentFocusRequest == null && !currentIsStreaming && !currentSyncHold()) {
                 val info = listState.layoutInfo
-                val lastVisible = info.visibleItemsInfo.lastOrNull()
+                val lastVisibleIndex = info.visibleItemsInfo.lastOrNull()?.index
                 val itemCount = info.totalItemsCount
-                if (lastVisible != null && itemCount > 0 && lastVisible.index >= itemCount - 2) {
+                if (holdsPinnedTail(pinned, rest) || reanchorsToTail(previous, rest, lastVisibleIndex, itemCount)) {
                     coroutineScope.launch {
-                        listState.scrollToItem(itemCount - 1, scrollOffset = Int.MAX_VALUE)
+                        follower.programmaticScroll = true
+                        try {
+                            listState.scrollToTail(itemCount - 1, extraEndPx)
+                        } finally {
+                            follower.programmaticScroll = false
+                        }
                     }
                 }
             }
-            previousViewportEnd = viewportEnd
+            previous = rest
         }
     }
 
     val pullToRefreshState = rememberPullToRefreshState()
+    val resubmit = canResubmit && !readOnly
+    val recoveryViews = remember(displayMessages, resubmit, recoveryAllowed, recoveryBranchSupported) {
+        if (resubmit && recoveryAllowed) {
+            attachmentRecoveries(displayMessages.map { it.message }, recoveryBranchSupported)
+        } else {
+            emptyMap()
+        }
+    }
+    val retryWithoutFiles by rememberUpdatedState(onRetryWithoutFiles)
+    val branchWithoutFiles by rememberUpdatedState(onBranchWithoutFiles)
+    val recoveryHost = remember(recoveryViews, recoveryBusy || isStreaming) {
+        AttachmentRecoveryHost(
+            views = recoveryViews,
+            busy = recoveryBusy || isStreaming,
+            onRetry = { retryWithoutFiles(it) },
+            onBranch = { branchWithoutFiles(it) },
+        )
+    }
+    val retryOwnerTexts by rememberUpdatedState(onRetryOwnerTexts)
+    val ownerTextHost = remember(ownerTexts) { OwnerTextHost(ownerTexts) { retryOwnerTexts() } }
+    // Parsed once per list; `contentType` below runs on every measure pass.
+    val wakeups = remember(displayMessages) { wakeupsByMessageId(displayMessages) }
+
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = onRefresh,
@@ -532,274 +569,360 @@ fun MessageList(
             )
         },
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .onFocusChanged { listHasFocus = it.hasFocus }
-                .onGloballyPositioned { listCoordinates = it }
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            // Observe on Initial pass so we don't interfere with scrolling
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            isTouching = event.changes.any { it.pressed }
+        val previewOverrides = LocalPreviewOverrides.current
+        // A file a subagent's child call saved has no live card of its own (the child calls live
+        // only in the trace), so it goes under the subagent's card rather than nowhere.
+        val subagentTraces = LocalSubagentProgress.current
+        val liveAttachments = remember(streamingAttachments, previewOverrides, activeToolCalls, subagentTraces) {
+            streamingAttachments.withPreviews(previewOverrides).withLiveSubagentFilesAdopted(activeToolCalls, subagentTraces)
+        }
+        // The rows are what this list records, so glass inside them must not sample it: a surface
+        // drawing its own ancestor's recording recurses until the stack overflows (iOS SIGSEGV in
+        // saveLayer). Cards in the thread draw their flat fallback, as in AdaptiveScaffold's body.
+        val listBackdrop = LocalGlassBackdrop.current.takeIf { recordsGlassBackdrop }
+        CompositionLocalProvider(LocalGlassBackdrop provides null) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .glassBackdropSource(listBackdrop)
+                    .onFocusChanged { listHasFocus = it.hasFocus }
+                    .clearFocusOnThreadTap(focusManager) { listHasFocus }
+                    .onGloballyPositioned { listCoordinates = it }
+                    .tailFollowerTouch(follower)
+                    .onEveryPress(unpinTail),
+                state = listState,
+                // The bottom reserve is the measured bar height PLUS a reading gap. The gap must stay
+                // here rather than in the follower's target: a follower-only gap is reclaimed by the
+                // scroll-to-bottom when the run settles, putting a jump at completion (the #169
+                // flicker class).
+                contentPadding = PaddingValues(
+                    top = topContentPadding + 8.dp,
+                    bottom = bottomContentPadding + MESSAGE_LIST_BOTTOM_GAP + extraEndSpace,
+                ),
+            ) {
+                itemsIndexed(
+                    items = displayMessages,
+                    // Key by the conversation SLOT (parent in the active path), not the message's
+                    // own server-assigned id: the slot is stable across the streaming→final swap
+                    // and regenerate siblings, so the trailing streaming reply (keyed to the same
+                    // slot below) and its finalized message stay ONE in-place item and the list
+                    // keeps its scroll anchor at completion. Unique within the path (one node/level).
+                    key = { _, node -> node.treeParentKey },
+                    contentType = { _, node ->
+                        // A wake-up is a user message that renders as a system row; its own type keeps
+                        // slot reuse from handing it a user bubble's composition, or the reverse.
+                        val role = when {
+                            !node.message.isCreatedByUser -> "assistant"
+                            wakeups.wakeupOf(node, isEditing = editing.editingMessageId == node.message.messageId) != null -> "system"
+                            else -> "user"
                         }
+                        "${chatLayoutStyle}_$role"
+                    },
+                ) { index, node ->
+                    val isMatch = index in searchMatchMessageIndexSet
+                    val isCurrent = currentSearchMatch != null && index == currentSearchMatch.messageIndex
+                    // Which occurrence within this message is focused (-1 when this isn't the current match).
+                    val focusedOccurrenceInMessage = if (isCurrent) currentSearchMatch.occurrenceInMessage else -1
+                    val isJumpTarget = jumpFlash?.messageIndex == index
+                    val flash = rememberJumpFlash(jumpFlash?.takeIf { isJumpTarget && it.fade }?.requestId)
+                    val flashColor = jumpFlashColor()
+                    // Outlined while find-in-page is open on it (closing it clears the target); a target with no
+                    // match to find gets the fading flash instead, so nothing is left drawn on it.
+                    val jumpOutline = if (isJumpTarget && jumpFlash?.fade == false) {
+                        Modifier.jumpTargetOutline(MaterialTheme.colorScheme.primary)
+                    } else {
+                        Modifier
                     }
-                },
-            state = listState,
-            // The bottom reserve is the measured bar height PLUS a reading gap. The gap must stay
-            // here rather than in the follower's target: a follower-only gap is reclaimed by the
-            // scroll-to-bottom when the run settles, putting a jump at completion (the #169
-            // flicker class).
-            contentPadding = PaddingValues(
-                top = topContentPadding + 8.dp,
-                bottom = bottomContentPadding + MESSAGE_LIST_BOTTOM_GAP,
-            ),
-        ) {
-            itemsIndexed(
-                items = displayMessages,
-                // Key by the conversation SLOT (parent in the active path), not the message's
-                // own server-assigned id: the slot is stable across the streaming→final swap
-                // and regenerate siblings, so the trailing streaming reply (keyed to the same
-                // slot below) and its finalized message stay ONE in-place item and the list
-                // keeps its scroll anchor at completion. Unique within the path (one node/level).
-                key = { _, node -> node.treeParentKey },
-                contentType = { _, node ->
-                    val role = if (node.message.isCreatedByUser) "user" else "assistant"
-                    "${chatLayoutStyle}_$role"
-                },
-            ) { index, node ->
-                val isMatch = index in searchMatchMessageIndexSet
-                val isCurrent = currentSearchMatch != null && index == currentSearchMatch.messageIndex
-                // Which occurrence within this message is focused (-1 when this isn't the current match).
-                val focusedOccurrenceInMessage = if (isCurrent) currentSearchMatch.occurrenceInMessage else -1
 
-                // Last message parses markdown synchronously; see [LocalImmediateMarkdown].
-                // Publish the focus-request nonce only around the current match so a collapsible
-                // block re-arms its auto-expand on every navigation (even back to the same match);
-                // non-current bubbles see 0L and don't recompose on navigation.
-                CompositionLocalProvider(
-                    LocalImmediateMarkdown provides (index == displayMessages.lastIndex),
-                    LocalSearchFocusNonce provides if (isCurrent) searchFocusRequest?.requestId ?: 0L else 0L,
-                    LocalSuppressGroupAutoCollapse provides (node.message.messageId == justSettledMessageId),
-                    LocalFeedbackEnabled provides !isStreaming,
-                ) {
-                MessageBubble(
-                    message = node.message,
-                    siblingIndex = node.siblingIndex,
-                    siblingCount = node.siblingCount,
-                    onSiblingNavigation = { newIndex ->
-                        lastNavigatedParentKey = node.treeParentKey
-                        onSiblingNavigation(node.treeParentKey, newIndex)
-                    },
-                    showActionsInitially = lastNavigatedParentKey == node.treeParentKey,
-                    onEdit = { onEditMessage(node.message.messageId) },
-                    onRegenerate = if (!node.message.isCreatedByUser) {
-                        { onRegenerateMessage(node.message.messageId) }
+                    // Last message parses markdown synchronously; see [LocalImmediateMarkdown].
+                    // Publish the focus-request nonce only around the current match so a collapsible
+                    // block re-arms its auto-expand on every navigation (even back to the same match);
+                    // non-current bubbles see 0L and don't recompose on navigation.
+                    CompositionLocalProvider(
+                        LocalImmediateMarkdown provides (index == displayMessages.lastIndex),
+                        LocalSearchFocusNonce provides if (isCurrent) searchFocusRequest?.requestId ?: 0L else 0L,
+                        LocalSuppressGroupAutoCollapse provides (node.message.messageId == justSettledMessageId),
+                        LocalFeedbackEnabled provides (!isStreaming && !readOnly),
+                        LocalExpansionScope provides expansionScope(ExpansionPane.PRIMARY, node.message.parentMessageId),
+                        LocalAttachmentRecovery provides recoveryHost,
+                        LocalOwnerTexts provides ownerTextHost,
+                    ) {
+                    // Built here, where the message is in hand: whether a rerun is possible, and
+                    // whether the changes can ride it, are both questions about THIS message's parts
+                    // and parent. Null on every other row (see MessageEditSession).
+                    // Memoized: the artifact check parses markdown, and this subtree recomposes on
+                    // every streaming flush. Everything else in this file that scans content parts is
+                    // wrapped the same way.
+                    val editable = remember(node.message.content, node.message.text) {
+                        hasEditablePart(node.message)
+                    }
+                    val editSession = if (editing.editingMessageId == node.message.messageId) {
+                        rememberMessageEditSession(
+                            message = node.message,
+                            // The edited message is on the active path, so its parent is too — no need
+                            // for the whole tree to resolve the turn a rerun would replay.
+                            displayed = displayMessages,
+                            editing = editing,
+                            saveAllowed = !isStreaming && !readOnly,
+                            canStartRun = resubmit,
+                            onTextChange = onEditTextChange,
+                            onPartTextChange = onEditPartTextChange,
+                            onSave = onEditSave,
+                            onRerun = onEditRerun,
+                            onCancel = onEditCancel,
+                        )
                     } else {
                         null
-                    },
-                    onCopy = { onCopyMessage(node.message.messageId) },
-                    onFeedback = if (!node.message.isCreatedByUser) {
-                        { feedback -> onFeedback(node.message.messageId, feedback) }
+                    }
+                    val systemEvent = wakeups.wakeupOf(node, isEditing = editing.editingMessageId == node.message.messageId)
+                    if (systemEvent != null) {
+                        SystemEventRow(
+                            display = systemEvent,
+                            messageId = node.message.messageId,
+                            fontSizeMultiplier = fontSizeMultiplier,
+                            useKatex = useKatex,
+                            siblingIndex = node.siblingIndex,
+                            siblingCount = node.siblingCount,
+                            onSiblingNavigation = { newIndex ->
+                                lastNavigatedParentKey = node.treeParentKey
+                                onSiblingNavigation(node.treeParentKey, newIndex)
+                            },
+                            onCopy = { onCopyMessage(node.message.messageId) },
+                            onEdit = if (resubmit && editable) {
+                                { onEditMessage(node.message.messageId) }
+                            } else {
+                                null
+                            },
+                            onReadAloud = if (readOnly) null else ({ onReadAloud(node.message.messageId) }),
+                            isReading = currentlyReadingMessageId == node.message.messageId,
+                            // A copy of a failed reply would carry the provider's error as an answer.
+                            onFork = if (readOnly || node.message.error) null else ({ onFork(node.message.messageId) }),
+                        )
                     } else {
-                        null
-                    },
-                    onContinue = if (!node.message.isCreatedByUser) {
-                        { onContinue(node.message.messageId) }
-                    } else {
-                        null
-                    },
-                    onReadAloud = { onReadAloud(node.message.messageId) },
-                    onFork = { onFork(node.message.messageId) },
-                    baseUrl = baseUrl,
-                    fontSizeMultiplier = fontSizeMultiplier,
-                    isReading = currentlyReadingMessageId == node.message.messageId,
-                    currentFeedback = node.message.feedback?.rating,
-                    isEditing = editingMessageId == node.message.messageId,
-                    editText = if (editingMessageId == node.message.messageId) editingText else "",
-                    onEditTextChange = onEditTextChange,
-                    onEditSaveAndSubmit = onEditSaveAndSubmit,
-                    onEditSaveOnly = onEditSaveOnly,
-                    onEditCancel = onEditCancel,
-                    userAvatarUrl = userAvatarUrl,
-                    userName = userName,
-                    selectedEndpoint = selectedEndpoint,
-                    showImageDescriptions = showImageDescriptions,
-                    chatLayoutStyle = chatLayoutStyle,
-                    showAvatars = showAvatars,
-                    showBubbles = showBubbles,
-                    useKatex = useKatex,
-                    searchQuery = searchQuery,
-                    isSearchMatch = isMatch,
-                    isCurrentSearchMatch = isCurrent,
-                    searchFocusedOccurrence = focusedOccurrenceInMessage,
-                    onFocusedOccurrencePosition = if (isCurrent && searchQuery != null) {
-                        { coordinates, matchRect ->
-                            // Only record while a jump is pending; the focused node keeps reporting
-                            // on every later scroll pass, and consuming those would churn state.
-                            if (searchFocusRequest != null) {
-                                focusedMatchReport = FocusedSearchMatchReport(
-                                    requestId = searchFocusRequest.requestId,
-                                    coordinates = coordinates,
-                                    matchRect = matchRect,
-                                )
-                            }
-                        }
-                    } else {
-                        null
-                    },
-                )
-                }
-            }
-
-            if (isStreaming) {
-                // Key the reply to the slot its finalized message will occupy: it attaches to
-                // the last message in the truncated path, whose id is the finalized node's
-                // treeParentKey (see itemsIndexed key above). Sharing that key makes the swap
-                // an in-place content update rather than a scroll-resetting remove+add.
-                val streamingSlotKey = displayMessages.lastOrNull()?.message?.messageId
-                    ?: "streaming_message"
-                item(key = streamingSlotKey) {
-                    StreamingMessageBubble(
-                        streamingContent = streamingContent,
-                        senderName = streamingSenderName,
-                        senderIconUrl = null,
+                    MessageBubble(
+                        message = node.message,
+                        modifier = jumpOutline
+                            .jumpFlashBackground(flash, flashColor)
+                            .then(
+                                if (sendFlight != null && sentIndex in 0 until index) sendFlight.replyHeaderModifier else Modifier,
+                            ),
+                        siblingIndex = node.siblingIndex,
+                        siblingCount = node.siblingCount,
+                        onSiblingNavigation = { newIndex ->
+                            lastNavigatedParentKey = node.treeParentKey
+                            onSiblingNavigation(node.treeParentKey, newIndex)
+                        },
+                        showActionsInitially = lastNavigatedParentKey == node.treeParentKey,
+                        onEdit = if (resubmit && editable) {
+                            { onEditMessage(node.message.messageId) }
+                        } else {
+                            null
+                        },
+                        onRegenerate = if (resubmit && !node.message.isCreatedByUser) {
+                            { onRegenerateMessage(node.message.messageId) }
+                        } else {
+                            null
+                        },
+                        onCopy = { onCopyMessage(node.message.messageId) },
+                        // A failed reply has no answer to rate or copy into a fork (web's HoverButtons).
+                        onFeedback = if (!node.message.isCreatedByUser && !node.message.error && feedbackEnabled && !readOnly) {
+                            { feedback -> onFeedback(node.message.messageId, feedback) }
+                        } else {
+                            null
+                        },
+                        onReadAloud = if (readOnly) null else ({ onReadAloud(node.message.messageId) }),
+                        onFork = if (readOnly || node.message.error) null else ({ onFork(node.message.messageId) }),
+                        baseUrl = baseUrl,
                         fontSizeMultiplier = fontSizeMultiplier,
-                        selectedEndpoint = selectedEndpoint,
+                        isReading = currentlyReadingMessageId == node.message.messageId,
+                        currentFeedback = node.message.feedback?.rating,
+                        editSession = editSession,
+                        userAvatarUrl = userAvatarUrl,
+                        userName = userName,
+                        showImageDescriptions = showImageDescriptions,
                         chatLayoutStyle = chatLayoutStyle,
                         showAvatars = showAvatars,
                         showBubbles = showBubbles,
+                        avatar = node.avatar,
                         useKatex = useKatex,
+                        searchQuery = searchQuery,
+                        isSearchMatch = isMatch,
+                        isCurrentSearchMatch = isCurrent,
+                        searchFocusedOccurrence = focusedOccurrenceInMessage,
+                        onFocusedOccurrencePosition = if (isCurrent && searchQuery != null) {
+                            { coordinates, matchRect ->
+                                // Only record while a jump is pending; the focused node keeps reporting
+                                // on every later scroll pass, and consuming those would churn state.
+                                if (searchFocusRequest != null) {
+                                    focusedMatchReport = FocusedSearchMatchReport(
+                                        requestId = searchFocusRequest.requestId,
+                                        coordinates = coordinates,
+                                        matchRect = matchRect,
+                                    )
+                                }
+                            }
+                        } else {
+                            null
+                        },
                     )
-                }
-
-                if (renderedToolCalls.isNotEmpty()) {
-                    items(
-                        items = renderedToolCalls,
-                        key = { "tool_call_${it.id}" },
-                        contentType = { "tool_call" },
-                    ) { toolCall ->
-                        StreamingToolCallCard(
-                            toolCall = toolCall,
-                            modifier = Modifier.padding(
-                                horizontal = 16.dp,
-                                vertical = 4.dp,
-                            ),
-                            baseUrl = baseUrl,
-                            streamingAttachments = streamingAttachments,
-                            showImageDescriptions = showImageDescriptions,
+                    if (resubmit && stoppedReply?.messageId == node.message.messageId) {
+                        StoppedReplyFooter(
+                            action = stoppedReply,
+                            modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
                         )
+                    }
+                    }
                     }
                 }
 
-                // Live deferred office-doc previews (v0.8.6): pending→Preparing,
-                // ready→artifact, failed→chip. Folded by file_id in the VM delegate.
-                val officeAttachments = streamingAttachments.filter {
-                    ArtifactType.isOfficePreviewMime(it.type)
-                }
-                if (officeAttachments.isNotEmpty()) {
-                    item(key = "streaming_office_previews") {
-                        OfficePreviewAttachments(
-                            attachments = officeAttachments,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                            isDarkTheme = isSurfaceDark(),
-                        )
-                    }
-                }
-
-                val orphanMemory = collectUnrenderedMemoryArtifacts(
-                    streamingAttachments,
-                    renderedToolCalls.map { it.id },
-                )
-                if (orphanMemory.isNotEmpty()) {
-                    item(key = "streaming_memory_artifacts") {
-                        MemoryArtifactsSection(
-                            artifacts = orphanMemory,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                            stateKey = "streaming",
-                        )
-                    }
-                }
-
-                // Human-review pause (v0.8.8): the run is waiting on the user, so the resolve
-                // controls sit at the tail of the still-unfinished reply — the continuation
-                // streams back into the bubble above.
-                if (pendingAction != null) {
-                    item(key = "pending_action_${pendingAction.actionId}") {
-                        PendingActionCard(
-                            pendingAction = pendingAction,
-                            isResolving = isResolvingPendingAction,
-                            onSubmitToolDecisions = onSubmitToolDecisions,
-                            onSubmitAnswer = onSubmitPendingAnswer,
-                            onSubmitAnswers = onSubmitPendingAnswers,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                            askAnswerDrafts = askAnswerDrafts,
-                            onAskAnswerDraftChange = onAskAnswerDraftChange,
-                        )
-                    }
-                }
-            }
-        }
-
-        // Scroll-to-bottom FAB
-        AnimatedVisibility(
-            visible = showScrollToBottom,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                // Float the FAB just above the input bar, tracking the same inset as the content.
-                .padding(bottom = (bottomContentPadding - 30.dp).coerceAtLeast(16.dp)),
-            enter = fadeIn(),
-            exit = fadeOut(),
-        ) {
-            SmallFloatingActionButton(
-                onClick = {
-                    userScrolledUp = false
-                    coroutineScope.launch {
-                        if (totalItemCount > 0) {
-                            listState.animateScrollToItem(totalItemCount - 1, scrollOffset = Int.MAX_VALUE)
+                if (isStreaming) {
+                    // Key the reply to the slot its finalized message will occupy: it attaches to
+                    // the last message in the truncated path, whose id is the finalized node's
+                    // treeParentKey (see itemsIndexed key above). Sharing that key makes the swap
+                    // an in-place content update rather than a scroll-resetting remove+add.
+                    val streamingSlotKey = displayMessages.lastOrNull()?.message?.messageId
+                        ?: "streaming_message"
+                    // Workspace changes get their own item; tool cards, office previews and memory
+                    // take the rest. The bubble's markdown images resolve against all of them.
+                    val streamingWorkspace = partitionWorkspaceChanges(liveAttachments)
+                    // The message the reply answers, which its saved message names as its parent.
+                    val replyScope =
+                        expansionScope(ExpansionPane.PRIMARY, displayMessages.lastOrNull()?.message?.messageId)
+                    item(key = streamingSlotKey) {
+                        ProvideMarkdownMedia(liveAttachments, baseUrl) {
+                            StreamingMessageBubble(
+                                streamingContent = streamingContent,
+                                senderName = streamingSenderName,
+                                avatar = streamingAvatar,
+                                fontSizeMultiplier = fontSizeMultiplier,
+                                chatLayoutStyle = chatLayoutStyle,
+                                showAvatars = showAvatars,
+                                showBubbles = showBubbles,
+                                useKatex = useKatex,
+                                streamingThinking = streamingThinking,
+                                // Inside the reply, under its sender row, where the finalized
+                                // message draws the cards that replace them.
+                                pendingSkills = pendingSkills,
+                                waiting = holdsReply,
+                            )
                         }
                     }
-                },
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                elevation = FloatingActionButtonDefaults.elevation(
-                    defaultElevation = 4.dp,
-                ),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = stringResource(Res.string.cd_scroll_to_bottom),
-                )
+
+                    // The live reply's other rows join the list when a send's reply content comes in.
+                    if (!holdsReply) {
+                        if (renderedToolCalls.isNotEmpty()) {
+                            items(
+                                items = renderedToolCalls,
+                                key = { "tool_call_${it.id}" },
+                                contentType = { "tool_call" },
+                            ) { toolCall ->
+                                CompositionLocalProvider(LocalExpansionScope provides replyScope) {
+                                    StreamingToolCallCard(
+                                        toolCall = toolCall,
+                                        modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                        baseUrl = baseUrl,
+                                        streamingAttachments = streamingWorkspace.inline,
+                                        showImageDescriptions = showImageDescriptions,
+                                        sandboxStarting = toolCall.id in sandboxStartingToolCallIds,
+                                        isLatestStep = toolCall.id == renderedToolCalls.lastOrNull()?.id,
+                                        replyLength = streamingContent.length,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (streamingWorkspace.changes.isNotEmpty()) {
+                            item(key = "streaming_workspace_changes", contentType = "workspace_changes") {
+                                CompositionLocalProvider(LocalExpansionScope provides replyScope) {
+                                    WorkspaceChangesSection(
+                                        changes = streamingWorkspace.changes,
+                                        baseUrl = baseUrl,
+                                        stateKey = "streaming",
+                                        modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                        live = true,
+                                    )
+                                }
+                            }
+                        }
+
+                        // Live office-doc previews (v0.8.6) once ready. Pending and failed ones are rows
+                        // under their tool call, or here when no rendered call claims them; see
+                        // isInlineOfficePreview.
+                        val streamingCallIds = renderedToolCalls.map { it.id }
+                        val officeAttachments = streamingWorkspace.inline.filter(::isInlineOfficePreview)
+                        if (officeAttachments.isNotEmpty() ||
+                            unclaimedOfficePreviewRows(streamingWorkspace.inline, streamingCallIds).isNotEmpty()
+                        ) {
+                            item(key = "streaming_office_previews") {
+                                OfficePreviewAttachments(
+                                    attachments = streamingWorkspace.inline,
+                                    renderedToolCallIds = streamingCallIds,
+                                    baseUrl = baseUrl,
+                                    modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                    isDarkTheme = isSurfaceDark(),
+                                )
+                            }
+                        }
+
+                        val orphanMemory = collectUnrenderedMemoryArtifacts(
+                            streamingWorkspace.inline,
+                            streamingCallIds,
+                        )
+                        if (orphanMemory.isNotEmpty()) {
+                            // Keyed per reply, so the next run's line never restores this one's open state.
+                            item(key = "streaming_memory_artifacts_$streamingSlotKey") {
+                                CompositionLocalProvider(LocalExpansionScope provides replyScope) {
+                                    MemoryArtifactsSection(
+                                        artifacts = orphanMemory,
+                                        modifier = Modifier.streamingContentColumnPadding(chatLayoutStyle, showAvatars, showBubbles),
+                                        stateKey = memoryArtifactsStateKey(streamingWorkspace.inline, fallback = ""),
+                                        onManage = LocalOpenMemories.current,
+                                        live = true,
+                                    )
+                                }
+                            }
+                        }
+
+                        // Human-review pause (v0.8.8): the run is waiting on the user, whose controls are
+                        // docked by the composer (AskUserQuestionPanel, ToolApprovalPanel). The tail of the
+                        // still-unfinished reply keeps a one-line marker so it reads as waiting rather than
+                        // stalled; the continuation streams back into the bubble above.
+                        if (pendingAction != null) {
+                            item(key = "pending_action_${pendingAction.actionId}") {
+                                val markerModifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                if (pendingAction.isAskUserQuestion) {
+                                    AskUserQuestionWaitingMarker(modifier = markerModifier)
+                                } else {
+                                    ToolApprovalWaitingMarker(modifier = markerModifier)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        ScrollToBottomButton(
+            listState = listState,
+            follower = follower,
+            extraEndPx = extraEndPx,
+            backdrop = listBackdrop,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = scrollToBottomPadding ?: scrollToBottomButtonPadding(bottomContentPadding)),
+        )
     }
 }
 
 /** How long phase 2 waits for the focused occurrence to report before settling for the message top. */
 private const val SEARCH_FOCUS_REPORT_TIMEOUT_MS = 500L
 
-// ── Streaming follow tuning ───────────────────────────────────────────
-// Fraction of the remaining distance-to-bottom consumed per frame. Recomputed from live layout
-// every frame, so this is an exponential ease: 0.15 is a time constant near 100ms at 60fps.
-private const val FOLLOW_FRACTION = 0.15f
+/** How many times a focused match is re-placed while the message around it settles, and how far apart. */
+private const val SEARCH_FOCUS_SETTLE_PASSES = 4
+private const val SEARCH_FOCUS_SETTLE_MS = 250L
 
-/** Floor on the per-frame step, so the last sub-pixel gap closes instead of easing forever. */
-private const val FOLLOW_MIN_STEP_PX = 0.5f
-
-/** Distance below which the list counts as settled at the bottom and the follower idles. */
-private const val FOLLOW_SETTLE_PX = 0.5f
-
-/**
- * Slack below the list's resting position within which the follower keeps its pin. A gesture that
- * leaves it hands the list to the user for the rest of the run; settling back inside it re-arms the
- * follow. Larger and a deliberate scroll-up gets yanked back to the tail; smaller and a slight
- * gesture near the tail ends the follow when the user meant to stay pinned.
- */
-private val NEAR_BOTTOM_BUFFER = 80.dp
-
-/** Reading gap held below the last line, on top of the caller-measured bar reserve. */
-private val MESSAGE_LIST_BOTTOM_GAP = 24.dp
+/** A settled match this close to the anchor line (px) is left where it is. */
+private const val SEARCH_FOCUS_SETTLE_TOLERANCE_PX = 48f
 
 private val SearchFocusScrollSpec = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
@@ -819,4 +942,29 @@ private class FocusedSearchMatchReport(
     val matchRect: Rect,
 ) {
     fun matches(request: SearchFocusRequest): Boolean = requestId == request.requestId
+}
+
+/**
+ * Messages, their text and their cards consume taps, so the root `clearFocusOnTap` never sees one.
+ * Watches the Initial pass and consumes nothing. Stands down while focus is inside the list (an inline
+ * edit keeps its caret taps). Not gated on scrolling: the auto-follow scrolls every frame while a reply streams.
+ */
+private fun Modifier.clearFocusOnThreadTap(
+    focusManager: FocusManager,
+    focusInside: () -> Boolean,
+): Modifier = pointerInput(focusManager) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        while (true) {
+            val change = awaitPointerEvent(PointerEventPass.Initial).changes.singleOrNull()
+            val abandoned = change == null ||
+                change.id != down.id ||
+                (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+            if (abandoned) return@awaitEachGesture
+            if (change.changedToUp()) {
+                if (!focusInside()) focusManager.clearFocus()
+                return@awaitEachGesture
+            }
+        }
+    }
 }

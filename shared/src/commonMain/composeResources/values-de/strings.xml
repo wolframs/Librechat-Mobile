@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Drawer -->
-    <string name="settings">Einstellungen</string>
 
     <!-- Content descriptions -->
-    <string name="cd_back_to_conversations">Zurück zu den Unterhaltungen</string>
 
     <!-- Version mismatch dialog -->
     <string name="version_mismatch_title">Backend-Versionskonflikt</string>
@@ -14,4 +12,15 @@
     <string name="session_expired_title">Abgemeldet</string>
     <string name="session_expired_message">Deine Sitzung ist abgelaufen. Melde dich erneut an, um fortzufahren.</string>
     <string name="session_expired_message_named">Deine Sitzung für %1$s ist abgelaufen. Melde dich erneut an, um fortzufahren.</string>
+    <string name="session_expired_switched_named">Deine Sitzung für %1$s ist abgelaufen, daher nutzt du jetzt %2$s. Melde dich über den Kontowechsler erneut bei %1$s an.</string>
+    <string name="session_expired_switched">Deine Sitzung ist abgelaufen, daher nutzt du jetzt %1$s. Melde dich über den Kontowechsler erneut an.</string>
+    <string name="session_banned_title">Konto eingeschränkt</string>
+    <string name="session_banned_message">Dein Server hat dieses Konto vorübergehend eingeschränkt, etwa nach zu vielen Anfragen oder einem Richtlinienverstoß. Bis die Einschränkung aufgehoben ist, kannst du keine Nachrichten senden, keine Agenten nutzen und keine Dateien hochladen, und du wirst möglicherweise abgemeldet. Falls sie bestehen bleibt, wende dich an deinen Server-Admin.</string>
+    <string name="session_banned_message_named">Dein Server hat %1$s vorübergehend eingeschränkt, etwa nach zu vielen Anfragen oder einem Richtlinienverstoß. Bis die Einschränkung aufgehoben ist, kannst du keine Nachrichten senden, keine Agenten nutzen und keine Dateien hochladen, und du wirst möglicherweise abgemeldet. Falls sie bestehen bleibt, wende dich an deinen Server-Admin.</string>
+    <string name="session_renewal_blocked_message">Deine Sitzung konnte nicht erneuert werden – der Server hat die Aktualisierungsanfrage abgelehnt.</string>
+    <string name="session_renewal_sign_in_again">Erneut anmelden</string>
+    <string name="shared_link_switch_title">Konto wechseln?</string>
+    <string name="shared_link_switch_message">Dieser geteilte Chat liegt auf %1$s, wo du als %2$s angemeldet bist. Wechsle zu diesem Konto, um ihn hier zu öffnen.</string>
+    <string name="shared_link_switch_confirm">Wechseln</string>
+    <string name="shared_link_open_in_browser">Im Browser öffnen</string>
 </resources>

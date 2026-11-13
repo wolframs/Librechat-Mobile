@@ -2,6 +2,7 @@ package com.garfiec.librechat.feature.chat.viewmodel.delegate
 
 import com.garfiec.librechat.core.common.ToolConstants
 import com.garfiec.librechat.core.model.ContentType
+import com.garfiec.librechat.core.model.RunStepStatus
 import com.garfiec.librechat.core.model.StreamEvent
 import com.garfiec.librechat.core.model.SubagentPhase
 import com.garfiec.librechat.core.model.content.AgentToolCall
@@ -10,6 +11,7 @@ import com.garfiec.librechat.feature.chat.viewmodel.SubagentHandle
 import com.garfiec.librechat.feature.chat.viewmodel.SubagentTrace
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Folds live `on_subagent_update` SSE envelopes (v0.8.6 subagents) into a
@@ -122,10 +124,12 @@ class SubagentTraceDelegate(
                     toolCallId to current.copy(
                         subagentRunId = current.subagentRunId ?: event.subagentRunId,
                         subagentType = event.subagentType ?: current.subagentType,
+                        subagentAgentId = event.subagentAgentId ?: current.subagentAgentId,
                         label = event.label ?: current.label,
                         phase = event.phase,
                         parts = nextParts,
                         isComplete = isTerminal,
+                        droppedUpdates = current.droppedUpdates + (event.activityDroppedCount ?: 0),
                     )
                     ),
             )
@@ -152,7 +156,13 @@ class SubagentTraceDelegate(
                     ),
                 ),
             )
-            is StreamEvent.ToolCallComplete -> completeToolCall(parts, inner.toolCallId, inner.output)
+            is StreamEvent.ToolCallComplete ->
+                completeToolCall(parts, inner.toolCallId, inner.output, inner.inputValidationError)
+            is StreamEvent.ToolCallClosed -> closeToolCall(parts, inner.toolCallId, inner.status)
+            // Guidance the parent (or the user) sent the child mid-run, in the order it went in.
+            is StreamEvent.SteerApplied -> inner.text?.let {
+                capParts(parts + MessageContentPart(type = ContentType.STEER, steer = JsonPrimitive(it)))
+            } ?: parts
             else -> parts // start/stop/error/run_step_delta carry no foldable content
         }
     }
@@ -181,13 +191,34 @@ class SubagentTraceDelegate(
         parts: List<MessageContentPart>,
         toolCallId: String,
         output: String,
+        inputValidationError: Boolean,
     ): List<MessageContentPart> {
         val index = parts.indexOfLast {
             it.type == ContentType.TOOL_CALL && it.toolCall?.id == toolCallId
         }
         if (index < 0) return parts
         val part = parts[index]
-        val updated = part.copy(toolCall = part.toolCall?.copy(output = output))
+        val updated = part.copy(
+            toolCall = part.toolCall?.copy(
+                output = output,
+                // The wire contract is `true` or absent, never `false`.
+                inputValidationError = true.takeIf { inputValidationError },
+            ),
+        )
+        return parts.toMutableList().also { it[index] = updated }
+    }
+
+    private fun closeToolCall(
+        parts: List<MessageContentPart>,
+        toolCallId: String,
+        status: RunStepStatus,
+    ): List<MessageContentPart> {
+        val index = parts.indexOfLast {
+            it.type == ContentType.TOOL_CALL && it.toolCall?.id == toolCallId
+        }
+        if (index < 0) return parts
+        val part = parts[index]
+        val updated = part.copy(toolCall = part.toolCall?.copy(runStepStatus = status))
         return parts.toMutableList().also { it[index] = updated }
     }
 

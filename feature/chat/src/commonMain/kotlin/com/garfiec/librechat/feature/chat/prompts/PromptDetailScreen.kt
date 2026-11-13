@@ -12,24 +12,24 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveButton
+import com.garfiec.librechat.core.ui.components.AdaptiveScaffold
+import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
 import com.garfiec.librechat.core.ui.components.LibreChatTopBar
+import com.garfiec.librechat.core.ui.components.topbar.BarAction
+import com.garfiec.librechat.core.ui.components.topbar.BarIcons
+import com.garfiec.librechat.core.ui.components.topbar.BarTint
 import com.garfiec.librechat.feature.chat.prompts.components.PromptPreviewPanel
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
@@ -45,31 +45,44 @@ fun PromptDetailScreen(
     onEdit: (String) -> Unit,
     modifier: Modifier = Modifier,
     onShare: () -> Unit = {},
+    onRetryText: () -> Unit = {},
+    isDeleting: Boolean = false,
 ) {
-    Scaffold(
+    AdaptiveScaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             LibreChatTopBar(
                 title = group.name,
                 onNavigateBack = onBack,
-                actions = {
-                    IconButton(onClick = onShare) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = stringResource(Res.string.cd_share_prompt),
+                actions = buildList {
+                    add(
+                        BarAction.Icon(
+                            id = "share",
+                            icon = BarIcons.ShareFilled,
+                            label = stringResource(Res.string.cd_share_prompt),
+                            onClick = onShare,
+                        ),
+                    )
+                    // An externally managed group is read-only here: the server refuses both.
+                    if (group.external == null) {
+                        add(
+                            BarAction.Icon(
+                                id = "edit",
+                                icon = BarIcons.EditFilled,
+                                label = stringResource(Res.string.cd_edit_prompt),
+                                onClick = { onEdit(group.id) },
+                            ),
                         )
-                    }
-                    IconButton(onClick = { onEdit(group.id) }) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = stringResource(Res.string.cd_edit_prompt),
-                        )
-                    }
-                    IconButton(onClick = onDelete) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = stringResource(Res.string.cd_delete_prompt),
-                            tint = MaterialTheme.colorScheme.error,
+                        add(
+                            BarAction.Icon(
+                                id = "delete",
+                                icon = BarIcons.DeleteFilled,
+                                label = stringResource(Res.string.cd_delete_prompt),
+                                tint = BarTint.DESTRUCTIVE,
+                                // Disabled while the delete is in flight, so a second tap can't fire it again.
+                                enabled = !isDeleting,
+                                onClick = onDelete,
+                            ),
                         )
                     }
                 },
@@ -112,6 +125,20 @@ fun PromptDetailScreen(
                 }
             }
 
+            group.external?.let { external ->
+                Text(
+                    text = when {
+                        external.isLangfuse && !external.promptName.isNullOrBlank() ->
+                            stringResource(Res.string.prompt_managed_in_langfuse_named, external.promptName)
+                        external.isLangfuse -> stringResource(Res.string.prompt_managed_in_langfuse)
+                        else -> stringResource(Res.string.prompt_managed_externally)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+
             val oneliner = group.oneliner
             if (!oneliner.isNullOrBlank()) {
                 Text(
@@ -144,6 +171,18 @@ fun PromptDetailScreen(
                 }
             }
 
+            if (group.textUnavailable) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = stringResource(Res.string.prompt_text_unavailable),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                AdaptiveTextButton(onClick = onRetryText, enabled = !group.isRetryingText) {
+                    Text(stringResource(Res.string.retry))
+                }
+            }
+
             // Preview panel for the production prompt
             val productionPromptText = group.productionPromptText
             if (productionPromptText != null) {
@@ -159,7 +198,7 @@ fun PromptDetailScreen(
             // Emits the prompt body, not the group's command — the command is a shorthand for
             // finding the prompt, never the text the user wants in their message.
             val usableText = group.productionPromptText
-            Button(
+            AdaptiveButton(
                 onClick = { usableText?.let(onUseInChat) },
                 enabled = !usableText.isNullOrBlank(),
                 modifier = Modifier.fillMaxWidth(),

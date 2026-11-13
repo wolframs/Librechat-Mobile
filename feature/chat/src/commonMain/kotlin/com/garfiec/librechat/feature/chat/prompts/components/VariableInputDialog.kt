@@ -7,13 +7,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -21,6 +17,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.chat.prompts.substitutePromptVariables
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
@@ -38,20 +37,19 @@ fun VariableInputDialog(
 
     val preview = substitutePromptVariables(promptTemplate, variableValues)
 
-    AlertDialog(
+    AdaptiveAlertDialog(
         onDismissRequest = onDismiss,
-        modifier = modifier,
+        modifier = modifier.clearFocusOnTap(),
         title = { Text(stringResource(Res.string.dialog_title_fill_variables)) },
         text = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .imePadding()
-                    .verticalScroll(rememberScrollState()),
+                    .imePadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 variables.forEach { variable ->
-                    OutlinedTextField(
+                    AdaptiveOutlinedTextField(
                         value = variableValues[variable] ?: "",
                         onValueChange = { variableValues[variable] = it },
                         label = { Text(variable) },

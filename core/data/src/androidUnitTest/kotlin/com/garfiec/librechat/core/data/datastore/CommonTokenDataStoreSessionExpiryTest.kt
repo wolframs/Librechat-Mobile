@@ -1,6 +1,7 @@
 package com.garfiec.librechat.core.data.datastore
 
 import com.garfiec.librechat.core.network.client.RefreshResult
+import com.garfiec.librechat.core.network.client.SessionEndReason
 import com.google.common.truth.Truth.assertThat
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -33,7 +34,6 @@ class CommonTokenDataStoreSessionExpiryTest {
         const val SERVER = "https://chat.example.com"
     }
 
-
     private val noRefresh: Lazy<HttpClient> = lazy { error("refresh client not expected in this test") }
 
     private fun refreshClientAnswering(status: HttpStatusCode): Lazy<HttpClient> = lazy {
@@ -62,8 +62,8 @@ class CommonTokenDataStoreSessionExpiryTest {
         val result = store.refreshAccessTokenFor("acctA", SERVER)
 
         assertThat(result).isEqualTo(RefreshResult.HardExpired)
-        assertThat(store.store[accessKeyOf("acctA")]).isNull()
-        assertThat(store.store[refreshKeyOf("acctA")]).isNull()
+        assertThat(store.persistedAccess("acctA")).isNull()
+        assertThat(store.persistedRefresh("acctA")).isNull()
         // The cold-start check reads through these, so this is what stops the replay.
         assertThat(store.isAuthenticated).isFalse()
         assertThat(store.getAccessToken()).isNull()
@@ -88,8 +88,8 @@ class CommonTokenDataStoreSessionExpiryTest {
         // A 5xx is a server-side blip, not evidence the session is dead — tearing down here would
         // log the user out over a transient failure a later request would have recovered from.
         assertThat(result).isEqualTo(RefreshResult.Transient)
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access")
-        assertThat(store.store[refreshKeyOf("acctA")]).isEqualTo("A-refresh")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access")
+        assertThat(store.persistedRefresh("acctA")).isEqualTo("A-refresh")
         assertThat(store.isAuthenticated).isTrue()
     }
 
@@ -116,7 +116,7 @@ class CommonTokenDataStoreSessionExpiryTest {
         val result = store.refreshAccessTokenFor("acctA", SERVER)
 
         assertThat(result).isEqualTo(RefreshResult.Refreshed)
-        assertThat(store.store[accessKeyOf("acctA")]).isEqualTo("A-access-2")
+        assertThat(store.persistedAccess("acctA")).isEqualTo("A-access-2")
     }
 
     @Test
@@ -182,6 +182,24 @@ class CommonTokenDataStoreSessionExpiryTest {
         store.emitSessionExpired()
 
         assertThat(emissions).isEqualTo(2)
+        job.cancel()
+    }
+
+    @Test
+    fun `a ban does not spend the expiry report`() = runTest {
+        val store = seededStore(noRefresh)
+        val reasons = mutableListOf<SessionEndReason>()
+        val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            store.sessionExpiredFlow.collect { reasons += it }
+        }
+
+        store.emitSessionExpired("acctA", SessionEndReason.BANNED)
+        store.emitSessionExpired("acctA", SessionEndReason.BANNED)
+        store.emitSessionExpired("acctA")
+
+        assertThat(reasons)
+            .containsExactly(SessionEndReason.BANNED, SessionEndReason.BANNED, SessionEndReason.EXPIRED)
+            .inOrder()
         job.cancel()
     }
 

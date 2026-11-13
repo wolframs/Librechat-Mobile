@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,27 +43,33 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.UIKitView
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.ui.components.AdaptiveDialog
 import com.garfiec.librechat.core.ui.platform.currentTopmostViewController
+import com.garfiec.librechat.core.ui.theme.chatColors
+import com.garfiec.librechat.core.ui.theme.themeShapes
 import com.garfiec.librechat.feature.chat.components.web.loadVendoredHtml
 import com.garfiec.librechat.feature.chat.components.web.rememberWebAssetBaseUrl
 import com.garfiec.librechat.feature.chat.resources.*
 import com.garfiec.librechat.feature.chat.resources.Res
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.cValue
-import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -71,29 +78,28 @@ import platform.AVFAudio.AVAudioPlayer
 import platform.AVFoundation.AVLayerVideoGravityResizeAspect
 import platform.AVFoundation.AVPlayer
 import platform.AVFoundation.AVPlayerLayer
-import platform.AVFoundation.AVPlayerTimeControlStatusPlaying
-import platform.AVFoundation.currentItem
 import platform.AVFoundation.currentTime
 import platform.AVFoundation.duration
 import platform.AVFoundation.pause
 import platform.AVFoundation.play
-import platform.AVFoundation.timeControlStatus
-import platform.CoreMedia.CMTimeGetSeconds
 import platform.Foundation.NSData
-import platform.Foundation.NSFileManager
-import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSURL
 import platform.Foundation.create
-import platform.Foundation.writeToFile
 import platform.UIKit.UIActivityViewController
 import platform.UIKit.UIColor
 import platform.UIKit.UIView
 import platform.WebKit.WKNavigation
 import platform.WebKit.WKNavigationDelegateProtocol
+import platform.WebKit.WKScriptMessage
+import platform.WebKit.WKScriptMessageHandlerProtocol
+import platform.WebKit.WKUserContentController
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
 import platform.darwin.NSObject
 
+// MultipleEmitters: early returns, so exactly one branch emits
+// TooGenericExceptionCaught: a player that fails to initialise degrades to no playback
+@Suppress("MultipleEmitters", "TooGenericExceptionCaught")
 @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
 @Composable
 actual fun AudioContent(
@@ -226,130 +232,6 @@ actual fun AudioContent(
 
 @OptIn(ExperimentalForeignApi::class)
 @Composable
-actual fun AudioContentPlayer(
-    audioUrl: String,
-    modifier: Modifier,
-) {
-    val player = remember(audioUrl) {
-        val url = NSURL.URLWithString(audioUrl) ?: return@remember null
-        try {
-            AVPlayer(uRL = url)
-        } catch (e: Exception) {
-            Logger.e(e) { "Failed to create AVPlayer for audio" }
-            null
-        }
-    }
-
-    var isPlaying by remember { mutableStateOf(false) }
-    var progress by remember { mutableFloatStateOf(0f) }
-
-    DisposableEffect(player) {
-        onDispose {
-            player?.pause()
-        }
-    }
-
-    LaunchedEffect(isPlaying) {
-        while (isPlaying && player != null) {
-            val duration = player.currentItem?.duration?.let { CMTimeGetSeconds(it) } ?: 0.0
-            val current = CMTimeGetSeconds(player.currentTime())
-            if (duration > 0.0) {
-                progress = (current / duration).toFloat()
-            }
-            delay(250L)
-            if (player.timeControlStatus != AVPlayerTimeControlStatusPlaying) {
-                isPlaying = false
-            }
-        }
-    }
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.Default.MusicNote,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            IconButton(
-                onClick = {
-                    if (player == null) return@IconButton
-                    if (isPlaying) {
-                        player.pause()
-                        isPlaying = false
-                    } else {
-                        player.play()
-                        isPlaying = true
-                    }
-                },
-                modifier = Modifier.size(40.dp),
-            ) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = stringResource(if (isPlaying) Res.string.cd_pause else Res.string.cd_play),
-                    modifier = Modifier.size(24.dp),
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
-@Composable
-actual fun AudioContentPlayerFromBytes(
-    audioBytes: ByteArray,
-    modifier: Modifier,
-) {
-    // Write bytes to a temp file off the composition thread, then play via AudioContentPlayer.
-    val tempPath by produceState<String?>(initialValue = null, audioBytes) {
-        value = withContext(Dispatchers.Default) {
-            val path = NSTemporaryDirectory() + "audio_${audioBytes.hashCode()}.mp3"
-            val nsData = audioBytes.usePinned { pinned ->
-                NSData.create(
-                    bytes = pinned.addressOf(0),
-                    length = audioBytes.size.toULong(),
-                )
-            }
-            nsData.writeToFile(path, atomically = true)
-            path
-        }
-    }
-
-    val path = tempPath ?: return
-
-    DisposableEffect(path) {
-        onDispose {
-            NSFileManager.defaultManager.removeItemAtPath(path, null)
-        }
-    }
-
-    AudioContentPlayer(
-        audioUrl = path,
-        modifier = modifier,
-    )
-}
-
-@OptIn(ExperimentalForeignApi::class)
-@Composable
 actual fun VideoContent(
     url: String,
     modifier: Modifier,
@@ -411,14 +293,6 @@ actual fun VideoContent(
 }
 
 @Composable
-actual fun VideoContentPlayer(
-    videoUrl: String,
-    modifier: Modifier,
-) {
-    VideoContent(url = videoUrl, modifier = modifier)
-}
-
-@Composable
 actual fun LatexBlock(
     latex: String,
     modifier: Modifier,
@@ -451,18 +325,20 @@ actual fun LatexInline(
 private fun KatexWebView(
     latex: String,
     displayMode: Boolean,
-    modifier: Modifier,
     initialHeight: Dp,
+    modifier: Modifier = Modifier,
 ) {
-    val bgComposeColor = MaterialTheme.colorScheme.background
-    val isDarkTheme = (bgComposeColor.red * 0.299 + bgComposeColor.green * 0.587 + bgComposeColor.blue * 0.114) < 0.5
-    val textColor = if (isDarkTheme) "#e0e0e0" else "#1a1a1a"
+    val chat = chatColors()
+    val bgComposeColor = chat.canvas
+    val textColor = remember(chat.messageText) { colorToCssHex(chat.messageText) }
     val bgColor = remember(bgComposeColor) { colorToCssHex(bgComposeColor) }
-    val html = remember(latex, textColor, bgColor) {
-        buildKatexHtml(latex, displayMode = displayMode, textColor = textColor, bgColor = bgColor)
+    // Dynamic Type: the page's font is in CSS px, which the system text size doesn't reach.
+    val fontScale = LocalDensity.current.fontScale
+    val html = remember(latex, textColor, bgColor, fontScale) {
+        buildKatexHtml(latex, displayMode = displayMode, textColor = textColor, bgColor = bgColor, fontScale = fontScale)
     }
 
-    var contentHeight by remember { mutableStateOf(initialHeight) }
+    var contentHeight by remember(fontScale) { mutableStateOf(initialHeight * fontScale) }
 
     val assetBase = rememberWebAssetBaseUrl() ?: return
 
@@ -484,7 +360,11 @@ private fun KatexWebView(
             )
             webView.setBackgroundColor(nativeBg)
             webView.scrollView.setBackgroundColor(nativeBg)
-            webView.scrollView.setScrollEnabled(false)
+            // A display equation wider than the bubble scrolls sideways (see buildKatexHtml). The page
+            // is exactly as tall as the view, so there is nothing to scroll vertically.
+            webView.scrollView.setScrollEnabled(displayMode)
+            webView.scrollView.setBounces(false)
+            webView.scrollView.setShowsVerticalScrollIndicator(false)
             webView.navigationDelegate = object : NSObject(), WKNavigationDelegateProtocol {
                 override fun webView(webView: WKWebView, didFinishNavigation: WKNavigation?) {
                     webView.evaluateJavaScript("document.body.scrollHeight") { result, _ ->
@@ -508,6 +388,8 @@ private fun KatexWebView(
     )
 }
 
+private const val KATEX_FONT_PX = 16
+
 private fun colorToCssHex(color: Color): String {
     val r = (color.red * 255).toInt()
     val g = (color.green * 255).toInt()
@@ -515,7 +397,13 @@ private fun colorToCssHex(color: Color): String {
     return "#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}"
 }
 
-private fun buildKatexHtml(latex: String, displayMode: Boolean, textColor: String, bgColor: String): String {
+private fun buildKatexHtml(
+    latex: String,
+    displayMode: Boolean,
+    textColor: String,
+    bgColor: String,
+    fontScale: Float,
+): String {
     val escapedLatex = latex
         .replace("\\", "\\\\")
         .replace("`", "\\`")
@@ -534,14 +422,15 @@ private fun buildKatexHtml(latex: String, displayMode: Boolean, textColor: Strin
                 body {
                     margin: 0; padding: 0;
                     display: flex;
-                    justify-content: ${if (displayMode) "center" else "flex-start"};
+                    justify-content: flex-start;
                     align-items: center;
                     background: $bgColor;
                     color: $textColor;
-                    overflow: hidden;
+                    overflow-x: ${if (displayMode) "auto" else "hidden"};
+                    overflow-y: hidden;
                     min-height: 100%;
                 }
-                #output { font-size: 16px; }
+                #output { font-size: ${KATEX_FONT_PX * fontScale}px;${if (displayMode) " margin: 0 auto;" else ""} }
                 .katex { color: $textColor; }
                 .error { color: #f44336; font-family: monospace; font-size: 12px; padding: 4px; }
             </style>
@@ -575,34 +464,37 @@ actual fun MermaidDiagram(
     var showCode by remember { mutableStateOf(false) }
     var showFullscreen by remember { mutableStateOf(false) }
 
-    val isDarkTheme = MaterialTheme.colorScheme.surface.let { color ->
-        val r = (color.red * 255).toInt()
-        val g = (color.green * 255).toInt()
-        val b = (color.blue * 255).toInt()
-        (r * 0.299 + g * 0.587 + b * 0.114) < 128
-    }
+    val diagram = chatColors().diagram
+    val diagramShape = themeShapes().diagram
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            .clip(diagramShape)
+            .background(diagram.canvas)
+            .border(1.dp, diagram.border, diagramShape),
     ) {
         // Header
         DisableSelection {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .background(diagram.header)
+                    .drawBehind {
+                        val y = size.height - 1.dp.toPx() / 2
+                        drawLine(diagram.border, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+                    }
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = stringResource(Res.string.label_mermaid),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = diagram.label,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(modifier = Modifier.weight(1f))
                 TextButton(onClick = { showCode = !showCode }) {
                     Icon(
                         imageVector = if (showCode) Icons.Default.Image else Icons.Default.Code,
@@ -620,11 +512,15 @@ actual fun MermaidDiagram(
                         imageVector = Icons.Default.Fullscreen,
                         contentDescription = stringResource(Res.string.cd_fullscreen),
                         modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = diagram.label,
                     )
                 }
             }
         }
+
+        // As tall as the rendered diagram, up to [MERMAID_MAX_INLINE_HEIGHT]. Kept outside the content and
+        // saved, so a row rebuilt by scrolling back or by the Code toggle keeps its measured height.
+        var diagramHeight by rememberSaveable(code) { mutableFloatStateOf(MERMAID_MAX_INLINE_HEIGHT.value) }
 
         // Content
         AnimatedContent(
@@ -637,18 +533,22 @@ actual fun MermaidDiagram(
             } else {
                 MermaidWKWebView(
                     code = code,
-                    isDarkTheme = isDarkTheme,
+                    theme = diagram.mermaidTheme,
+                    onContentHeight = {
+                        diagramHeight = it.toFloat()
+                            .coerceIn(MERMAID_MIN_INLINE_HEIGHT.value, MERMAID_MAX_INLINE_HEIGHT.value)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(300.dp)
-                        .padding(8.dp),
+                        .padding(8.dp)
+                        .height(diagramHeight.dp),
                 )
             }
         }
     }
 
     if (showFullscreen) {
-        Dialog(
+        AdaptiveDialog(
             onDismissRequest = { showFullscreen = false },
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
@@ -659,7 +559,7 @@ actual fun MermaidDiagram(
             ) {
                 MermaidWKWebView(
                     code = code,
-                    isDarkTheme = isDarkTheme,
+                    theme = diagram.mermaidTheme,
                     modifier = Modifier.fillMaxSize().padding(16.dp),
                 )
                 IconButton(
@@ -681,9 +581,11 @@ actual fun MermaidDiagram(
 @Composable
 private fun MermaidWKWebView(
     code: String,
-    isDarkTheme: Boolean,
-    modifier: Modifier,
+    theme: String,
+    modifier: Modifier = Modifier,
+    onContentHeight: ((Int) -> Unit)? = null,
 ) {
+    val reportHeight by rememberUpdatedState(onContentHeight)
     val escapedCode = remember(code) {
         code.replace("\\", "\\\\")
             .replace("`", "\\`")
@@ -692,8 +594,8 @@ private fun MermaidWKWebView(
             .replace("<", "\\u003c")
             .replace("\n", "\\n")
     }
-    val theme = if (isDarkTheme) "dark" else "default"
-    val html = remember(escapedCode, theme) { buildMermaidHtml(escapedCode, theme) }
+    val errorPrefix = stringResource(Res.string.diagram_error_prefix)
+    val html = remember(escapedCode, theme, errorPrefix) { buildMermaidHtml(escapedCode, theme, errorPrefix) }
 
     val assetBase = rememberWebAssetBaseUrl() ?: return
 
@@ -703,6 +605,20 @@ private fun MermaidWKWebView(
         modifier = modifier,
         factory = {
             val config = WKWebViewConfiguration()
+            // The page posts its rendered height once Mermaid's async render settles, and again on
+            // resize (see buildMermaidHtml); didFinishNavigation fires before the diagram exists.
+            config.userContentController.addScriptMessageHandler(
+                object : NSObject(), WKScriptMessageHandlerProtocol {
+                    override fun userContentController(
+                        userContentController: WKUserContentController,
+                        didReceiveScriptMessage: WKScriptMessage,
+                    ) {
+                        val height = (didReceiveScriptMessage.body as? Number)?.toInt()
+                        if (height != null && height > 0) reportHeight?.invoke(height)
+                    }
+                },
+                name = MERMAID_HEIGHT_HANDLER,
+            )
             val webView = WKWebView(frame = cValue { }, configuration = config)
             webView.setOpaque(false)
             webView.loadVendoredHtml(html, assetBase)
@@ -715,10 +631,17 @@ private fun MermaidWKWebView(
                 loadedHtml = html
             }
         },
+        // Unregistered on release so the handler, and the state it captured, go with the view.
+        onRelease = { webView ->
+            webView.configuration.userContentController.removeScriptMessageHandlerForName(MERMAID_HEIGHT_HANDLER)
+        },
     )
 }
 
-private fun buildMermaidHtml(escapedCode: String, theme: String): String {
+private const val MERMAID_HEIGHT_HANDLER = "mermaidHeight"
+
+private fun buildMermaidHtml(escapedCode: String, theme: String, errorPrefix: String): String {
+    val prefix = jsStringBody(errorPrefix)
     return """
         <!DOCTYPE html>
         <html>
@@ -741,15 +664,22 @@ private fun buildMermaidHtml(escapedCode: String, theme: String): String {
             <script src="mermaid/mermaid.min.js"></script>
             <script>
                 mermaid.initialize({ startOnLoad: false, theme: '$theme', securityLevel: 'strict', flowchart: { useMaxWidth: true } });
+                // Re-reported on resize: a fold or rotation rescales the diagram to the new width.
+                function reportHeight() {
+                    window.webkit.messageHandlers.$MERMAID_HEIGHT_HANDLER.postMessage(Math.ceil(document.body.scrollHeight));
+                }
                 try {
                     var code = "$escapedCode";
                     mermaid.render('rendered', code).then(function(result) {
                         document.getElementById('diagram').innerHTML = result.svg;
                     }).catch(function(err) {
-                        document.getElementById('diagram').innerHTML = '<div class="error">Diagram error: ' + err.message + '</div>';
+                        document.getElementById('diagram').innerHTML = '<div class="error">$prefix ' + err.message + '</div>';
+                    }).then(function() {
+                        reportHeight();
+                        window.addEventListener('resize', reportHeight);
                     });
                 } catch(e) {
-                    document.getElementById('diagram').innerHTML = '<div class="error">Diagram error: ' + e.message + '</div>';
+                    document.getElementById('diagram').innerHTML = '<div class="error">$prefix ' + e.message + '</div>';
                 }
             </script>
         </body>
@@ -757,7 +687,7 @@ private fun buildMermaidHtml(escapedCode: String, theme: String): String {
     """.trimIndent()
 }
 
-actual fun shareArtifact(title: String, content: String, language: String) {
+internal fun shareArtifact(content: String) {
     val viewController = currentTopmostViewController() ?: return
     val activityVC = UIActivityViewController(
         activityItems = listOf(content),
@@ -771,3 +701,7 @@ private fun formatDurationIos(seconds: Int): String {
     val s = seconds % 60
     return "$m:${s.toString().padStart(2, '0')}"
 }
+
+/** [prefix] as the body of a single-quoted JavaScript string inside an inline script. */
+private fun jsStringBody(prefix: String): String =
+    prefix.replace("\\", "\\\\").replace("'", "\\'").replace("<", "\\u003c")

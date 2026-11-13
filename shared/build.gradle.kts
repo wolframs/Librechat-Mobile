@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
+
 plugins {
     id("librechat.kmp.library")
     id("librechat.kmp.compose")
@@ -6,7 +8,7 @@ plugins {
     alias(libs.plugins.skie)
 }
 
-extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+android {
     namespace = "com.garfiec.librechat.shared"
 }
 
@@ -20,6 +22,17 @@ kotlin {
             export(project(":core:model"))
             export(project(":core:network"))
             export(project(":core:data"))
+            // TEMPORARY: Kotlin 2.4.10's Release optimization passes exceed the CI heap limit:
+            // StaticInitializersOptimization, then DevirtualizationAnalysis's constraint graph.
+            // Skipping these optimizations preserves correctness, with possible binary-size and
+            // runtime costs. The static-initializer issue is KT-89519, fixed by KT-87570 starting
+            // in Kotlin 2.5.0-Beta2; the devirtualization failure needs separate verification.
+            // After a compiler upgrade, re-enable each phase only after the CI OOM canary links
+            // within its usual time at the unchanged heap limit.
+            if (buildType == NativeBuildType.RELEASE) {
+                freeCompilerArgs += "-Xdisable-phases=" +
+                    "RemoveRedundantCallsToStaticInitializersPhase,DevirtualizationAnalysis"
+            }
         }
     }
 
@@ -30,6 +43,7 @@ kotlin {
             api(project(":core:network"))
             api(project(":core:data"))
             api(project(":core:ui"))
+            implementation(project(":core:notifications"))
             implementation(project(":core:logging"))
             implementation(project(":feature:auth"))
             implementation(project(":feature:chat"))
@@ -37,6 +51,7 @@ kotlin {
             implementation(project(":feature:settings"))
             implementation(project(":feature:agents"))
             implementation(project(":feature:files"))
+            implementation(project(":feature:schedules"))
             implementation(project(":feature:skills"))
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
@@ -54,6 +69,9 @@ kotlin {
             implementation(libs.coil3.compose)
             implementation(libs.coil3.network.ktor)
             implementation(libs.coil3.svg)
+        }
+        commonTest.dependencies {
+            implementation(libs.coroutines.test)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

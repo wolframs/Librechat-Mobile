@@ -16,8 +16,6 @@
     <string name="close">Close</string>
 
     <!-- Content descriptions -->
-    <string name="cd_create_agent">Create Agent</string>
-    <string name="cd_search">Search</string>
     <string name="cd_back">Back</string>
     <string name="cd_more_actions">More actions</string>
     <string name="cd_more_options">More options</string>
@@ -26,8 +24,6 @@
     <string name="cd_remove_item">Remove %1$s</string>
     <string name="cd_edit_action">Edit action</string>
     <string name="cd_delete_action">Delete action</string>
-    <string name="cd_edit_handoff">Edit handoff %1$s</string>
-    <string name="cd_remove_handoff">Remove handoff %1$s</string>
     <string name="cd_add_starter">Add starter</string>
     <string name="cd_agent_avatar_tap">Agent avatar. Tap to change.</string>
     <string name="cd_agent_avatar_name">%1$s avatar</string>
@@ -36,11 +32,33 @@
     <!-- Marketplace screen -->
     <string name="search_agents_hint">Search agents\u2026</string>
     <string name="no_agents_found">No agents found</string>
-    <string name="no_agents_available">No agents available</string>
     <string name="agents_not_available_title">Agents not available</string>
     <string name="agents_not_available_description">Your server administrator has disabled agents for your account.</string>
     <string name="try_different_search">Try a different search term</string>
     <string name="check_back_later">Check back later for new agents</string>
+    <string name="agents_chip_top_picks">Top picks</string>
+    <string name="agents_chip_all">All</string>
+    <string name="agents_chip_editable">Editable</string>
+    <string name="agents_filter_mine">My agents</string>
+    <string name="agents_sort_label">Sort by</string>
+    <string name="agents_sort_newest">Newest first</string>
+    <string name="agents_sort_oldest">Oldest first</string>
+    <string name="agents_sort_popular">Popular</string>
+    <string name="agents_sort_author">By creator name</string>
+    <string name="agents_mine_empty_title">You haven't created any agents yet</string>
+    <string name="agents_top_pick">Top pick</string>
+    <string name="agents_new_agent">New agent</string>
+    <string name="agent_unnamed">Unnamed agent</string>
+    <string name="agents_clear_search">Clear search</string>
+    <string name="agents_no_matches_in">No matches in %1$s</string>
+    <string name="agents_none_in">No agents in %1$s</string>
+    <string name="agents_search_all">Search all agents</string>
+    <string name="agents_show_all">Show all agents</string>
+    <string name="agents_empty_title">No agents yet</string>
+    <string name="agents_empty_description_create">Create an agent with its own instructions, model and tools.</string>
+    <string name="agents_load_failed">Couldn't load agents</string>
+    <string name="agents_load_more_failed">Couldn't load more agents</string>
+    <string name="agents_retry">Retry</string>
     <string name="error_unknown">An unknown error occurred</string>
     <string name="unknown_author">Unknown</string>
 
@@ -49,12 +67,8 @@
     <string name="delete_agent">Delete Agent</string>
     <string name="delete_agent_confirm">Are you sure you want to delete "%1$s"? This cannot be undone.</string>
     <string name="delete_this_agent">this agent</string>
-    <string name="by_author">by %1$s</string>
-    <string name="label_description">Description</string>
-    <string name="no_description">No description</string>
     <string name="label_category">Category</string>
     <string name="label_model">Model</string>
-    <string name="default_value">Default</string>
     <string name="label_tools">Tools</string>
     <string name="label_conversation_starters">Conversation Starters</string>
 
@@ -72,6 +86,7 @@
     <string name="agent_description_label">Description</string>
     <string name="agent_description_placeholder">Optional: Describe your Agent here</string>
     <string name="agent_instructions_label">Instructions</string>
+    <string name="agent_instructions_linked_prompt">This agent uses a saved prompt as its instructions. Change or unlink it on the web; edits here would not change what the agent runs.</string>
     <string name="agent_instructions_placeholder">The system instructions that the agent uses</string>
     <string name="insert_variable">Insert variable</string>
     <string name="cd_insert_variable">Insert variable</string>
@@ -238,13 +253,20 @@
     <string name="acl_public_label">Public</string>
     <string name="acl_public_description">Allow anyone with access to the server</string>
     <string name="acl_role">Role</string>
-    <string name="acl_revoke">Revoke</string>
+    <string name="acl_revoke_principal">Revoke access for %1$s</string>
     <string name="acl_search_hint">Search users or groups…</string>
     <string name="acl_search_empty">No matches</string>
+    <string name="acl_search_failed">Couldn't search right now.</string>
+    <string name="acl_search_unavailable">Your role can't search for people or groups. Ask an admin to turn on the people picker for your role.</string>
+    <string name="acl_roles_failed">Couldn't load roles, so no one can be added yet.</string>
+    <string name="acl_load_failed">Couldn't load who has access.</string>
+    <string name="acl_share_check_failed">Couldn't check whether you can share this agent.</string>
+    <string name="acl_retry">Retry</string>
     <string name="acl_grant_dialog_title">Add user or group</string>
     <string name="acl_principal_user">User</string>
     <string name="acl_principal_group">Group</string>
     <string name="acl_principal_role">Role</string>
+    <string name="acl_principal_unknown">Unknown</string>
     <string name="acl_create_mode_notice">Sharing &amp; access controls are available after the agent is saved.</string>
 
     <!-- Tool select dialog -->
@@ -261,6 +283,9 @@
     <string name="agent_file_upload_failed">Failed to upload file</string>
     <string name="agent_file_remove_failed">Failed to remove file</string>
     <string name="cd_remove_file">Remove %1$s</string>
+    <string name="agent_file_remove_confirm_title">Remove %1$s?</string>
+    <string name="agent_file_remove_confirm_title_generic">Remove this file?</string>
+    <string name="agent_file_remove_confirm_message">If no other agent uses this file, it will be permanently deleted.</string>
 
     <!-- Skills selector (v0.8.6) -->
     <string name="label_skills">Skills</string>
@@ -281,11 +306,6 @@
     <string name="add_subagent">Add subagent</string>
     <string name="subagents_full">Maximum number of subagents reached.</string>
 
-    <!-- Unsaved editor draft -->
-    <string name="discard_agent_changes_title">Discard unsaved changes?</string>
-    <string name="discard_agent_changes_message">Your changes to this agent have not been saved.</string>
-    <string name="discard">Discard</string>
-    <string name="stay">Stay</string>
     <!-- Unified tools marketplace (v0.8.8) -->
     <string name="tools_marketplace_title">Tools</string>
     <string name="tools_marketplace_description">Choose what this agent can do</string>
@@ -314,5 +334,88 @@
     <string name="builtin_ask_user_desc">Pauses the run to ask you a clarifying question.</string>
 
     <!-- Agent contact (v0.8.8) -->
-    <string name="agent_contact_title">Contact</string>
+    <string name="agent_category_hr">Human Resources</string>
+    <string name="agent_category_rd">Research &amp; Development</string>
+    <string name="agent_category_finance">Finance</string>
+    <string name="agent_category_it">IT</string>
+    <string name="agent_category_sales">Sales</string>
+    <string name="agent_category_aftersales">After Sales</string>
+    <string name="agent_category_idea">Ideas</string>
+    <string name="agent_category_travel">Travel</string>
+    <string name="agent_category_learning">Learning</string>
+    <string name="agent_category_writing">Writing</string>
+    <string name="agent_category_shopping">Shopping</string>
+    <string name="agent_category_code">Code</string>
+    <string name="agent_category_misc">Misc.</string>
+    <string name="agent_category_roleplay">Roleplay</string>
+    <string name="visibility_team">Team</string>
+    <string name="agent_contact_line">Contact: %1$s</string>
+    <string name="agent_pin">Pin to model menu</string>
+    <string name="agent_unpin">Unpin from model menu</string>
+    <string name="agent_copy_link">Copy link</string>
+    <string name="agent_link_copied">Link copied</string>
+    <string name="agent_updated_relative">Updated %1$s</string>
+    <string name="agent_updated_on">Updated on %1$s</string>
+    <string name="agent_public">Public</string>
+    <string name="agent_try_asking">Try asking</string>
+    <string name="agent_load_failed">Couldn't load this agent</string>
+    <string name="agent_delete_failed">Couldn't delete this agent</string>
+    <string name="agent_duplicate_failed">Couldn't duplicate this agent</string>
+    <string name="agent_pin_failed">Couldn't update your pins</string>
+    <string name="agent_contact_send_email">Send email</string>
+    <plurals name="agent_pin_limit">
+        <item quantity="one">You can pin up to %1$d favorite.</item>
+        <item quantity="other">You can pin up to %1$d favorites.</item>
+    </plurals>
+    <!-- Agent tool approval modes (v0.8.9-rc1) -->
+    <string name="tool_approval_mode_cd">Tool approval mode: %1$s</string>
+    <string name="tool_approval_inherit">Use inherited policy</string>
+    <string name="tool_approval_ask">Always ask</string>
+    <string name="tool_approval_allow">Always approve</string>
+    <string name="tool_approval_chat">Ask once per chat</string>
+    <string name="tool_approval_always">Ask once, then always approve</string>
+    <string name="tool_approval_admin_ask">Administrator policy requires approval.</string>
+    <string name="tool_approval_admin_deny">Administrator policy blocks this tool.</string>
+    <string name="tool_approval_reset">Reset my remembered approvals</string>
+    <string name="tool_approval_reset_success">Your remembered approvals were reset.</string>
+    <string name="tool_approval_reset_error">Could not reset remembered approvals. Please retry.</string>
+    <string name="tool_approval_reset_forbidden">You can't reset approvals for this agent.</string>
+    <string name="code_stateful_sessions">Stateful code sessions</string>
+    <string name="code_stateful_sessions_info">When enabled, this agent uses the dedicated stateful Code API instead of the default stateless service. Retained files under /mnt/data carry across runs, but each run starts a fresh process. Shell variables, the working directory, $HOME, temporary files, global installs, and background processes are not durable. The runtime may reset, so keep anything important under /mnt/data. Requires Code Interpreter and the app-level stateful sessions capability.</string>
+    <string name="code_environment_unavailable_choice">Unavailable machine: %1$s (uncheck to remove)</string>
+    <string name="code_environment">Execution environment</string>
+    <string name="code_environment_deployment_default">Deployment default</string>
+    <string name="code_environment_attached_name">%1$s (attached VM)</string>
+    <string name="code_environment_info">Choose the managed runtime or attached VM that owns this workspace.</string>
+    <string name="code_environment_per_chat">Machines available in new chats</string>
+    <string name="code_environment_per_chat_info">Choose the machines this agent may use. Each new chat can pick one of these machines if its user has access. The default and existing chats stay unchanged.</string>
+    <string name="code_environment_choice_limit">Select up to %1$d additional machines. The default machine is always allowed.</string>
+    <string name="code_environment_default_machine">%1$s (default)</string>
+    <string name="stateful_code_environment">Stateful environment</string>
+    <string name="stateful_code_environment_user">User workspace (recommended)</string>
+    <string name="stateful_code_environment_agent_user">Agent + user workspace</string>
+    <string name="stateful_code_environment_conversation">Conversation workspace</string>
+    <string name="stateful_code_environment_info">Choose who shares this agent's stateful workspace. This does not share live files with stateless code sessions.</string>
+    <string name="code_workspace_default">Default workspace for new chats</string>
+    <string name="code_workspace_last_used">Last used workspace</string>
+    <string name="code_workspace_default_info">New chats use this workspace. Without a default, reuse your last available choice for this agent and machine on this device. Existing chats keep their workspace.</string>
+    <string name="code_workspace_saved_loading">Loading workspace…</string>
+    <string name="code_workspace_saved_missing">Workspace missing</string>
+    <string name="code_workspace_saved_unavailable">Workspace unavailable</string>
+    <string name="code_workspace_saved_unsupported">Update worker for workspaces</string>
+    <string name="repository_instructions">Repository instructions</string>
+    <string name="repository_instructions_prefer">Prefer repository conventions</string>
+    <string name="repository_instructions_defer">Prefer agent conventions</string>
+    <string name="repository_instructions_off">Off</string>
+    <string name="repository_instructions_info">Load AGENTS.md, or CLAUDE.md when absent, from the selected workspace when its owner enables discovery. Tool permissions remain unchanged.</string>
+    <string name="agent_git_identity">Git identity</string>
+    <string name="agent_git_name">Commit name</string>
+    <string name="agent_git_email">Commit email</string>
+    <string name="agent_git_identity_both_required">Enter a valid Git name and email, or leave both blank.</string>
+    <string name="agent_git_identity_info">Applied as the author and committer for Git commands run by this agent. Credentials are configured separately.</string>
+    <string name="code_background">Background execution</string>
+    <string name="code_background_info">Lets the model run code in the background: the conversation goes on while it runs, and the model picks up the result later. Output and files still attach to the original run.</string>
+    <string name="web_search_keys_add_action">Add search keys</string>
+    <string name="web_search_keys_manage_action">Manage search keys</string>
+    <string name="marketplace_set_up">Set up</string>
 </resources>

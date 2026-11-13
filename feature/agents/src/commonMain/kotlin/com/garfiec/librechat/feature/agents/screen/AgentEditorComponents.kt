@@ -11,12 +11,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,7 +23,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveDropdownMenu
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
 import com.garfiec.librechat.feature.agents.resources.*
 import com.garfiec.librechat.feature.agents.resources.Res
 import org.jetbrains.compose.resources.stringResource
@@ -35,6 +37,26 @@ import org.jetbrains.compose.resources.stringResource
  * special variables (`{{current_date}}`, `{{iso_datetime}}`, etc.) at the
  * current cursor position. Mirrors upstream `Instructions.tsx`.
  */
+/**
+ * In place of [InstructionsField] when the agent's instructions come from a linked prompt
+ * (v0.8.9-rc1): the link is managed on the web, and the stored text is not what the agent runs.
+ */
+@Composable
+internal fun LinkedInstructionsNote(modifier: Modifier = Modifier) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(Res.string.agent_instructions_label),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = stringResource(Res.string.agent_instructions_linked_prompt),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
 @Composable
 internal fun InstructionsField(
     value: String,
@@ -71,11 +93,18 @@ internal fun InstructionsField(
                 text = stringResource(Res.string.agent_instructions_label),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Weighted, so a long label or a large font wraps "Insert variable" rather than pushing
+            // the add button, its only control, out of the row.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f, fill = false).padding(start = 8.dp),
+            ) {
                 Text(
                     text = stringResource(Res.string.insert_variable),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(
@@ -83,7 +112,7 @@ internal fun InstructionsField(
                         contentDescription = stringResource(Res.string.cd_insert_variable),
                     )
                 }
-                DropdownMenu(
+                AdaptiveDropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                 ) {
@@ -110,7 +139,7 @@ internal fun InstructionsField(
             }
         }
         Spacer(modifier = Modifier.height(4.dp))
-        OutlinedTextField(
+        AdaptiveOutlinedTextField(
             value = fieldValue,
             onValueChange = {
                 fieldValue = it
@@ -130,6 +159,8 @@ internal fun SelectedToolRow(
     toolDescription: String?,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Drawn before the remove button (an MCP tool's approval mode). */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -149,9 +180,11 @@ internal fun SelectedToolRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
+        trailing?.invoke()
         IconButton(onClick = onRemove) {
             Icon(
                 imageVector = Icons.Default.Close,

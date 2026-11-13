@@ -3,15 +3,23 @@ package com.garfiec.librechat.feature.auth.viewmodel
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.garfiec.librechat.core.common.identity.deriveServerId
+import com.garfiec.librechat.core.common.extensions.serverHostLabel
+import com.garfiec.librechat.core.common.identity.cleanServerUrl
+import com.garfiec.librechat.core.common.identity.serverOrigin
+import com.garfiec.librechat.core.common.result.FailureKind
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.common.result.message
+import com.garfiec.librechat.core.common.result.suspendRunCatching
+import com.garfiec.librechat.core.data.datastore.AccountEntry
+import com.garfiec.librechat.core.data.datastore.AccountRoster
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
-import com.garfiec.librechat.core.data.datastore.SettingsDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.HeaderWriteFailure
 import com.garfiec.librechat.core.data.repository.HeaderWriteResult
 import com.garfiec.librechat.core.data.repository.ServerRepository
+import com.garfiec.librechat.core.data.repository.ServerResolution
+import com.garfiec.librechat.core.model.config.StartupConfig
 import com.garfiec.librechat.core.network.client.CustomHeaderRules
 import com.garfiec.librechat.core.network.client.HeaderRejection
 import com.garfiec.librechat.core.ui.components.CustomHeaderRow
@@ -29,17 +37,23 @@ import kotlinx.coroutines.launch
 @Immutable
 data class HeaderFieldError(val index: Int, val reason: HeaderRejection)
 
+/** A server the roster's accounts are on, as the "Your servers" shortcut shows it. */
+@Immutable
+data class KnownServer(
+    val url: String,
+    /** The address without its scheme; the path stays, so two subpath servers on one host differ. */
+    val label: String,
+    val host: String,
+    val accountCount: Int,
+)
+
 @Immutable
 data class ServerUrlUiState(
     val url: String = "",
-    val rememberedServers: List<String> = emptyList(),
-    val httpWarningSuppressedServers: Set<String> = emptySet(),
-    val canForgetServers: Boolean = true,
     val isLoading: Boolean = false,
     val error: String? = null,
     val isValidated: Boolean = false,
     val showHttpWarning: Boolean = false,
-    val suppressHttpWarning: Boolean = false,
     val showAdvanced: Boolean = false,
     val customHeaders: List<CustomHeaderRow> = emptyList(),
     val headerError: HeaderFieldError? = null,
@@ -55,30 +69,51 @@ data class ServerUrlUiState(
      * sends the user to fix a URL that was never the problem.
      */
     val headersSaveFailure: HeaderWriteFailure? = null,
+    /** Servers of the accounts on this device, most recently used first. */
+    val knownServers: List<KnownServer> = emptyList(),
 )
 
+internal fun knownServersOf(entries: List<AccountEntry>): List<KnownServer> =
+    entries.groupBy { it.serverUrl }
+        .entries
+        .sortedByDescending { (_, accounts) -> accounts.maxOf { it.lastActiveAt } }
+        .map { (url, accounts) ->
+            KnownServer(
+                url = url,
+                label = url.substringAfter("://").trimEnd('/'),
+                host = url.serverHostLabel(),
+                accountCount = accounts.size,
+            )
+        }
+
 /**
- * Validates a server URL and selects it for the sign-in flow. Two modes:
+ * Validates a server URL and selects it for the sign-in flow.
+ *
+ * The address is found before anything is stored: [ConfigRepository.resolveServer] probes the cleaned
+ * address, and when that path answers but isn't LibreChat, the bare origin — so a pasted page under a
+ * host-root deployment (`https://host/some/page`) still connects, while a deployment served under a
+ * path (`https://host/librechat`) is kept as typed. Whichever answered is what gets stored and shown
+ * in the field. Two modes for the commit:
  *
  * - **Normal** (`addAccount = false`): the pre-login screen. Sets the process-global server URL and
- *   validates + caches the config through the live pipeline.
+ *   publishes + caches the config.
  * - **Add-account** (`addAccount = true`): reached from the account switcher while another account
  *   is live. Must never touch the live account's state: the URL goes into a pending add session
- *   ([AccountSwitcher.beginAdd]) instead of the global store, and validation runs under the pending
- *   identity without publishing to the live server's config state/cache
- *   ([ConfigRepository.probeServerUrl]). The validated config rides on the pending session for the
- *   add-mode login screen.
+ *   ([AccountSwitcher.beginAdd]) instead of the global store, and the config rides on that session
+ *   for the add-mode login screen instead of being published. The field starts empty; the live
+ *   server is the first of [ServerUrlUiState.knownServers].
  */
 class ServerUrlViewModel(
     private val serverDataStore: ServerDataStore,
     private val serverRepository: ServerRepository,
     private val configRepository: ConfigRepository,
     private val accountSwitcher: AccountSwitcher,
-    private val settingsDataStore: SettingsDataStore,
+    private val accountRoster: AccountRoster,
     private val addAccount: Boolean = false,
+    private val cleartextBlockedForDomainNames: Boolean = platformBlocksCleartextToDomainNames,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ServerUrlUiState(canForgetServers = !addAccount))
+    private val _uiState = MutableStateFlow(ServerUrlUiState())
     val uiState: StateFlow<ServerUrlUiState> = _uiState.asStateFlow()
 
     /**
@@ -93,18 +128,17 @@ class ServerUrlViewModel(
 
     init {
         viewModelScope.launch {
+            accountRoster.entriesFlow().collect { entries ->
+                _uiState.value = _uiState.value.copy(knownServers = knownServersOf(entries))
+            }
+        }
+        viewModelScope.launch {
+            if (addAccount) return@launch
             // awaitBaseUrl (not getBaseUrl) so a cold-start relaunch doesn't read "" before
             // ServerDataStore's async warm-up resolves, which would skip pre-filling the saved URL.
-            // In add mode this pre-fills the ACTIVE server so the common same-server-different-user
-            // add is a single tap; typing a different URL adds a new server.
             val existingUrl = serverDataStore.awaitBaseUrl()
             if (existingUrl.isBlank()) return@launch
-            // The URL prefill above deliberately shows the ACTIVE server in add mode — but its
-            // headers must NOT come along. They are a credential, and prefilling them would show the
-            // live server's secret on a screen the user believes is configuring a *new* server; an
-            // edit there would then silently rewrite the live server's credential. Add mode starts
-            // empty and the user re-enters what the new server needs.
-            val savedHeaders = if (addAccount) emptyMap() else serverRepository.headersForServer(existingUrl)
+            val savedHeaders = serverRepository.headersForServer(existingUrl)
             // Both awaits above can outlast the first frame, and `headersForServer` adds a second
             // suspension on the header store's own warm-up. By the time they resolve the user may
             // already be typing — applying the prefill then overwrites a URL or a freshly rotated
@@ -122,16 +156,25 @@ class ServerUrlViewModel(
                 headersLoadFailed = savedHeaders == null,
             )
         }
-        viewModelScope.launch {
-            serverDataStore.rememberedServers.collect { servers ->
-                _uiState.value = _uiState.value.copy(rememberedServers = servers)
-            }
-        }
-        viewModelScope.launch {
-            serverDataStore.httpWarningSuppressedServers.collect { servers ->
-                _uiState.value = _uiState.value.copy(httpWarningSuppressedServers = servers)
-            }
-        }
+    }
+
+    /**
+     * Connects to a known server in one tap, with the headers already stored for [url]. The editor is
+     * reset first: rows in it belong to another server, and Connect would file them under this one.
+     */
+    fun connectTo(url: String) {
+        userEdited = true
+        headersEdited = false
+        _uiState.value = _uiState.value.copy(
+            url = url,
+            error = null,
+            showAdvanced = false,
+            customHeaders = emptyList(),
+            headerError = null,
+            headersLoadFailed = false,
+            headersSaveFailure = null,
+        )
+        validateAndConnect()
     }
 
     fun onUrlChanged(url: String) {
@@ -139,42 +182,6 @@ class ServerUrlViewModel(
         // throws on partial input. The header set is committed against the final URL on Connect.
         userEdited = true
         _uiState.value = _uiState.value.copy(url = url, error = null)
-    }
-
-    fun selectServer(url: String) {
-        onUrlChanged(url)
-        headersEdited = false
-        _uiState.value = _uiState.value.copy(customHeaders = emptyList(), headersLoadFailed = false)
-        viewModelScope.launch {
-            val headers = if (addAccount) emptyMap() else serverRepository.headersForServer(url)
-            if (_uiState.value.url != url || headersEdited) return@launch
-            _uiState.value = _uiState.value.copy(
-                customHeaders = headers.orEmpty().map { (name, value) -> CustomHeaderRow(name, value) },
-                headersLoadFailed = headers == null,
-                showAdvanced = headers == null || headers.isNotEmpty(),
-            )
-        }
-    }
-
-    fun forgetServer(url: String) {
-        if (addAccount) return
-        viewModelScope.launch {
-            val currentUrl = serverDataStore.awaitBaseUrl()
-            if (normalizeUrl(currentUrl) == normalizeUrl(url)) {
-                serverDataStore.clearServerUrl()
-                if (normalizeUrl(_uiState.value.url) == normalizeUrl(url)) {
-                    _uiState.value = _uiState.value.copy(url = "")
-                }
-            }
-            serverDataStore.forgetServer(url)
-            settingsDataStore.clearServerBannerDismissals(deriveServerId(url).value)
-        }
-    }
-
-    fun restoreHttpWarning(url: String) {
-        viewModelScope.launch {
-            serverDataStore.setHttpWarningSuppressed(url, suppressed = false)
-        }
     }
 
     /**
@@ -239,13 +246,22 @@ class ServerUrlViewModel(
     }
 
     fun validateAndConnect() {
-        val url = normalizeUrl(_uiState.value.url)
+        val url = cleanServerUrl(_uiState.value.url)
         if (url.isBlank()) {
             _uiState.value = _uiState.value.copy(error = "Please enter a server URL")
             return
         }
 
         // Show warning dialog if user enters an HTTP URL
+        if (url.startsWith("http://", ignoreCase = true)) {
+            if (cleartextBlockedForDomainNames && hostIsQualifiedDomainName(url)) {
+                _uiState.value = _uiState.value.copy(error = FailureKind.CleartextBlocked.message())
+                return
+            }
+            _uiState.value = _uiState.value.copy(showHttpWarning = true)
+            return
+        }
+
         // Auto-add https:// if no scheme provided
         val normalizedUrl = if (!url.startsWith("http://", ignoreCase = true) &&
             !url.startsWith("https://", ignoreCase = true)
@@ -255,43 +271,22 @@ class ServerUrlViewModel(
             url
         }
 
-        if (normalizedUrl.startsWith("http://", ignoreCase = true)) {
-            viewModelScope.launch {
-                if (serverDataStore.isHttpWarningSuppressed(normalizedUrl)) {
-                    doValidateAndConnect(normalizedUrl)
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        showHttpWarning = true,
-                        suppressHttpWarning = false,
-                    )
-                }
-            }
-        } else {
-            doValidateAndConnect(normalizedUrl)
-        }
+        // Show the address that is actually being stored, so a stripped page path is not a surprise.
+        _uiState.value = _uiState.value.copy(url = normalizedUrl)
+        doValidateAndConnect(normalizedUrl)
     }
 
     fun confirmHttpConnection() {
-        _uiState.value = _uiState.value.copy(showHttpWarning = false)
-        val url = normalizeUrl(_uiState.value.url)
-        doValidateAndConnect(url, suppressHttpWarningOnSuccess = _uiState.value.suppressHttpWarning)
+        val url = cleanServerUrl(_uiState.value.url)
+        _uiState.value = _uiState.value.copy(showHttpWarning = false, url = url)
+        doValidateAndConnect(url)
     }
 
     fun dismissHttpWarning() {
-        _uiState.value = _uiState.value.copy(
-            showHttpWarning = false,
-            suppressHttpWarning = false,
-        )
+        _uiState.value = _uiState.value.copy(showHttpWarning = false)
     }
 
-    fun setSuppressHttpWarning(suppress: Boolean) {
-        _uiState.value = _uiState.value.copy(suppressHttpWarning = suppress)
-    }
-
-    private fun doValidateAndConnect(
-        url: String,
-        suppressHttpWarningOnSuccess: Boolean = false,
-    ) {
+    private fun doValidateAndConnect(url: String) {
         val headers = _uiState.value.customHeaders.toPairs()
         CustomHeaderRules.firstRejection(headers)?.let { rejection ->
             // Reject before touching the network: a gateway answers a malformed credential with a
@@ -320,10 +315,10 @@ class ServerUrlViewModel(
             //   derive different serverIds, so the credential would be filed under a server the
             //   app never contacts.
             // - Only when a row was actually edited. An empty map means "delete this server's
-            //   headers", and the editor is empty by default both in add mode (which prefills the
-            //   ACTIVE server's URL, so one tap on the untouched prefill would wipe the live
-            //   session's credential) and before the store resolves. Clearing is expressed by
-            //   removing rows, which sets the flag.
+            //   headers", and the editor is empty by default both in add mode (where the URL may be
+            //   a signed-in server, so Connect on the untouched editor would wipe a live session's
+            //   credential) and before the store resolves. Clearing is expressed by removing rows,
+            //   which sets the flag.
             // Stop on a refusal rather than probing anyway: the probe would go out without the
             // credential, come back as the gateway's login page, and surface as "could not connect
             // to server" — sending the user to re-check a URL that was never the problem, with the
@@ -333,12 +328,13 @@ class ServerUrlViewModel(
             val typed = CustomHeaderRules.toHeaderMap(headers)
             // Add mode's editor starts empty by design — it must not show the active server's secret
             // — so an empty map here is "the user typed nothing", never "the user cleared their
-            // headers". The URL is prefilled with the ACTIVE server, so writing it would delete a
-            // credential belonging to a session the user is still signed in to, from a screen about
-            // a different account. There is nothing to clear in add mode: the editor never
-            // represented anything stored.
+            // headers". The URL may be a signed-in server (a known-server row), so writing it would
+            // delete a credential belonging to a session the user is still signed in to, from a
+            // screen about a different account. There is nothing to clear in add mode: the editor
+            // never represented anything stored.
             val wouldClearWithoutHavingLoaded = addAccount && typed.isEmpty()
-            if (headersEdited && !wouldClearWithoutHavingLoaded) {
+            val wroteTyped = headersEdited && !wouldClearWithoutHavingLoaded
+            if (wroteTyped) {
                 val written = serverRepository.setHeaders(url, typed)
                 if (written is HeaderWriteResult.Refused) {
                     _uiState.value = _uiState.value.copy(
@@ -352,66 +348,90 @@ class ServerUrlViewModel(
                 _uiState.value = _uiState.value.copy(headersLoadFailed = false)
             }
 
-            val result = if (addAccount) validatePendingServer(url) else validateLiveServer(url)
+            val probeHeaders = if (wroteTyped) typed else serverRepository.headersForServer(url).orEmpty()
+            resolveAndCommit(url, probeHeaders, wroteTyped)
+        }
+    }
 
-            when (result) {
-                is Result.Success -> {
-                    serverDataStore.rememberServer(url)
-                    if (suppressHttpWarningOnSuccess) {
-                        serverDataStore.setHttpWarningSuppressed(url, suppressed = true)
+    private suspend fun resolveAndCommit(url: String, probeHeaders: Map<String, String>, wroteTyped: Boolean) {
+        val candidates = listOf(url, serverOrigin(url)).distinct()
+        when (val resolution = configRepository.resolveServer(candidates, probeHeaders)) {
+            is ServerResolution.Failed -> {
+                // Nothing was stored for this attempt. An add session left over from an earlier,
+                // abandoned attempt is dropped so no staged state outlives it.
+                if (addAccount) accountSwitcher.cancelAdd()
+                showError(resolution.error)
+            }
+            is ServerResolution.Resolved -> {
+                val winner = resolution.url
+                // The headers were filed under what was typed; the server the app will contact is the
+                // origin, and the serverId that keys them hashes that URL. Re-keyed before anything
+                // reads them under the winner — beginAdd's pending identity among them.
+                if (winner != url && probeHeaders.isNotEmpty()) {
+                    val moved = serverRepository.setHeaders(winner, probeHeaders)
+                    if (moved is HeaderWriteResult.Refused) {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            showAdvanced = true,
+                            headersSaveFailure = moved.reason,
+                        )
+                        return
                     }
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        isValidated = true,
-                        suppressHttpWarning = false,
-                    )
+                    // Only an entry this attempt wrote; one the user stored earlier under that address
+                    // may belong to another account's server. Best-effort: a stale row is inert.
+                    if (wroteTyped) serverRepository.setHeaders(url, emptyMap())
                 }
-                is Result.Error -> {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        error = result.message ?: "Could not connect to server",
-                    )
+                if (addAccount) {
+                    commitPendingServer(winner, resolution.config)?.let {
+                        showError(it)
+                        return
+                    }
+                } else {
+                    val prepared = suspendRunCatching { accountSwitcher.prepareForSignIn(winner) }
+                    if (prepared.isFailure) {
+                        showError(Result.Error(prepared.exceptionOrNull()))
+                        return
+                    }
+                    configRepository.publishStartupConfig(resolution.config)
                 }
-                is Result.Loading -> { /* no-op */ }
+                _uiState.value = _uiState.value.copy(url = winner, isLoading = false, isValidated = true)
             }
         }
     }
 
-    private suspend fun validateLiveServer(url: String): Result<*> {
-        val previousUrl = serverDataStore.awaitBaseUrl()
-        // Set the URL first so API calls use it
-        serverDataStore.setServerUrl(url)
-        val result = configRepository.validateServerUrl(url)
-        if (result is Result.Error) {
-            if (previousUrl.isBlank()) {
-                serverDataStore.clearServerUrl()
-            } else {
-                serverDataStore.setServerUrl(previousUrl)
-            }
-        }
-        return result
+    private fun showError(error: Result.Error) {
+        _uiState.value = _uiState.value.copy(
+            isLoading = false,
+            error = error.message ?: "Could not connect to server",
+        )
     }
 
-    private suspend fun validatePendingServer(url: String): Result<*> {
+    /** Starts the add session on [url] with its config attached; the error when it can't. */
+    private suspend fun commitPendingServer(url: String, config: StartupConfig): Result.Error? {
         // beginAdd requires a resolved active account; the switcher only offers "add" while one is
         // live, but a logout/expiry racing the tap must surface as an error, not a crash.
-        val begun = runCatching { accountSwitcher.beginAdd(url) }
+        val begun = suspendRunCatching { accountSwitcher.beginAdd(url) }
         if (begun.isFailure) {
-            return Result.Error(
-                begun.exceptionOrNull(),
-                "Could not start adding an account. Try again.",
-            )
+            return Result.Error(begun.exceptionOrNull(), "Could not start adding an account. Try again.")
         }
-        val result = accountSwitcher.withPendingIdentity { configRepository.probeServerUrl() }
-        when (result) {
-            is Result.Success -> accountSwitcher.attachPendingConfig(result.data)
-            // Drop the pending session so an abandoned attempt leaves no staged state; a retry
-            // begins a fresh one.
-            is Result.Error -> accountSwitcher.cancelAdd()
-            is Result.Loading -> Unit
-        }
-        return result
+        accountSwitcher.attachPendingConfig(config)
+        return null
     }
+}
 
-    private fun normalizeUrl(url: String): String = url.trim().trimEnd('/')
+/**
+ * Whether the platform refuses plain HTTP to a dotted DNS name outside `.local`, as iOS App Transport
+ * Security does. Local IPs, single-label names and `.local` names stay reachable.
+ */
+internal expect val platformBlocksCleartextToDomainNames: Boolean
+
+/**
+ * Whether [url]'s host is a dotted DNS name outside `.local`. IP literals are not: which addresses
+ * iOS counts as external is the platform's call, and the probe reports its refusal.
+ */
+internal fun hostIsQualifiedDomainName(url: String): Boolean {
+    val authority = serverOrigin(url).substringAfter("://").substringAfterLast('@')
+    if (authority.startsWith('[')) return false
+    val host = authority.substringBefore(':').trimEnd('.').lowercase()
+    return '.' in host && !host.all { it.isDigit() || it == '.' } && !host.endsWith(".local")
 }

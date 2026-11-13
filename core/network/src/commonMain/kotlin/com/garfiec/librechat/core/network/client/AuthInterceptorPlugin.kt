@@ -5,6 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpClientPlugin
 import io.ktor.client.plugins.HttpSend
 import io.ktor.client.plugins.plugin
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.HttpRequestPipeline
 import io.ktor.client.request.headers
 import io.ktor.http.HttpHeaders
@@ -16,6 +17,21 @@ class AuthInterceptorPlugin private constructor(
     private val tokenManager: TokenManager,
     private val serverUrlProvider: ServerUrlProvider?,
 ) {
+    /**
+     * The server base URL to scope this request against, EMPTY treated as absent.
+     *
+     * A `?:` alone catches only null, and a `RequestIdentity` captured before the URL resolved
+     * carries `""`. That empty string then reads as a host-root deployment: `isSameHostAsServer`
+     * fails open on it, and `isSecuredImagePath` derives an empty base path — so on a deployment
+     * served under a base path the `${basePath}/images/…` skip misses, the image 401 takes the
+     * refresh-and-retry leg, 401s again against a mount that never reads `Authorization`, and
+     * `emitSessionExpired` signs the user out of a live session. [ImageCookiePlugin] and
+     * [ServerHeadersPlugin] both normalize here; this seam has to agree with them or the cookie is
+     * attached by one rule and the logout suppressed by another.
+     */
+    private fun resolveBaseUrl(snapshot: RequestIdentity?): String? =
+        snapshot?.baseUrl?.takeIf { it.isNotEmpty() } ?: serverUrlProvider?.getBaseUrl()
+
     class Config {
         lateinit var tokenManager: TokenManager
 
@@ -50,7 +66,7 @@ class AuthInterceptorPlugin private constructor(
             fun isSkipPath(url: URLBuilder): Boolean = isAuthSkipPath(url)
 
             // Attach token to outgoing requests. Runs at State, which is after
-            // the SwitchBarrier/defaultRequest phases have applied the base URL —
+            // the SwitchBarrier/ServerUrlReady phase has applied the base URL —
             // so for the common relative-path call `context.url.host` is already
             // the base host, and for an absolute cross-host URL (e.g. a presigned
             // CDN download) it is that foreign host.
@@ -63,7 +79,7 @@ class AuthInterceptorPlugin private constructor(
             // live active account, preserving legacy behavior.
             scope.requestPipeline.intercept(HttpRequestPipeline.State) {
                 val snapshot = context.attributes.getOrNull(RequestIdentityKey)
-                val serverBaseUrl = snapshot?.baseUrl ?: plugin.serverUrlProvider?.getBaseUrl()
+                val serverBaseUrl = plugin.resolveBaseUrl(snapshot)
                 if (!isSkipPath(context.url) && isSameHostAsServer(context.url.host, serverBaseUrl)) {
                     // Explicit branch (not `?:`): a snapshot whose bearer is null must attach
                     // nothing — a pending add-account probe before sign-in has no token yet, and
@@ -93,8 +109,25 @@ class AuthInterceptorPlugin private constructor(
                 // (e.g. a presigned CDN URL). For a non-base host, pass the
                 // original 401 straight through with no token on the retry.
                 val snapshot = request.attributes.getOrNull(RequestIdentityKey)
-                val serverBaseUrl = snapshot?.baseUrl ?: plugin.serverUrlProvider?.getBaseUrl()
+                val serverBaseUrl = plugin.resolveBaseUrl(snapshot)
                 if (!isSameHostAsServer(request.url.host, serverBaseUrl)) {
+                    return@intercept originalCall
+                }
+
+                // The local image mount authenticates on a cookie and never reads Authorization
+                // (see [isSecuredImagePath]), so a refreshed bearer cannot change its verdict: the
+                // retry 401s again, `alreadyRetried` fires, and the user is signed out of a live
+                // session by every conversation that contains a generated image. Pass it through
+                // instead — [ImageCookiePlugin] is what actually authenticates these.
+                //
+                // Checked HERE rather than added to AUTH_SKIP_PATHS: the bearer stays attached at the
+                // State phase (harmless, and correct the day upstream grows a bearer path), and the
+                // skip set additionally suppresses proactive renewal, which images have no reason to.
+                if (isSecuredImagePath(request.url, serverBaseUrl)) {
+                    return@intercept originalCall
+                }
+
+                if (UnauthorizedIsVerdict in request.attributes) {
                     return@intercept originalCall
                 }
 
@@ -111,14 +144,17 @@ class AuthInterceptorPlugin private constructor(
                 // down the live account's session over its own dead credentials.
                 val alreadyRetried = request.attributes.getOrNull(RetryFlag) == true
                 if (alreadyRetried) {
-                    Logger.w(tag = "Auth") { "401 after retry - session expired" }
+                    Logger.w("Auth") { "401 after retry - session expired" }
                     plugin.tokenManager.emitSessionExpired(snapshot?.accountId)
                     return@intercept originalCall
                 }
 
-                Logger.d(tag = "Auth") { "401 received, attempting token refresh" }
+                Logger.d("Auth") { "401 received, attempting token refresh" }
                 when (val refresh = plugin.tokenManager.refreshBearerFor(snapshot)) {
                     is BearerResult.Refreshed -> {
+                        snapshot?.let {
+                            request.attributes.put(RequestIdentityKey, it.copy(bearer = refresh.token, openId = refresh.openId))
+                        }
                         request.headers {
                             remove(HttpHeaders.Authorization)
                             append(HttpHeaders.Authorization, "Bearer ${refresh.token}")
@@ -128,19 +164,34 @@ class AuthInterceptorPlugin private constructor(
                     }
                     BearerResult.Expired -> {
                         // Hard failure: the session is gone. Route the (snapshot's) account to re-auth.
-                        Logger.w(tag = "Auth") { "Token refresh failed - session expired" }
+                        Logger.w("Auth") { "Token refresh failed - session expired" }
                         plugin.tokenManager.emitSessionExpired(snapshot?.accountId)
+                        // On the CALL's attributes, not the request builder's — see [SessionRenewalFailedKey].
+                        originalCall.attributes.put(SessionRenewalFailedKey, true)
                         originalCall
                     }
                     BearerResult.Transient -> {
                         // Recoverable failure (network/5xx/malformed/server false-negative). Do NOT
                         // emit session-expired — fail just this request and keep the user signed in so
                         // a later request (or relaunch) recovers instead of a spurious logout.
-                        Logger.w(tag = "Auth") { "Token refresh transient failure - keeping session" }
+                        Logger.w("Auth") { "Token refresh transient failure - keeping session" }
+                        originalCall.attributes.put(SessionRenewalFailedKey, true)
                         originalCall
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * Marks a request whose `401` is the endpoint's verdict on what it was sent (a wrong 2FA code),
+ * not an expired session: [AuthInterceptorPlugin] passes it through without refreshing and
+ * resending. A resend repeats the same wrong code and spends the server's 2FA attempt limit twice.
+ */
+internal val UnauthorizedIsVerdict = AttributeKey<Unit>("UnauthorizedIsVerdict")
+
+/** See [UnauthorizedIsVerdict]. */
+internal fun HttpRequestBuilder.unauthorizedIsVerdict() {
+    attributes.put(UnauthorizedIsVerdict, Unit)
 }

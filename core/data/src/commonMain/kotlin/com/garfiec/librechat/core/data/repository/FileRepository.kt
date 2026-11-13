@@ -1,11 +1,12 @@
 package com.garfiec.librechat.core.data.repository
 
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.model.Attachment
 import com.garfiec.librechat.core.model.FileObject
 import com.garfiec.librechat.core.model.request.DeleteFileEntry
+import com.garfiec.librechat.core.model.response.DeleteFilesResponse
 import com.garfiec.librechat.core.model.response.FilePreviewResponse
 import com.garfiec.librechat.core.model.response.FileUploadConfig
-import com.garfiec.librechat.core.network.upload.StreamingUploadSource
 
 interface FileRepository {
     suspend fun getFiles(): Result<List<FileObject>>
@@ -20,20 +21,6 @@ interface FileRepository {
         onProgress: ((Float) -> Unit)? = null,
     ): Result<FileObject>
     suspend fun uploadFile(
-        source: StreamingUploadSource,
-        filename: String,
-        type: String,
-        fileId: String? = null,
-        endpoint: String? = null,
-        model: String? = null,
-        agentId: String? = null,
-        toolResource: String? = null,
-        messageFile: Boolean? = null,
-        width: Int? = null,
-        height: Int? = null,
-        onProgress: ((Float) -> Unit)? = null,
-    ): Result<FileObject>
-    suspend fun uploadFile(
         bytes: ByteArray,
         filename: String,
         type: String,
@@ -46,19 +33,39 @@ interface FileRepository {
         width: Int? = null,
         height: Int? = null,
         onProgress: ((Float) -> Unit)? = null,
+        /**
+         * Password the user typed for a PDF that the previous attempt refused with
+         * `PdfPasswordProtectedException`. The PDF is decrypted on-device with it; it is never sent.
+         */
+        pdfPassword: String? = null,
     ): Result<FileObject>
+
+    /**
+     * Deletes [files]. Success carries the per-file outcome: a partial delete answers 200, so the
+     * caller must evict what it asked for MINUS [DeleteFilesResponse.failedFileIds] rather than
+     * treating success as "all gone". See [DeleteFilesResponse].
+     */
     suspend fun deleteFiles(
         files: List<DeleteFileEntry>,
         agentId: String? = null,
         toolResource: String? = null,
-    ): Result<Unit>
+    ): Result<DeleteFilesResponse>
     suspend fun downloadFile(userId: String, fileId: String): Result<ByteArray>
+
+    /**
+     * Downloads a generated file's bytes. A code-output download fallback (no `file_id`, a
+     * `/api/files/code/download/…` filepath) is fetched from the sandbox route it names; anything
+     * else goes through [downloadFile], which needs [userId]. Doesn't check expiry: callers skip an
+     * expired file rather than spend a request on a 404.
+     */
+    suspend fun downloadAttachment(attachment: Attachment, userId: String?): Result<ByteArray>
     suspend fun getAgentFiles(agentId: String): Result<List<FileObject>>
 
     /**
      * Polls `GET /api/files/:fileId/preview` until the status is terminal
-     * (`ready`/`failed`) or the attempt budget is exhausted, then returns the
-     * last [FilePreviewResponse]. Used by the deferred office-doc preview flow.
+     * (`ready`/`failed`), the attempt budget is exhausted, or several requests
+     * in a row fail, then returns the last result. Used by the deferred-preview
+     * flow for generated files.
      */
     suspend fun pollFilePreview(fileId: String): Result<FilePreviewResponse>
 

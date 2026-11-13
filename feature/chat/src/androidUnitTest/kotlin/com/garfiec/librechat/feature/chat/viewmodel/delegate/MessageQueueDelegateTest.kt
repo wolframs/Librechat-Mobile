@@ -5,11 +5,15 @@ import com.garfiec.librechat.core.common.identity.AccountState
 import com.garfiec.librechat.core.common.identity.InMemoryActiveAccountProvider
 import com.garfiec.librechat.core.data.endpoint.EndpointDispatch
 import com.garfiec.librechat.feature.chat.viewmodel.ChatStateHandle
-import com.garfiec.librechat.feature.chat.viewmodel.QueueHandle
 import com.garfiec.librechat.feature.chat.viewmodel.ChatUiState
+import com.garfiec.librechat.feature.chat.viewmodel.ComparisonState
 import com.garfiec.librechat.feature.chat.viewmodel.ComposerSnapshot
+import com.garfiec.librechat.feature.chat.viewmodel.ModelChoice
+import com.garfiec.librechat.feature.chat.viewmodel.QueueHandle
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedEditSession
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
+import com.garfiec.librechat.feature.chat.viewmodel.QueuedTurnServerState
+import com.garfiec.librechat.feature.chat.viewmodel.SettledQueuedTurn
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,17 +44,38 @@ class MessageQueueDelegateTest {
             awaitSettleFlags.add(awaitSettle)
         },
         onQueuedDropped = { droppedCounts.add(it) },
-        onQueueChanged = {},
     )
 
     private fun spec(id: String, text: String = id, model: String? = "gpt-4") = QueuedMessage(
         localId = id,
         text = text,
-        endpoint = "openAI",
-        model = model,
-        agentId = null,
+        choice = ModelChoice.Raw("openAI", model),
         dispatch = EndpointDispatch(endpointType = null, key = null, modelDisplayLabel = null),
     )
+
+    private fun serverOwned(
+        id: String,
+        status: QueuedTurnServerState.Status = QueuedTurnServerState.Status.Queued,
+    ) = spec(id).copy(
+        server = QueuedTurnServerState(status = status, id = "qt-$id"),
+        clientRequestId = "req-$id",
+        parentMessageId = "msg-0",
+    )
+
+    private fun settle(
+        evidence: SettledQueuedTurn.Evidence,
+        effectivePredecessorCreatedAt: Long? = null,
+    ) {
+        stateFlow.value = stateFlow.value.copy(
+            queue = stateFlow.value.queue.copy(
+                settledQueuedTurns = stateFlow.value.queue.settledQueuedTurns + SettledQueuedTurn(
+                    clientRequestId = "req-settled-${stateFlow.value.queue.settledQueuedTurns.size}",
+                    evidence = evidence,
+                    effectivePredecessorCreatedAt = effectivePredecessorCreatedAt,
+                ),
+            ),
+        )
+    }
 
     private val queue get() = stateFlow.value.messageQueue
     private val paused get() = stateFlow.value.isQueuePaused
@@ -62,7 +87,7 @@ class MessageQueueDelegateTest {
                 editingQueuedItem = QueuedEditSession(
                     original = original,
                     originalIndex = 0,
-                    stashed = ComposerSnapshot(text = "", endpoint = "openAI", model = null),
+                    stashed = ComposerSnapshot(text = "", choice = ModelChoice.Raw("openAI", null)),
                 ),
             ),
         )
@@ -87,43 +112,35 @@ class MessageQueueDelegateTest {
     }
 
     @Test
-    fun `takeForEdit removes and returns the item with its index`() {
+    fun `replace swaps the row in place`() {
         delegate.enqueue(spec("a"))
         delegate.enqueue(spec("b", text = "hello"))
+        delegate.enqueue(spec("c"))
 
-        val taken = delegate.takeForEdit("b")
+        delegate.replace("b", fallbackIndex = 0, item = spec("b", text = "edited"))
 
-        assertThat(taken?.index).isEqualTo(1)
-        assertThat(taken?.value?.text).isEqualTo("hello")
-        assertThat(queue.map { it.localId }).containsExactly("a")
+        assertThat(queue.map { it.localId }).containsExactly("a", "b", "c").inOrder()
+        assertThat(queue[1].text).isEqualTo("edited")
     }
 
     @Test
-    fun `takeForEdit returns null for an unknown id`() {
-        assertThat(delegate.takeForEdit("missing")).isNull()
+    fun `replace inserts at the fallback index when the row has already left`() {
+        delegate.enqueue(spec("a"))
+        delegate.enqueue(spec("c"))
+
+        delegate.replace("b", fallbackIndex = 1, item = spec("b"))
+
+        assertThat(queue.map { it.localId }).containsExactly("a", "b", "c").inOrder()
     }
 
     @Test
-    fun `takeForEdit leaves the pause flag untouched`() {
+    fun `replace leaves the pause flag untouched`() {
         delegate.enqueue(spec("a"))
         delegate.pause()
 
-        delegate.takeForEdit("a")
+        delegate.replace("a", fallbackIndex = 0, item = spec("a", text = "edited"))
 
-        // The item is only borrowed for editing, so the queue stays paused.
         assertThat(paused).isTrue()
-    }
-
-    @Test
-    fun `reinsert restores an item at the original index`() {
-        delegate.enqueue(spec("a"))
-        delegate.enqueue(spec("c"))
-        val taken = delegate.takeForEdit("a") ?: error("missing")
-        delegate.enqueue(spec("b"))
-
-        delegate.reinsert(taken.index, taken.value)
-
-        assertThat(queue.map { it.localId }).containsExactly("a", "c", "b").inOrder()
     }
 
     @Test
@@ -144,10 +161,7 @@ class MessageQueueDelegateTest {
         delegate.clearPauseIfEmpty()
         assertThat(paused).isTrue()
 
-        // takeForEdit empties the queue but leaves the pause set (item is only borrowed).
-        delegate.takeForEdit("a")
-        assertThat(paused).isTrue()
-
+        stateFlow.value = stateFlow.value.copy(queue = stateFlow.value.queue.copy(messageQueue = emptyList()))
         delegate.clearPauseIfEmpty()
         assertThat(paused).isFalse()
     }
@@ -195,17 +209,6 @@ class MessageQueueDelegateTest {
     }
 
     @Test
-    fun `pause registers while editing even when the queue is momentarily empty`() {
-        // Mirrors a Stop during the edit of the sole queued item: it's pulled out (queue empty)
-        // but the edit session is active, so the pause must still register.
-        enterEditMode()
-
-        delegate.pause()
-
-        assertThat(paused).isTrue()
-    }
-
-    @Test
     fun `drainNext is a no-op when paused`() {
         delegate.enqueue(spec("a"))
         delegate.pause()
@@ -217,10 +220,245 @@ class MessageQueueDelegateTest {
     }
 
     @Test
+    fun `drainNext holds the queue during Compare setup`() {
+        delegate.enqueue(spec("a"))
+        stateFlow.value = stateFlow.value.copy(comparisonState = ComparisonState(isSettingUp = true))
+
+        delegate.drainNext()
+
+        assertThat(sent).isEmpty()
+        assertThat(queue.map { it.localId }).containsExactly("a")
+    }
+
+    private fun setSettingUp(settingUp: Boolean) {
+        stateFlow.value = stateFlow.value.copy(comparisonState = ComparisonState(isSettingUp = settingUp))
+    }
+
+    @Test
+    fun `ending Compare setup drains what it held`() {
+        delegate.enqueue(spec("a"))
+        setSettingUp(true)
+        delegate.drainNext()
+
+        setSettingUp(false)
+        delegate.releaseCompareSetupHold()
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `ending Compare setup does not drain alongside an item already on its way`() {
+        delegate.enqueue(spec("a"))
+        delegate.enqueue(spec("b"))
+        delegate.drainNext() // a is popped and waiting on its settle
+
+        setSettingUp(true)
+        setSettingUp(false)
+        delegate.releaseCompareSetupHold()
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+        assertThat(queue.map { it.localId }).containsExactly("b")
+    }
+
+    @Test
+    fun `an item refused by Compare setup on its way is drained when setup ends`() {
+        setSettingUp(true)
+        delegate.requeueRefusedDrain(spec("a"))
+        assertThat(queue.map { it.localId }).containsExactly("a")
+
+        setSettingUp(false)
+        delegate.releaseCompareSetupHold()
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
     fun `drainNext is a no-op on an empty queue`() {
         delegate.drainNext()
 
         assertThat(sent).isEmpty()
+    }
+
+    @Test
+    fun `drainNext refuses to send a row the server owns`() {
+        // The server has no guard against a turn being enqueued and then also sent the ordinary
+        // way, so this refusal is the whole double-send protection.
+        delegate.enqueue(serverOwned("a"))
+
+        delegate.drainNext()
+
+        assertThat(sent).isEmpty()
+        assertThat(queue.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `a server-owned row anywhere in the queue blocks the whole drain`() {
+        // The server admits behind the boundary this run just closed, so a local row firing now
+        // races it wherever it sits — the head is not the only thing that matters.
+        delegate.enqueue(spec("a"))
+        delegate.enqueue(serverOwned("b"))
+
+        delegate.drainNext()
+
+        assertThat(sent).isEmpty()
+        assertThat(queue.map { it.localId }).containsExactly("a", "b").inOrder()
+    }
+
+    @Test
+    fun `a rejected row still blocks the drain`() {
+        // A definite rejection proves nothing was committed, but recovery is the user's call —
+        // upstream keeps the row server-owned rather than quietly resending it.
+        delegate.enqueue(
+            serverOwned("a", QueuedTurnServerState.Status.Rejected).let {
+                it.copy(server = it.server?.copy(errorCode = "QUEUED_TURN_QUEUE_FULL"))
+            },
+        )
+
+        delegate.drainNext()
+
+        assertThat(sent).isEmpty()
+    }
+
+    @Test
+    fun `an admission that consumed this boundary blocks the drain after its row is gone`() {
+        // The race the settled store exists for: the poll removes an admitted row, then the run's
+        // own Final arrives. With only the `server != null` test, the legacy follow-up behind it
+        // would drain into a turn the server has already started.
+        delegate.enqueue(spec("a"))
+        settle(SettledQueuedTurn.Evidence.Admitted, effectivePredecessorCreatedAt = 100L)
+
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+
+        assertThat(sent).isEmpty()
+        assertThat(queue.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `one admission fences one boundary`() {
+        // Same epoch twice — a re-delivered run end must not keep the queue frozen for ever on
+        // evidence that was already spent. The second pass drains.
+        delegate.enqueue(spec("a"))
+        settle(SettledQueuedTurn.Evidence.Admitted, effectivePredecessorCreatedAt = 100L)
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+        assertThat(sent).isEmpty()
+
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `a spent admission does not fence a later run's boundary`() {
+        delegate.enqueue(spec("a"))
+        settle(SettledQueuedTurn.Evidence.Admitted, effectivePredecessorCreatedAt = 100L)
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+
+        // The admitted turn's OWN run now ends under a new epoch.
+        delegate.drainNext(endedGenerationCreatedAt = 200L)
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `a run end during Compare setup still retires its admission`() {
+        delegate.enqueue(spec("a"))
+        settle(SettledQueuedTurn.Evidence.Admitted, effectivePredecessorCreatedAt = 100L)
+        setSettingUp(true)
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+        setSettingUp(false)
+        delegate.releaseCompareSetupHold()
+        assertThat(sent).isEmpty()
+
+        // "Send queued" later is not blocked by an admission that was never retired.
+        delegate.drainNext()
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `a drain held by Compare setup is released under its run's epoch`() {
+        // An admission for another boundary blocks only an epoch-less drain.
+        delegate.enqueue(spec("a"))
+        settle(SettledQueuedTurn.Evidence.Admitted, effectivePredecessorCreatedAt = 999L)
+        setSettingUp(true)
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+
+        setSettingUp(false)
+        delegate.releaseCompareSetupHold()
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `an item refused on its way is re-drained under the run end that sent it`() {
+        // Popped by run end 100, then refused by a setup that opened during its settle wait.
+        delegate.enqueue(spec("a"))
+        settle(SettledQueuedTurn.Evidence.Admitted, effectivePredecessorCreatedAt = 999L)
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+        setSettingUp(true)
+        delegate.requeueRefusedDrain(sent.removeAt(0))
+
+        setSettingUp(false)
+        delegate.releaseCompareSetupHold()
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `a drain held at a run end still waits for the reply to settle`() {
+        delegate.enqueue(spec("a"))
+        setSettingUp(true)
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+
+        setSettingUp(false)
+        val owed = delegate.releaseCompareSetupHold()
+
+        assertThat(owed).isTrue()
+        assertThat(awaitSettleFlags).containsExactly(true)
+    }
+
+    @Test
+    fun `a cleared setup hold drains nothing later`() {
+        delegate.enqueue(spec("a"))
+        setSettingUp(true)
+        delegate.drainNext()
+        delegate.clearCompareSetupHold()
+
+        setSettingUp(false)
+        delegate.releaseCompareSetupHold()
+
+        assertThat(sent).isEmpty()
+    }
+
+    @Test
+    fun `an admission for a different boundary does not block`() {
+        delegate.enqueue(spec("a"))
+        settle(SettledQueuedTurn.Evidence.Admitted, effectivePredecessorCreatedAt = 999L)
+
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `an admission whose boundary the server has not reported does not block`() {
+        // AdmittedPendingBoundary cannot fence anything — there is no epoch to match, and
+        // blocking on it would wedge the queue on evidence that may never be completed.
+        delegate.enqueue(spec("a"))
+        settle(SettledQueuedTurn.Evidence.AdmittedPendingBoundary)
+
+        delegate.drainNext(endedGenerationCreatedAt = 100L)
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
+    }
+
+    @Test
+    fun `a legacy queue still drains`() {
+        delegate.enqueue(spec("a"))
+
+        delegate.drainNext()
+
+        assertThat(sent.map { it.localId }).containsExactly("a")
     }
 
     @Test
@@ -269,7 +507,7 @@ class MessageQueueDelegateTest {
         delegate.enqueue(spec("a", model = "gpt-4"))
         // Mutate live state after queueing — must not retro-edit the queued snapshot.
         stateFlow.value = stateFlow.value.copy(
-            selection = stateFlow.value.selection.copy(selectedModel = "claude", selectedEndpoint = "anthropic"),
+            selection = stateFlow.value.selection.copy(choice = ModelChoice.Raw("anthropic", "claude")),
         )
 
         delegate.drainNext()
@@ -330,7 +568,6 @@ class MessageQueueDelegateTest {
             activeAccountProvider = warming,
             sendWithSpec = { spec, _ -> warmingSent.add(spec) },
             onQueuedDropped = { warmingDropped.add(it) },
-            onQueueChanged = {},
         )
         warmingDelegate.enqueue(spec("a").copy(accountId = "srv:user-A"))
 

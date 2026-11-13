@@ -21,6 +21,7 @@ constants change when upstream moves, and upstream only moves at a sync.
     scripts/check-mirrors.py --to v0.8.8           # synced commit -> a target tag
     scripts/check-mirrors.py --from v0.8.6 --to v0.8.7
     scripts/check-mirrors.py --diff                # show what actually changed
+    scripts/check-mirrors.py --from X --to X       # check every anchor resolves at X
     scripts/check-mirrors.py --list                # print the registry, check nothing
     scripts/check-mirrors.py --self-test           # check the extractor, needs no submodule
 
@@ -33,6 +34,7 @@ is, not a reason to skip.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -113,11 +115,19 @@ def resolve(upstream: Path, rev: str) -> str:
 
 
 def file_at(upstream: Path, rev: str, path: str) -> str | None:
+    """The file's text at `rev`, or None when it doesn't exist there. A binary file (a PNG the
+    client loads from the server) reads as its size and sha256, so a change is still caught."""
     proc = subprocess.run(
         ["git", "-C", str(upstream), "show", f"{rev}:{path}"],
-        capture_output=True, text=True,
+        capture_output=True,
     )
-    return proc.stdout if proc.returncode == 0 else None
+    if proc.returncode != 0:
+        return None
+    try:
+        return proc.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        digest = hashlib.sha256(proc.stdout).hexdigest()
+        return f"<binary file, {len(proc.stdout)} bytes, sha256 {digest}>\n"
 
 
 # -------------------------------------------------------------------------- extraction
@@ -126,18 +136,114 @@ def file_at(upstream: Path, rev: str, path: str) -> str | None:
 # forms, and regex literals. Regexes are only recognised in value position, so a division
 # `a / b` is not mistaken for one -- which matters because upstream's MIME tables are
 # arrays of regex literals containing character classes like [\w.-].
-_SKIPPABLE = re.compile(
-    r"""
-      //[^\n]*                     # line comment
-    | /\*.*?\*/                    # block comment
-    | "(?:\\.|[^"\\])*"            # double-quoted
-    | '(?:\\.|[^'\\])*'            # single-quoted
-    | `(?:\\.|[^`\\])*`            # template literal
-    """,
-    re.VERBOSE | re.DOTALL,
-)
+#
+# One left-to-right scan rather than a regex alternation, because the forms nest: a
+# template literal's `${...}` can hold another template, and a regex literal can hold a
+# quote (`.replace(/'/g, ...)`). Either one, read as a flat pattern, opens a string that
+# runs to some unrelated quote further down and silently masks every declaration after it.
 
 _OPEN, _CLOSE = "([{", ")]}"
+
+
+def _quoted_end(text: str, i: int) -> int | None:
+    quote, j, n = text[i], i + 1, len(text)
+    while j < n:
+        if text[j] == "\\":
+            j += 2
+            continue
+        if text[j] == quote:
+            return j + 1
+        j += 1
+    return None
+
+
+def _regex_end(text: str, i: int) -> int | None:
+    j, n, in_class = i + 1, len(text), False
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c == "\n":
+            return None
+        if in_class:
+            in_class = c != "]"
+        elif c == "[":
+            in_class = True
+        elif c == "/":
+            j += 1
+            while j < n and text[j].isalpha():
+                j += 1
+            return j
+        j += 1
+    return None
+
+
+def _template_end(text: str, i: int) -> int | None:
+    j, n = i + 1, len(text)
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c == "`":
+            return j + 1
+        if text.startswith("${", j):
+            j = _expression_end(text, j + 2)
+            if j is None:
+                return None
+            continue
+        j += 1
+    return None
+
+
+def _skippable_at(text: str, i: int, prev: str) -> tuple[int, bool] | None:
+    """(end, is_value) of the comment/string/regex starting at `i`, or None if none does.
+
+    `prev` is the last significant character before `i`; it decides whether a `/` opens a
+    regex (value position) or is a division.
+    """
+    c = text[i]
+    if text.startswith("//", i):
+        end = text.find("\n", i)
+        return (len(text) if end == -1 else end), False
+    if text.startswith("/*", i):
+        end = text.find("*/", i + 2)
+        return None if end == -1 else (end + 2, False)
+    if c == "/":
+        if prev and (prev.isalnum() or prev in ")]_$"):
+            return None                  # division, not a regex
+        end = _regex_end(text, i)
+    elif c in "\"'":
+        end = _quoted_end(text, i)
+    elif c == "`":
+        end = _template_end(text, i)
+    else:
+        return None
+    return None if end is None else (end, True)
+
+
+def _expression_end(text: str, j: int) -> int | None:
+    """Index just past the `}` closing a template's `${`, skipping what is nested inside."""
+    depth, n, prev = 0, len(text), "("
+    while j < n:
+        hit = _skippable_at(text, j, prev)
+        if hit is not None:
+            j, is_value = hit
+            if is_value:
+                prev = "a"
+            continue
+        c = text[j]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            if depth == 0:
+                return j + 1
+            depth -= 1
+        if not c.isspace():
+            prev = c
+        j += 1
+    return None
 
 
 def _mask(text: str) -> str:
@@ -147,46 +253,21 @@ def _mask(text: str) -> str:
     aligned with the original, so a slice found here can be taken from the real text.
     """
     out = list(text)
-
-    for m in _SKIPPABLE.finditer(text):
-        for i in range(m.start(), m.end()):
-            if out[i] != "\n":
-                out[i] = " "
-
-    # Regex literals, scanned left to right on the already-masked text so we never start
-    # one inside a comment or string.
-    masked = "".join(out)
-    i, n = 0, len(masked)
+    i, n, prev = 0, len(text), ""
     while i < n:
-        if masked[i] != "/":
+        hit = _skippable_at(text, i, prev)
+        if hit is None:
+            if not text[i].isspace():
+                prev = text[i]
             i += 1
             continue
-        # Slice first, THEN rstrip: rstripping the whole file before slicing shortens it by
-        # any trailing whitespace and reads a character that many positions early.
-        prev = masked[:i].rstrip()[-1:]
-        if prev and (prev.isalnum() or prev in ")]_$"):
-            i += 1                       # division, not a regex
-            continue
-        j, closed = i + 1, False
-        while j < n:
-            c = masked[j]
-            if c == "\\":
-                j += 2
-                continue
-            if c == "\n":
-                break
-            if c == "/":
-                closed = True
-                break
-            j += 1
-        if not closed:
-            i += 1
-            continue
-        for k in range(i, j + 1):
+        end, is_value = hit
+        for k in range(i, end):
             if out[k] != "\n":
                 out[k] = " "
-        i = j + 1
-
+        if is_value:
+            prev = "a"                   # a literal is a value: a `/` after it divides
+        i = end
     return "".join(out)
 
 
@@ -239,8 +320,41 @@ def _function_body_start(masked: str, after_name: int) -> int | None:
     if i >= n:
         return None
 
-    brace = masked.find("{", i)
-    return brace if brace != -1 else None
+    return _body_brace_after_annotation(masked, i + 1)
+
+
+def _body_brace_after_annotation(masked: str, after_params: int) -> int | None:
+    """Index of the body `{` after a parameter list, skipping a return-type annotation's braces.
+
+    `function f(m: string): { major: number } | null {` has an object type between the `)` and
+    the body, and taking its `{` for the body collapses the block to the signature -- the same
+    inert-watch trap as everywhere else in this module (`parseOpusVersion` in bedrock.ts). A `{`
+    that follows a type position (`:`, `|`, `&`, `,`, `(`, `<`, `=>`) opens an object type and is
+    skipped whole; the first `{` after anything else -- `)`, a type name, `]`, a closing `>` or
+    `}` -- is the body. Braces inside a generic (`Promise<{ a: 1 }>`) are never the body.
+    """
+    angle, i, n = 0, after_params, len(masked)
+    while i < n:
+        c = masked[i]
+        if c == "<":
+            angle += 1
+        elif c == ">" and not masked.startswith("=>", i - 1):
+            angle = max(0, angle - 1)
+        elif c == "{" and angle == 0:
+            before = masked[after_params:i].rstrip()
+            if not before or not (before[-1] in ":|&,(<" or before.endswith("=>")):
+                return i
+            depth = 0
+            while i < n:                      # skip the object type whole
+                if masked[i] == "{":
+                    depth += 1
+                elif masked[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+        i += 1
+    return None
 
 
 def _callable_body_start(masked: str, init: int) -> int | None:
@@ -253,6 +367,14 @@ def _callable_body_start(masked: str, init: int) -> int | None:
     `(…) => {…}` and `arg => {…}`, each optionally `async` -- and returns the index at which
     the caller should start counting. A concise arrow body (`(a) => a.map(…)`) has no brace, so
     counting starts just past the `=>`, which is still the value rather than the signature.
+
+    A **return-type annotation** sits between the parameter list and the arrow
+    (`(p?: string | null): boolean => {`), so the arrow is not adjacent to the closing `)`.
+    It is found by scanning for the first `=>` at bracket depth zero rather than by matching
+    it straight after the parens: a function-typed annotation
+    (`(): ((x: string) => void) => {`) carries its own `=>` inside parentheses, and stopping
+    at that one would start counting inside the signature -- the same inert-watch outcome by
+    a different route.
     """
     i = re.compile(r"\s*(?:async\s+)?").match(masked, init).end()
 
@@ -279,21 +401,60 @@ def _callable_body_start(masked: str, init: int) -> int | None:
     if i >= n:
         return None
 
-    arrow = re.compile(r"\s*=>\s*").match(masked, i + 1)
-    return arrow.end() if arrow else None
+    return _arrow_body_start(masked, i + 1)
+
+
+def _arrow_body_start(masked: str, after_params: int) -> int | None:
+    """Index just past the `=>` that follows a parameter list, or None if there is none.
+
+    Skips a return-type annotation by scanning at depth zero, so nothing nested in one can be
+    mistaken for the arrow. Stops at a `;` or a `=` at depth zero: neither can appear between a
+    parameter list and its arrow, so reaching one means this initializer is not a function after
+    all and the caller must not treat the text as a signature.
+
+    **Angle brackets are counted too, and separately.** `_OPEN`/`_CLOSE` are round, square and
+    curly, so a `=>` inside a GENERIC argument sits at depth zero and is taken for the body arrow
+    — `(): Record<string, () => { id: number }> => {` then starts counting inside the annotation
+    and yields the signature alone. It only shows up when the generic contains a brace, which is
+    why an unparameterised `() => void` inside one appears to work: the wrong arrow is matched,
+    but counting still begins before the real body. Between a parameter list's `)` and its arrow
+    the only `<`/`>` are type brackets, so a plain counter is safe here and nowhere else.
+    """
+    depth, angle, i, n = 0, 0, after_params, len(masked)
+    while i < n:
+        c = masked[i]
+        if c in _OPEN:
+            depth += 1
+        elif c in _CLOSE:
+            depth -= 1
+            if depth < 0:
+                return None
+        elif c == "<":
+            angle += 1
+        elif c == ">":
+            # Not a closing bracket: the `>` of a `=>` we are standing next to. Leave it.
+            if angle > 0 and not masked.startswith("=>", i - 1):
+                angle -= 1
+        elif depth == 0 and angle == 0:
+            if masked.startswith("=>", i):
+                return re.compile(r"=>\s*").match(masked, i).end()
+            if c in ";=":
+                return None
+        i += 1
+    return None
 
 
 def extract_block(text: str, symbol: str) -> str | None:
     """The full declaration of `symbol`, from its keyword to its closing delimiter.
 
     Handles `export const X = [...]`, `= new Set([...])`, `= {...}`, `export enum X {}`,
-    `export function X(...) {}` and a function assigned to a binding
+    `export function X(...) {}` (optionally `async` or `export default`) and a function assigned to a binding
     (`const X = (a) => {...}`, `const X = function (a) {...}`).
     Returns None when the symbol is not declared here -- upstream renamed or moved it,
     which the caller reports as MISSING rather than passing over.
     """
     anchor = re.compile(
-        rf"^[ \t]*(?:export\s+)?(?P<kw>const|let|var|enum|type|interface|function)"
+        rf"^[ \t]*(?:export\s+(?:default\s+)?)?(?:async\s+)?(?P<kw>const|let|var|enum|type|interface|function)"
         rf"\s+{re.escape(symbol)}\b",
         re.MULTILINE,
     )
@@ -408,6 +569,49 @@ const handler = async ({ req, res }) => {
   await run(req);
 };
 """, 3),
+    # The annotation sits between the parameter list and the arrow, so an arrow matched
+    # straight after the closing paren is not found at all and the block collapses to the
+    # signature. Two registered entries extracted a signature-only block before this case
+    # existed: `document-supported-provider-predicate` (1 line) and
+    # `google-thinking-budget-bounds` (3). `isValidMemoryKey` was never affected -- a
+    # `function` declaration has no arrow to miss.
+    ("arrow with a return-type annotation", """
+export const isDocumentSupportedProvider = (provider?: string | null): boolean => {
+  const normalized = provider?.toLowerCase() ?? '';
+  return documentSupportedProviders.has(normalized);
+};
+""", 4),
+    ("arrow with a multi-line parameter list and a return-type annotation", """
+export const getGoogleThinkingBudgetBounds = (
+  model: string,
+): GoogleThinkingBudgetBounds | undefined => {
+  return BOUNDS[model];
+};
+""", 5),
+    # A function-typed annotation carries its own `=>` inside parentheses; stopping at that
+    # one starts the count inside the signature, which is the same inert watch by another
+    # route.
+    ("arrow returning a function type", """
+const makeGuard = (name: string): ((x: string) => boolean) => {
+  return (x) => x === name;
+};
+""", 3),
+    # The same trap one bracket further out, and the one the parenthesised case above does NOT
+    # cover: `_OPEN`/`_CLOSE` are round, square and curly, so an arrow inside a GENERIC argument
+    # is at depth zero. It only bites when the generic also contains a brace — with
+    # `Map<string, () => void>` the wrong arrow is matched and counting still starts before the
+    # real body, so the block comes out right by accident.
+    ("arrow returning a generic containing a function type", """
+export const build = (): Record<string, () => { id: number }> => {
+  const out = {};
+  return out;
+};
+""", 4),
+    ("arrow returning a generic with a braced type argument", """
+export const index = (): Map<string, { id: number }> => {
+  return new Map();
+};
+""", 3),
     ("single bare parameter, no parentheses", """
 const onError = error => {
   logger.error(error);
@@ -421,6 +625,35 @@ const onAbort = function (signal = { force: true }) {
     ("function declaration", """
 export function normalizeServerName(serverName) {
   return serverName.replace(/[^a-zA-Z0-9_.-]/g, '_');
+}
+""", 3),
+    # Without `async` in the anchor this form is simply not found, so the entry reports `??`
+    # every sync and reads as a tooling hiccup rather than an unwatched mirror.
+    ("async function declaration with a return type", """
+export async function handleAgentQueuedTurnCancel(req: Request, res: Response): Promise<void> {
+  const outcome = await cancel(req);
+  res.json(outcome);
+}
+""", 4),
+    # The first `{` after the parameter list is the return type's, not the body's; counted from
+    # there the block is the signature line alone (packages/data-provider/src/bedrock.ts).
+    # packages/data-provider/src/createPayload.ts. Without `default` in the anchor the symbol is
+    # never found and the entry reports `??` at every revision.
+    ("default-exported function declaration", """
+export default function createPayload(submission: t.TSubmission) {
+  const { conversation } = submission;
+  return { conversation };
+}
+""", 4),
+    ("function declaration with an object return type", """
+function parseOpusVersion(model: string): { major: number; minor: number } | null {
+  const nameFirst = model.match(/claude-opus[-.]?(\\d+)/);
+  return nameFirst ? { major: 1, minor: 0 } : null;
+}
+""", 4),
+    ("function declaration returning a generic of an object type", """
+export function load(id: string): Promise<{ id: string }> {
+  return fetchIt(id);
 }
 """, 3),
     ("annotated array literal", """
@@ -440,6 +673,15 @@ export const MCPErrorCodes = {
   OAUTH_SECRET_REENTRY_REQUIRED: 'MCP_OAUTH_SECRET_REENTRY_REQUIRED',
 } as const;
 """, 3),
+    ("after a nested template and a quote in a regex (packages/api/src/files/documents/html.ts)", """
+let list = `<ol>${items.map((x) => `<li>${x}</li>`).join('')}</ol>`;
+let safe = s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const PPTX_PREVIEW_CDN = {
+  pptxPreview: {
+    src: 'https://cdn.jsdelivr.net/npm/pptx-preview@1.0.7/dist/pptx-preview.umd.js',
+  },
+} as const;
+""", 5),
     ("interface body", """
 export interface MCPServerStatus {
   requiresOAuth: boolean;
@@ -550,11 +792,13 @@ def main() -> int:
         return 2
 
     if rev_from == rev_to:
-        print(f"Both revisions are {rev_from[:12]} — nothing to compare.")
-        print("Point --to at the sync target, or fetch the submodule first.")
-        return 0
-
-    print(f"upstream {rev_from[:12]} -> {rev_to[:12]}   ({len(entries)} mirrors)\n")
+        # Nothing can drift, but every anchor can still fail to resolve. Checking that here is
+        # how a sync proves the registry was repointed at the new pin: a `??` row means an entry
+        # still names a file or symbol that does not exist there.
+        print(f"Both revisions are {rev_from[:12]} — checking that every mirror resolves.")
+        print("Point --to at the sync target to compare two revisions.\n")
+    else:
+        print(f"upstream {rev_from[:12]} -> {rev_to[:12]}   ({len(entries)} mirrors)\n")
 
     results = [check(e, args.upstream, rev_from, rev_to) for e in entries]
     changed = [r for r in results if r.status == CHANGED]
@@ -577,7 +821,10 @@ def main() -> int:
 
     print()
     if not changed and not missing:
-        print(f"All {len(results)} mirrors unchanged across this range.")
+        if rev_from == rev_to:
+            print(f"All {len(results)} mirrors resolve at this revision.")
+        else:
+            print(f"All {len(results)} mirrors unchanged across this range.")
         return 0
 
     if changed:

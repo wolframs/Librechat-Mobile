@@ -1,13 +1,14 @@
 package com.garfiec.librechat
 
 import com.garfiec.librechat.core.common.identity.deriveServerId
-import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.data.datastore.AccountRoster
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.db.dao.ServerDao
 import com.garfiec.librechat.core.data.db.entity.ServerEntity
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.ConfigRepository
 import com.garfiec.librechat.core.data.repository.ServerRepositoryImpl
+import com.garfiec.librechat.core.data.repository.ServerResolution
 import com.garfiec.librechat.core.model.config.StartupConfig
 import com.garfiec.librechat.core.ui.components.CustomHeaderRow
 import com.garfiec.librechat.feature.auth.viewmodel.ServerUrlViewModel
@@ -20,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -65,12 +67,8 @@ class ServerHeaderEditorContractTest {
         Dispatchers.setMain(testDispatcher)
         every { serverDataStore.currentUrlFlow } returns currentUrl
         coEvery { serverDataStore.awaitBaseUrl() } returns liveUrl
-        coEvery { configRepository.probeServerUrl() } returns
-            Result.Success(StartupConfig(serverDomain = liveUrl))
-        coEvery { configRepository.validateServerUrl(any()) } returns
-            Result.Success(StartupConfig(serverDomain = liveUrl))
-        coEvery { accountSwitcher.withPendingIdentity(any<suspend () -> Result<StartupConfig>>()) } coAnswers {
-            firstArg<suspend () -> Result<StartupConfig>>().invoke()
+        coEvery { configRepository.resolveServer(any(), any()) } coAnswers {
+            ServerResolution.Resolved(firstArg<List<String>>().first(), StartupConfig(serverDomain = liveUrl))
         }
     }
 
@@ -91,11 +89,11 @@ class ServerHeaderEditorContractTest {
     }
 
     /**
-     * Add-account mode prefills the URL with the ACTIVE server but starts with an empty editor by
-     * design, so "the editor is empty" here never means "the user cleared their headers". Touching a
-     * row must not turn that emptiness into a delete against the server the user is still signed in
-     * to — the credential is plaintext-only with no second copy, and the failure that follows blames
-     * the URL.
+     * Add-account mode starts with an empty editor by design, even when the user taps the ACTIVE
+     * server's known-server row, so "the editor is empty" here never means "the user cleared their
+     * headers". Touching a row must not turn that emptiness into a delete against the server the user
+     * is still signed in to — the credential is plaintext-only with no second copy, and the failure
+     * that follows blames the URL.
      */
     @Test
     fun `add mode with a touched but blank editor keeps the active server's credential`() =
@@ -106,15 +104,15 @@ class ServerHeaderEditorContractTest {
                 serverRepository = repository(),
                 configRepository = configRepository,
                 accountSwitcher = accountSwitcher,
+                accountRoster = mockk<AccountRoster> { every { entriesFlow() } returns flowOf(emptyList()) },
                 addAccount = true,
-                settingsDataStore = mockk(relaxed = true),
             )
             advanceUntilIdle()
 
             // The user expands Advanced and taps "+ Add header", then thinks better of it and
-            // connects on the prefilled URL without filling the row in.
+            // taps the active server's row without filling the row in.
             viewModel.addHeaderRow()
-            viewModel.validateAndConnect()
+            viewModel.connectTo(liveUrl)
             advanceUntilIdle()
 
             assertThat(dao.rows).containsKey(liveId)

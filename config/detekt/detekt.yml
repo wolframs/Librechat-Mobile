@@ -1,41 +1,44 @@
 build:
   maxIssues: 0
 
+# Set to hold for almost all of the codebase; the few outliers carry a @Suppress naming the rule,
+# which marks the debt instead of a threshold sized to admit the worst offender.
 complexity:
   LongMethod:
-    threshold: 300
+    threshold: 100
     ignoreAnnotated:
       - "Composable"
   LongParameterList:
-    functionThreshold: 10
-    constructorThreshold: 20
+    functionThreshold: 8
+    constructorThreshold: 12
     ignoreDefaultParameters: true
     ignoreAnnotated:
       - "Composable"
   TooManyFunctions:
-    thresholdInFiles: 30
-    thresholdInClasses: 100
-    thresholdInInterfaces: 25
-    thresholdInObjects: 20
+    thresholdInFiles: 20
+    thresholdInClasses: 30
+    thresholdInInterfaces: 20
+    thresholdInObjects: 15
     thresholdInEnums: 10
     ignoreAnnotatedFunctions:
       - "Preview"
+      - "PreviewNarrowScreens"
   NestedBlockDepth:
-    threshold: 6
+    threshold: 5
   CyclomaticComplexMethod:
-    threshold: 60
+    threshold: 25
     ignoreAnnotated:
       - "Composable"
   ComplexCondition:
-    threshold: 10
+    threshold: 6
   LargeClass:
-    threshold: 2500
+    threshold: 600
 
 style:
   MagicNumber:
     active: false
   ReturnCount:
-    max: 12
+    max: 8
     excludeReturnFromLambda: true
     ignoreAnnotated:
       - "Composable"
@@ -49,11 +52,93 @@ style:
       - "**/build/generated/compose/resourceGenerator/**"
   ForbiddenComment:
     active: false
+  # Chrome goes through core/ui's adaptive components so it follows the interface style (Material /
+  # Liquid Glass). A raw M3 bar, sheet, FAB or menu silently stays Material in glass mode, and a raw
+  # dialog or sheet leaves its scrim under the native iOS glass bar.
+  ForbiddenImport:
+    active: true
+    imports:
+      - value: "androidx.compose.material3.TopAppBar"
+        reason: "Use AdaptiveTopBar (core/ui components/topbar)."
+      - value: "androidx.compose.material3.CenterAlignedTopAppBar"
+        reason: "Use AdaptiveTopBar with a BarTitleAlignment.CENTER title."
+      - value: "androidx.compose.material3.ModalBottomSheet"
+        reason: "Use AdaptiveModalBottomSheet (core/ui components)."
+      - value: "androidx.compose.material3.FloatingActionButton"
+        reason: "Use AdaptiveFloatingActionButton (core/ui components)."
+      - value: "androidx.compose.material3.SmallFloatingActionButton"
+        reason: "Use AdaptiveFloatingActionButton(small = true) (core/ui components)."
+      - value: "androidx.compose.material3.LargeFloatingActionButton"
+        reason: "No glass counterpart yet; add one to AdaptiveFloatingActionButton."
+      - value: "androidx.compose.material3.ExtendedFloatingActionButton"
+        reason: "No glass counterpart yet; add one to AdaptiveFloatingActionButton."
+      - value: "androidx.compose.material3.AlertDialog"
+        reason: "Use AdaptiveAlertDialog (core/ui components)."
+      - value: "androidx.compose.ui.window.Dialog"
+        reason: "Use AdaptiveDialog (core/ui components)."
+      - value: "androidx.compose.material3.DropdownMenu"
+        reason: "Use AdaptiveDropdownMenu (core/ui components)."
+      # Its menu is a member of the box's scope and can't be imported, so the box is the entry point.
+      - value: "androidx.compose.material3.ExposedDropdownMenuBox"
+        reason: "Use AdaptiveExposedDropdownMenuBox + AdaptiveExposedDropdownMenu (core/ui components)."
+      - value: "androidx.compose.material3.Switch"
+        reason: "Use AdaptiveSwitch (core/ui components)."
+      - value: "androidx.compose.material3.RadioButton"
+        reason: "Use AdaptiveRadioButton (core/ui components)."
+      - value: "androidx.compose.material3.Checkbox"
+        reason: "Use AdaptiveCheckbox (core/ui components)."
+      - value: "androidx.compose.material3.HorizontalDivider"
+        reason: "Use AdaptiveDivider (core/ui components)."
+      - value: "androidx.compose.material3.Button"
+        reason: "Use AdaptiveButton (core/ui components)."
+      - value: "androidx.compose.material3.OutlinedButton"
+        reason: "Use AdaptiveOutlinedButton (core/ui components)."
+      - value: "androidx.compose.material3.FilledTonalButton"
+        reason: "Use AdaptiveFilledTonalButton (core/ui components)."
+      - value: "androidx.compose.material3.OutlinedTextField"
+        reason: "Use AdaptiveOutlinedTextField (core/ui components)."
+      - value: "androidx.compose.material3.SingleChoiceSegmentedButtonRow"
+        reason: "Use AdaptiveSegmentedChoice (core/ui components)."
+      - value: "androidx.compose.material3.SegmentedButton"
+        reason: "Use AdaptiveSegmentedChoice (core/ui components)."
+      - value: "androidx.compose.material3.TabRow"
+        reason: "Use AdaptiveTabRow (core/ui components)."
+      - value: "androidx.compose.material3.PrimaryTabRow"
+        reason: "Use AdaptiveTabRow (core/ui components)."
+      - value: "androidx.compose.material3.SecondaryTabRow"
+        reason: "Use AdaptiveTabRow with AdaptiveTabRowKind.SECONDARY (core/ui components)."
+      - value: "androidx.compose.material3.FilterChip"
+        reason: "Use AdaptiveFilterChip (core/ui components)."
+      - value: "androidx.compose.material3.AssistChip"
+        reason: "Use AdaptiveAssistChip (core/ui components)."
+      - value: "androidx.compose.material3.InputChip"
+        reason: "Use AdaptiveInputChip (core/ui components)."
+      - value: "androidx.compose.material3.SuggestionChip"
+        reason: "Use AdaptiveSuggestionChip (core/ui components)."
+      - value: "androidx.compose.material3.SnackbarHost"
+        reason: "Use AdaptiveSnackbarHost (core/ui components)."
+      - value: "androidx.compose.material3.CircularProgressIndicator"
+        reason: "Use AdaptiveCircularProgressIndicator (core/ui components)."
+      # Not chrome: channel differences go through ChannelPolicy or a perChannel preference
+      # default, so every one of them is listed in one place.
+      - value: "com.garfiec.librechat.core.common.DistributionChannel"
+        reason: "Read a ChannelPolicy field, or declare a perChannel default in AppPreferences."
+      # Values are matched against the whole import, so the type entry alone lets an enum-entry
+      # import (`…DistributionChannel.PLAY_STORE`) through.
+      - value: "com.garfiec.librechat.core.common.DistributionChannel.*"
+        reason: "Read a ChannelPolicy field, or declare a perChannel default in AppPreferences."
+    # Tests may drive the raw M3 control on purpose: the ban governs shipped chrome.
+    excludes:
+      - "**/core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/topbar/**"
+      - "**/core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/Adaptive*.kt"
+      - "**/src/*Test/**"
+      - "**/src/test/**"
   UnusedPrivateMember:
     active: true
     allowedNames: "(_|ignored|expected|serialVersionUID)"
     ignoreAnnotated:
       - "Preview"
+      - "PreviewNarrowScreens"
   UnusedPrivateProperty:
     active: true
     allowedNames: "(_|ignored|expected|serialVersionUID)"
@@ -97,6 +182,7 @@ exceptions:
   TooGenericExceptionCaught:
     active: true
     exceptionNames:
+      - "Exception"
       - "RuntimeException"
       - "Throwable"
     allowedExceptionNameRegex: "_|(ignore|expected).*"
@@ -123,9 +209,20 @@ coroutines:
 # the screen-specific-ViewModel anti-pattern the rule actually targets is absent
 # from this project.
 Compose:
+  # The adaptive sheet and dialogs wrap M3 surfaces that open their own window and emit nothing into
+  # the caller's layout; without this the rules treat every sheet or dialog host as a content emitter.
+  ModifierMissing:
+    active: true
+    contentEmittersDenylist: AdaptiveModalBottomSheet,AdaptiveAlertDialog,AdaptiveDialog
+  LambdaParameterEventTrailing:
+    active: true
+    contentEmittersDenylist: AdaptiveModalBottomSheet,AdaptiveAlertDialog,AdaptiveDialog
+  MultipleEmitters:
+    active: true
+    contentEmittersDenylist: AdaptiveModalBottomSheet,AdaptiveAlertDialog,AdaptiveDialog
   CompositionLocalAllowlist:
     active: true
-    allowedCompositionLocals: LocalAddArtifactToHomeScreen,LocalAttachmentDownloader,LocalChatMediaViewer,LocalChatParagraphSpacing,LocalFeedbackEnabled,LocalImmediateMarkdown,LocalInlineArtifactPrefs,LocalMermaidRenderCache,LocalOpenArtifact,LocalOpenPdf,LocalParsedMarkdownCache,LocalRelativeTimeReference,LocalSearchFocusNonce,LocalSubagentProgress,LocalSuppressGroupAutoCollapse
+    allowedCompositionLocals: LocalAddArtifactToHomeScreen,LocalServerUrl,LocalArtifactFileActions,LocalAttachmentDownloader,LocalFileNotice,LocalOpenFileActions,LocalDarkTheme,LocalThemeTokens,LocalDateTimeFormat,LocalExpansionScope,LocalExpansionStates,LocalGlassBackdrop,LocalGlassLevel,LocalGlassSheetHost,LocalGroupPosition,LocalInSeparateWindow,LocalMediaThumbnails,LocalNativeOverlayGate,LocalChatMediaViewer,LocalFeedbackEnabled,LocalImmediateMarkdown,LocalInlineArtifactPrefs,LocalIosAppLocale,LocalCitationSheet,LocalMarkdownMedia,LocalMarkdownSource,LocalMermaidRenderCache,LocalOpenArtifact,LocalOpenMemories,LocalOpenPdf,LocalParsedMarkdownCache,LocalPreviewOverrides,LocalRelativeTimeReference,LocalResubmitEnabled,LocalSearchFocusNonce,LocalSiteIcons,LocalSubagentProgress,LocalPtcTraces,LocalSubagentThreads,LocalSubagentThreadsAvailable,LocalSuppressGroupAutoCollapse,LocalOpenMessageFile,LocalOpenSharedChat,LocalExternalUriHandler,LocalThinkingOpenByDefault,LocalModeVeil,LocalComposerFlare,LocalDrawerGestureLock,LocalMcpSignIn,LocalOpenSubagentThread,LocalAttachmentRecovery,LocalOwnerTexts,LocalCodeWorkspaceComposer,LocalPullRequestComposer,LocalToolContent,LocalToolPreview,LocalMcpApps,LocalLegacyUiResources,LocalBackClaims,LocalCollapseLongUserMessages,LocalCodeRunHost,LocalCodeRunPart,LocalThreadScrollHandle,LocalSendFlight,LocalSidebarAsideRequests,LocalArtifactOrigin
 
 # detekt-koin rule overrides (defaults ship in plugin jar; buildUponDefaultConfig = true)
 koin-rules:
@@ -177,8 +274,37 @@ formatting:
     excludes:
       - "**/build/generated/compose/resourceGenerator/**"
 
-# Custom row-tenancy ruleset (:detekt-rules). Enforces that account-scoped Room DAOs filter every
-# tenant-table statement by accountId. See AccountScopedDaoRule.
+# Custom ruleset (:detekt-rules). AccountScopedDao enforces that account-scoped Room DAOs filter
+# every tenant-table statement by accountId. AlertDialogNestedScroll catches an AdaptiveAlertDialog
+# text slot that scrolls itself without opting out of the dialog's own scroll. MaskedFieldKeyboard
+# catches a masked text field that isn't on the password keyboard. HardcodedColor catches a
+# `Color(0x…)` literal, which no theme can reach.
 librechat:
   AccountScopedDao:
     active: true
+  AlertDialogNestedScroll:
+    active: true
+  MaskedFieldKeyboard:
+    active: true
+  # The allowlist: every colour outside these paths comes from the theme. An entry is a kind of
+  # colour a theme must not recolour, with its reason; if a theme author would reasonably want to
+  # recolour it, it's a theme token instead (a producer in core/ui theme/), not an entry here.
+  HardcodedColor:
+    active: true
+    excludes:
+      # The theme itself: Switchboard's producers and the mirrored server palettes.
+      - "**/core/ui/src/*/kotlin/**/theme/**"
+      - "**/core/model/src/*/kotlin/**/config/theme/**"
+      # Provider tiles: each provider's fixed brand-adjacent tint, the same under every theme so a
+      # provider is recognisable at a glance (the web's provider registry is the same exception).
+      - "**/core/ui/src/commonMain/kotlin/**/components/EndpointIcons.kt"
+      # Letter avatars: a fixed palette so an account keeps its colour across themes and devices.
+      - "**/core/ui/src/commonMain/kotlin/**/components/AvatarColors.kt"
+      # Tests assert on literal colours.
+      - "**/test/**"
+      - "**/androidTest/**"
+      - "**/commonTest/**"
+      - "**/jvmTest/**"
+      - "**/androidUnitTest/**"
+      - "**/androidInstrumentedTest/**"
+      - "**/iosTest/**"

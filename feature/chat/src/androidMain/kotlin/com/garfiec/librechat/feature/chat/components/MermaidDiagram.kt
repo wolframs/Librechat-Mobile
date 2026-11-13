@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -36,18 +36,27 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.ui.components.AdaptiveDialog
+import com.garfiec.librechat.core.ui.theme.DiagramColors
+import com.garfiec.librechat.core.ui.theme.chatColors
+import com.garfiec.librechat.core.ui.theme.themeShapes
 import com.garfiec.librechat.feature.chat.components.web.rememberWebAssetBaseUrl
 import com.garfiec.librechat.feature.chat.components.web.safelyDestroyWebView
 import com.garfiec.librechat.feature.chat.resources.*
@@ -62,34 +71,37 @@ actual fun MermaidDiagram(
     var showCode by remember { mutableStateOf(false) }
     var showFullscreen by remember { mutableStateOf(false) }
 
-    val isDarkTheme = MaterialTheme.colorScheme.surface.toArgb().let { argb ->
-        val r = (argb shr 16) and 0xFF
-        val g = (argb shr 8) and 0xFF
-        val b = argb and 0xFF
-        (r * 0.299 + g * 0.587 + b * 0.114) < 128
-    }
+    val diagram = chatColors().diagram
+    val diagramShape = themeShapes().diagram
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            .clip(diagramShape)
+            .background(diagram.canvas)
+            .border(1.dp, diagram.border, diagramShape),
     ) {
         // Header
         DisableSelection {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .background(diagram.header)
+                    .drawBehind {
+                        val y = size.height - 1.dp.toPx() / 2
+                        drawLine(diagram.border, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+                    }
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = stringResource(Res.string.label_mermaid),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = diagram.label,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(modifier = Modifier.weight(1f))
                 TextButton(
                     onClick = { showCode = !showCode },
                 ) {
@@ -109,11 +121,17 @@ actual fun MermaidDiagram(
                         imageVector = Icons.Default.Fullscreen,
                         contentDescription = stringResource(Res.string.cd_fullscreen),
                         modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = diagram.label,
                     )
                 }
             }
         }
+
+        // As tall as the rendered diagram, up to [MERMAID_MAX_INLINE_HEIGHT]: a wide chart scaled
+        // to the bubble is short, and is read in fullscreen rather than by an empty box. Kept outside
+        // the content and saved, so a row rebuilt by scrolling back or by the Code toggle keeps its
+        // measured height instead of jumping through the default.
+        var diagramHeight by rememberSaveable(code) { mutableFloatStateOf(MERMAID_MAX_INLINE_HEIGHT.value) }
 
         // Content
         AnimatedContent(
@@ -129,18 +147,21 @@ actual fun MermaidDiagram(
             } else {
                 MermaidWebView(
                     code = code,
-                    isDarkTheme = isDarkTheme,
+                    diagram = diagram,
+                    onContentHeight = {
+                        diagramHeight = it.toFloat().coerceIn(MERMAID_MIN_INLINE_HEIGHT.value, MERMAID_MAX_INLINE_HEIGHT.value)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(300.dp)
-                        .padding(8.dp),
+                        .padding(8.dp)
+                        .height(diagramHeight.dp),
                 )
             }
         }
     }
 
     if (showFullscreen) {
-        Dialog(
+        AdaptiveDialog(
             onDismissRequest = { showFullscreen = false },
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
@@ -151,7 +172,8 @@ actual fun MermaidDiagram(
             ) {
                 MermaidWebView(
                     code = code,
-                    isDarkTheme = isDarkTheme,
+                    diagram = diagram,
+                    zoomable = true,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(16.dp),
@@ -177,10 +199,15 @@ actual fun MermaidDiagram(
 @Composable
 private fun MermaidWebView(
     code: String,
-    isDarkTheme: Boolean,
-    modifier: Modifier,
+    diagram: DiagramColors,
+    modifier: Modifier = Modifier,
+    onContentHeight: ((Int) -> Unit)? = null,
+    // Fullscreen only: zoomed inside the thread, a vertical swipe on the diagram pans it instead of
+    // scrolling the list.
+    zoomable: Boolean = false,
 ) {
-    val bgColor = MaterialTheme.colorScheme.surfaceContainerHighest.toArgb()
+    val bgColor = diagram.canvas.toArgb()
+    val reportHeight by rememberUpdatedState(onContentHeight)
     val escapedCode = remember(code) {
         code.replace("\\", "\\\\")
             .replace("`", "\\`")
@@ -189,10 +216,11 @@ private fun MermaidWebView(
             .replace("<", "\\u003c")
             .replace("\n", "\\n")
     }
-    val theme = if (isDarkTheme) "dark" else "default"
+    val theme = diagram.mermaidTheme
 
-    val html = remember(escapedCode, theme) {
-        buildMermaidHtml(escapedCode, theme)
+    val errorPrefix = stringResource(Res.string.diagram_error_prefix)
+    val html = remember(escapedCode, theme, errorPrefix) {
+        buildMermaidHtml(escapedCode, theme, errorPrefix)
     }
     val assetBase = rememberWebAssetBaseUrl() ?: return
 
@@ -213,7 +241,16 @@ private fun MermaidWebView(
                 settings.useWideViewPort = true
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
-                webChromeClient = WebChromeClient()
+                settings.setSupportZoom(zoomable)
+                settings.builtInZoomControls = zoomable
+                settings.displayZoomControls = false
+                // The page reports its rendered height through the title (see buildMermaidHtml).
+                webChromeClient = object : WebChromeClient() {
+                    override fun onReceivedTitle(view: WebView?, title: String?) {
+                        title?.removePrefix(HEIGHT_TITLE_PREFIX)?.takeIf { it != title }?.toIntOrNull()
+                            ?.let { reportHeight?.invoke(it) }
+                    }
+                }
                 webViewClient = object : WebViewClient() {
                     override fun onReceivedSslError(
                         view: WebView?,
@@ -251,12 +288,15 @@ private fun MermaidWebView(
     )
 }
 
+private const val HEIGHT_TITLE_PREFIX = "height:"
+
 /**
  * `internal` rather than private so `VendoredAssetReferenceTest` can assert that every
  * referenced path is one the vendoring script actually ships — a wrong relative path here
  * renders a blank box with no error anywhere in Kotlin.
  */
-internal fun buildMermaidHtml(escapedCode: String, theme: String): String {
+internal fun buildMermaidHtml(escapedCode: String, theme: String, errorPrefix: String): String {
+    val prefix = jsStringBody(errorPrefix)
     return """
         <!DOCTYPE html>
         <html>
@@ -274,9 +314,7 @@ internal fun buildMermaidHtml(escapedCode: String, theme: String): String {
                     background: transparent;
                     overflow: visible;
                 }
-                .mermaid {
-                    width: 100%;
-                }
+                .mermaid { width: 100%; }
                 .mermaid svg {
                     max-width: 100%;
                     height: auto;
@@ -290,8 +328,7 @@ internal fun buildMermaidHtml(escapedCode: String, theme: String): String {
             </style>
         </head>
         <body>
-            <div class="mermaid" id="diagram">
-            </div>
+            <div class="mermaid" id="diagram"></div>
             <script>
                 if (typeof structuredClone === 'undefined') {
                     window.structuredClone = function(obj) {
@@ -331,20 +368,31 @@ internal fun buildMermaidHtml(escapedCode: String, theme: String): String {
                     securityLevel: 'strict',
                     flowchart: { useMaxWidth: true },
                 });
+                // Re-reported on resize: a fold or rotation rescales the diagram to the new width.
+                function reportHeight() {
+                    document.title = '$HEIGHT_TITLE_PREFIX' + Math.ceil(document.body.scrollHeight);
+                }
                 try {
                     var code = "$escapedCode";
                     mermaid.render('rendered', code).then(function(result) {
                         document.getElementById('diagram').innerHTML = result.svg;
                     }).catch(function(err) {
                         document.getElementById('diagram').innerHTML =
-                            '<div class="error">Diagram error: ' + err.message + '</div>';
+                            '<div class="error">$prefix ' + err.message + '</div>';
+                    }).then(function() {
+                        reportHeight();
+                        window.addEventListener('resize', reportHeight);
                     });
                 } catch(e) {
                     document.getElementById('diagram').innerHTML =
-                        '<div class="error">Diagram error: ' + e.message + '</div>';
+                        '<div class="error">$prefix ' + e.message + '</div>';
                 }
             </script>
         </body>
         </html>
     """.trimIndent()
 }
+
+/** [prefix] as the body of a single-quoted JavaScript string inside an inline script. */
+private fun jsStringBody(prefix: String): String =
+    prefix.replace("\\", "\\\\").replace("'", "\\'").replace("<", "\\u003c")

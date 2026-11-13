@@ -2,29 +2,40 @@ package com.garfiec.librechat.core.data.datastore
 
 import co.touchlab.kermit.Logger
 import com.garfiec.librechat.core.common.extensions.trimTrailingSlash
+import com.garfiec.librechat.core.common.identity.cleanServerUrl
 import com.garfiec.librechat.core.common.result.AccessGatewayException
 import com.garfiec.librechat.core.logging.Diag
 import com.garfiec.librechat.core.logging.LogOrigin
+import com.garfiec.librechat.core.model.auth.AuthCookies
+import com.garfiec.librechat.core.model.auth.RequestAuth
+import com.garfiec.librechat.core.model.auth.SessionCredentials
 import com.garfiec.librechat.core.model.response.RefreshResponse
+import com.garfiec.librechat.core.network.client.AuthGate
 import com.garfiec.librechat.core.network.client.CookieHelper
 import com.garfiec.librechat.core.network.client.PinnedServerBaseUrlKey
+import com.garfiec.librechat.core.network.client.RefreshCookieCredentials
 import com.garfiec.librechat.core.network.client.RefreshResult
-import com.garfiec.librechat.core.network.client.SecureTokenStorage
 import com.garfiec.librechat.core.network.client.SessionEndReason
+import com.garfiec.librechat.core.network.client.SessionHealth
 import com.garfiec.librechat.core.network.client.TokenManager
+import com.garfiec.librechat.core.network.client.attachAuthCookies
 import com.garfiec.librechat.core.network.client.expiresAtEpochMillisOrNull
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -67,13 +78,15 @@ import kotlin.time.Clock
  * if it changed, so a refresh that races a teardown can never resurrect the cleared session even
  * though the POST holds no lock — while another account's changes leave it valid.
  */
+@Suppress("TooManyFunctions", "LargeClass") // debt: 51 functions; over 600 lines since the v0.8.9 enrollment arm
 abstract class CommonTokenDataStore(
     private val refreshClient: Lazy<HttpClient>,
     private val ioDispatcher: CoroutineDispatcher,
-) : TokenManager, SecureTokenStorage {
+) : TokenManager, RefreshCookieCredentials {
 
+    /** The active slot's bearer and OpenID markers, one value so a reader never pairs two generations. */
     @Volatile
-    private var cachedAccessToken: String? = null
+    private var cachedAuth = RequestAuth(null)
 
     /**
      * The account whose tokens are currently active, or `null` when logged out or on a legacy install
@@ -94,7 +107,7 @@ abstract class CommonTokenDataStore(
 
     private fun loadCacheFromStorage() {
         activeAccountKey = readValue(KEY_ACTIVE_ACCOUNT)
-        cachedAccessToken = readValue(accessKey(activeAccountKey))
+        cachedAuth = storedAuth(activeAccountKey)
         tokenInitialized = true
     }
 
@@ -113,8 +126,6 @@ abstract class CommonTokenDataStore(
      * completed login to whatever was on disk. This is the **only** writer of the cache fields outside
      * a mutation.
      */
-    override suspend fun warmUp() { warmTokenCache() }
-
     suspend fun warmTokenCache() = withContext(ioDispatcher) {
         stateMutex.withLock { if (!tokenInitialized) loadCacheFromStorage() }
     }
@@ -130,20 +141,16 @@ abstract class CommonTokenDataStore(
      * stale bearer until process death. Reading through costs a repeated decrypt instead.
      */
     private fun ensureTokenLoaded(): String? {
-        if (tokenInitialized) return cachedAccessToken.nonBlankOrNull()
-        return readValue(accessKey(readValue(KEY_ACTIVE_ACCOUNT))).nonBlankOrNull()
+        if (tokenInitialized) return cachedAuth.bearer.nonBlankOrNull()
+        return sessions.readAccess(readValue(KEY_ACTIVE_ACCOUNT)).nonBlankOrNull()
     }
 
     private fun String?.nonBlankOrNull(): String? = this?.takeUnless { it.isBlank() }
 
-    // The bare key (null account) is the logged-out / legacy / mid-auth-staging fallback; a resolved
-    // account namespaces to `acct:<id>:<base>`. One helper so both token bases scope identically.
-    private fun scopedKey(account: String?, base: String): String =
-        if (account == null) base else accountScopedName(account, base)
+    private fun storedAuth(account: String?): RequestAuth =
+        sessions.readSession(account)?.let { RequestAuth(it.accessToken, it.cookies.openId) } ?: RequestAuth(sessions.readAccess(account))
 
-    private fun accessKey(account: String?): String = scopedKey(account, KEY_ACCESS_TOKEN)
-
-    private fun refreshKey(account: String?): String = scopedKey(account, KEY_REFRESH_TOKEN)
+    private val sessions = SecureSessionRecords(::readValue, ::writeValues, ::removeValue)
 
     /** Guards the in-memory identity/cache + short storage reads/writes of it. Never held across a POST. */
     private val stateMutex = Mutex()
@@ -177,6 +184,18 @@ abstract class CommonTokenDataStore(
     private val _sessionExpired = MutableSharedFlow<SessionEndReason>(extraBufferCapacity = 1)
     override val sessionExpiredFlow: SharedFlow<SessionEndReason> = _sessionExpired.asSharedFlow()
 
+    /**
+     * See [SessionHealth]. Written from [recordIntermediaryBlock] (under the flight lock) and cleared
+     * wherever a slot's stand-down marker is cleared, plus on a hard expiry. A plain state flow, not
+     * guarded by either lock: a lost update costs a banner that lingers until the next refresh
+     * outcome, never a wrong teardown.
+     */
+    private val _sessionHealth = MutableStateFlow<SessionHealth>(SessionHealth.Healthy)
+    override val sessionHealth: StateFlow<SessionHealth> = _sessionHealth.asStateFlow()
+
+    private val authGates = AuthGateState()
+    override val authGate: StateFlow<AuthGate?> = authGates.gate
+
     @Volatile
     private var sessionExpiryReported = false
 
@@ -197,6 +216,36 @@ abstract class CommonTokenDataStore(
     @Volatile
     private var proactiveSuppressedUntil: Map<String, Long> = emptyMap()
 
+    /**
+     * Why the slot should not POST again yet, per slot, with the deadline after which it may.
+     * Written and read **under the slot's flight lock** — see [recordProactiveOutcome] for why
+     * [proactiveSuppressedUntil] cannot serve this purpose.
+     *
+     * Two modes, because the two stand-downs have different scopes and one map is easier to reason
+     * about than two:
+     *
+     * - **[RejectedRefresh.refreshToken] set** — a proactive renewal had *that token* rejected.
+     *   Keyed on the token's own bytes, not the slot alone: once the slot rotates, the record
+     *   describes a token nobody will send again and stops matching by itself, so a fresh token is
+     *   never suppressed by an older one's failure. Proactive callers only.
+     * - **[RejectedRefresh.refreshToken] null** — the endpoint itself is blocked by something that is
+     *   not LibreChat, so *no* token will get through and every caller stands down, reactive
+     *   included. This one has to be slot-wide: the bytes are irrelevant when a bouncer is answering
+     *   before the server sees the request.
+     */
+    @Volatile
+    private var rejectedRefreshes: Map<String, RejectedRefresh> = emptyMap()
+
+    /** A null [refreshToken] means the whole slot stands down, not just this credential. */
+    private class RejectedRefresh(val refreshToken: String?, val retryAfterEpochMillis: Long)
+
+    /**
+     * The wall clock every cooldown deadline and the bearer's `exp` are judged against. Open so a
+     * test can move it past a cooldown, which is the only way to show a stand-down *lapses* rather
+     * than merely holds; production reads the system clock.
+     */
+    protected open fun nowEpochMillis(): Long = Clock.System.now().toEpochMilliseconds()
+
     // Platform implementations provide a plain synchronously-readable key/value secure store.
     protected abstract fun readValue(key: String): String?
     protected abstract fun writeValue(key: String, value: String)
@@ -213,7 +262,11 @@ abstract class CommonTokenDataStore(
 
     override suspend fun getAccessToken(): String? = ensureTokenLoaded()
 
-    override suspend fun setTokens(accessToken: String, refreshToken: String) = stateMutex.withLock {
+    override suspend fun setTokens(accessToken: String, refreshToken: String) =
+        setSession(SessionCredentials(accessToken, AuthCookies(refreshToken)))
+
+    override suspend fun setSession(session: SessionCredentials) = stateMutex.withLock {
+        val accessToken = session.accessToken
         // Authentication path only (login / OAuth / 2FA). Stage the freshly-issued pair under the bare
         // keys and drop the active binding, so a re-login while another account is active never writes
         // into that account's keyed slot. onAccountResolved re-homes the staged pair once identity is
@@ -221,16 +274,20 @@ abstract class CommonTokenDataStore(
         // Only the bare (staging) slot's truth changes; keyed slots (and their in-flight refreshes,
         // which write their own slot) stay valid.
         bumpEpoch(null)
+        // A fresh sign-in is new truth for the bare slot: any stand-down recorded against the pair
+        // being replaced must not outlive it. (Teardown clears too, but it runs under [stateMutex]
+        // while a flight can still be recording, so this is the write that can't be lost.)
+        clearRejectedRefresh(slotKey(null))
         resetSessionExpiryLatch()
-        cachedAccessToken = accessToken
-        activeAccountKey = null
         // Drop the persisted mirror BEFORE staging, so a crash in the staging window (before
         // onAccountResolved re-homes) can never cold-start back into the previously-active account —
         // the mirror must never outlive the in-memory identity. A crash after this remove but before
         // the stage write just cold-starts logged-out (safe), never as the wrong account.
         removeValue(KEY_ACTIVE_ACCOUNT)
         // One commit so a crash never persists a new access token with a stale/absent refresh token.
-        writeValues(mapOf(KEY_ACCESS_TOKEN to accessToken, KEY_REFRESH_TOKEN to refreshToken))
+        sessions.writeSession(null, session)
+        cachedAuth = RequestAuth(accessToken, session.cookies.openId)
+        activeAccountKey = null
     }
 
     override suspend fun onAccountResolved(accountId: String) = stateMutex.withLock {
@@ -240,26 +297,28 @@ abstract class CommonTokenDataStore(
         // restore of already-keyed tokens whose mirror diverged), leave the keyed slot intact.
         // Crash-safe ordering: write the keyed slot, THEN the mirror, and only then drop the staging
         // keys — an interruption before the mirror write re-stages on the next resolve.
-        val stagedAccess = readValue(KEY_ACCESS_TOKEN).nonBlankOrNull()
-        val stagedRefresh = readValue(KEY_REFRESH_TOKEN)
-        val rehomed = stagedAccess != null && stagedRefresh != null
+        val staged = sessions.readSession(null)?.takeIf { it.accessToken.isNotBlank() }
+        val rehomed = staged != null
         if (rehomed) {
             // Both the keyed slot (overwritten with the new truth) and the bare slot (staging
             // consumed) change; a no-staging mirror re-home changes neither, so nothing is bumped.
             bumpEpoch(accountId)
             bumpEpoch(null)
-            writeValues(mapOf(accessKey(accountId) to stagedAccess, refreshKey(accountId) to stagedRefresh))
+            // Same as [setTokens]: the keyed slot is being overwritten with a freshly-issued pair.
+            clearRejectedRefresh(slotKey(accountId))
+            sessions.writeSession(accountId, checkNotNull(staged))
+            // A fresh sign-in got past whatever the server required: setup is done.
+            removeValue(twoFactorSetupKey(accountId))
         }
         writeValue(KEY_ACTIVE_ACCOUNT, accountId)
         activeAccountKey = accountId
         // De-fanged: remove ONLY the bare staging keys, never another account's keyed slot — a
         // previously-active account's tokens are retained for a later switch back.
-        removeValue(KEY_ACCESS_TOKEN)
-        removeValue(KEY_REFRESH_TOKEN)
+        sessions.removeSession(null)
         // Trust the staged access in-memory only when we actually persisted it (rehomed); otherwise
         // (torn/absent staging, e.g. a partial keychain write) read the keyed slot so the cached
         // bearer can never diverge from storage across a cold start.
-        cachedAccessToken = if (rehomed) stagedAccess else readValue(accessKey(accountId))
+        cachedAuth = if (rehomed) RequestAuth(staged?.accessToken, staged?.cookies?.openId) else storedAuth(accountId)
     }
 
     /**
@@ -274,29 +333,48 @@ abstract class CommonTokenDataStore(
         // The bare staging slot is purged below too (when the active slot is keyed) — bump it so an
         // in-flight bare refresh can't resurrect the staged pair.
         if (activeAccountKey != null) bumpEpoch(null)
-        removeValue(accessKey(activeAccountKey))
-        removeValue(refreshKey(activeAccountKey))
+        // Both slots' refresh tokens are removed below, so any rejection marker for them now
+        // describes a deleted credential; don't retain it.
+        clearRejectedRefresh(slotKey(activeAccountKey))
+        clearRejectedRefresh(slotKey(null))
+        sessions.removeSession(activeAccountKey)
+        // The 2FA setup marker stays: this teardown also starts a new sign-in (Connect on the server
+        // screen), which keeps the roster entry, so the account still owes setup. A sign-in to it
+        // ([onAccountResolved]) or its removal ([removeAccount]) is what clears the marker.
         if (activeAccountKey != null) {
             // The active slot is keyed, so the bare keys can only hold a stale staged pair — purge it
             // so a killed login can't be cold-started back into an apparently-authenticated state.
-            removeValue(KEY_ACCESS_TOKEN)
-            removeValue(KEY_REFRESH_TOKEN)
+            sessions.removeSession(null)
         }
         removeValue(KEY_ACTIVE_ACCOUNT)
         activeAccountKey = null
-        cachedAccessToken = null
+        cachedAuth = RequestAuth(null)
     }
 
     override suspend fun getAccessTokenFor(accountId: String): String? = stateMutex.withLock {
         // Serve the active account from the in-memory cache (the per-request hot path via the switch
         // barrier's keyed bearer read); fall to storage only for a non-active account's slot. Under
         // stateMutex so the account check and the cache read can't interleave with a select/teardown.
-        val token = if (accountId == activeAccountKey) cachedAccessToken else readValue(accessKey(accountId))
-        token.nonBlankOrNull()
+        accessForLocked(accountId)
+    }
+
+    /** Caller holds [stateMutex]. */
+    private fun accessForLocked(accountId: String): String? =
+        (if (accountId == activeAccountKey) cachedAuth.bearer else sessions.readAccess(accountId)).nonBlankOrNull()
+
+    override suspend fun hasLiveSession(accountId: String): Boolean = stateMutex.withLock {
+        val access = accessForLocked(accountId) ?: return@withLock false
+        val cookies = sessions.readCookies(accountId) ?: return@withLock true
+        // An OpenID-reuse refresh token is the provider's, and the server can renew without it, so its
+        // exp says nothing about the LibreChat session.
+        if (cookies.openId != null) return@withLock true
+        // LibreChat signs the refresh token with the session's fixed end, which refreshes never extend.
+        val refreshEnds = expiresAtEpochMillisOrNull(cookies.refreshToken) ?: return@withLock true
+        maxOf(refreshEnds, expiresAtEpochMillisOrNull(access) ?: 0L) > nowEpochMillis()
     }
 
     override suspend fun getStagedAccessToken(): String? = stateMutex.withLock {
-        readValue(KEY_ACCESS_TOKEN).nonBlankOrNull()
+        sessions.readAccess(null).nonBlankOrNull()
     }
 
     override suspend fun clearStagedTokens() = stateMutex.withLock {
@@ -304,8 +382,16 @@ abstract class CommonTokenDataStore(
         // deliberate: an in-flight refresh of a *keyed* account (the active one, mid-add) is
         // legitimate and must not discard its result; nothing refreshes the bare slot while an
         // account binding exists (pending add-flow 401s never trigger a refresh).
-        removeValue(KEY_ACCESS_TOKEN)
-        removeValue(KEY_REFRESH_TOKEN)
+        sessions.removeSession(null)
+        // With no account bound the cache mirrors the bare slot, so it goes with it.
+        if (activeAccountKey == null) cachedAuth = RequestAuth(null)
+    }
+
+    override suspend fun boundAccountId(): String? = stateMutex.withLock {
+        // Loads rather than reading storage around the cache: a teardown that follows keys off
+        // [activeAccountKey], and before the warm it would miss the bound account's slot.
+        if (!tokenInitialized) loadCacheFromStorage()
+        activeAccountKey
     }
 
     override suspend fun selectAccount(accountId: String) = stateMutex.withLock {
@@ -316,28 +402,30 @@ abstract class CommonTokenDataStore(
         // switch barrier).
         writeValue(KEY_ACTIVE_ACCOUNT, accountId)
         activeAccountKey = accountId
-        cachedAccessToken = readValue(accessKey(accountId))
+        cachedAuth = storedAuth(activeAccountKey)
         resetSessionExpiryLatch()
     }
 
     override suspend fun removeAccount(accountId: String) = stateMutex.withLock {
         resetSessionExpiryLatch()
         bumpEpoch(accountId)
-        removeValue(accessKey(accountId))
-        removeValue(refreshKey(accountId))
+        sessions.removeSession(accountId)
+        removeValue(twoFactorSetupKey(accountId))
         // Evict the account's single-flight lock so [flights] doesn't retain a Mutex per removed
         // account. Safe: removeAccount bumps the epoch, so any in-flight refresh of this account
         // discards its result on commit regardless.
         flightMutex.withLock { flights.remove(accountId) }
+        // Same reason, and it also drops the removed account's refresh token from memory.
+        clearRejectedRefresh(slotKey(accountId))
         if (activeAccountKey == accountId) {
             removeValue(KEY_ACTIVE_ACCOUNT)
             activeAccountKey = null
-            cachedAccessToken = null
+            cachedAuth = RequestAuth(null)
         }
     }
 
     override suspend fun refreshAccessToken(usedAccessToken: String?): RefreshResult =
-        // The live active account, against the live base URL (the refresh client's defaultRequest).
+        // The live active account, against the live base URL (the refresh client's ServerUrlReadyPlugin).
         performRefresh(
             accountKey = activeAccountKey,
             absoluteRefreshUrl = null,
@@ -349,17 +437,29 @@ abstract class CommonTokenDataStore(
         accountId: String,
         baseUrl: String,
         usedAccessToken: String?,
-    ): RefreshResult =
+    ): RefreshResult {
+        // An empty string is absence, not a base URL: concatenated it yields the RELATIVE
+        // `/api/auth/refresh`, and passed on as `pinnedBaseUrl` it is a server id that names
+        // nothing. Both are absorbed today — Ktor resolves the relative path against the same
+        // live base an unpinned POST would use, and `ServerHeadersPlugin.resolveBaseUrl` applies
+        // this identical `takeIf` before it looks a server up — so this changes no behaviour. It
+        // is here because the two downstream normalizations are what make it true, and saying
+        // "unpinned" once beats depending on both of them to keep saying it.
+        // [ensureFreshAccessToken] normalizes at this same seam.
+        val pinned = baseUrl.trimTrailingSlash().takeIf { it.isNotEmpty() }
         // URL-pinned: post to an absolute URL so a concurrent server switch can't redirect this
         // account's refresh token to another server. [pinnedBaseUrl] carries the *server* half of that
         // pin to ServerHeadersPlugin — the request URL alone can't serve as the key, because it is the
-        // refresh endpoint, not the deployment root, and would derive a different serverId.
-        performRefresh(
+        // refresh endpoint, not the deployment root, and would derive a different serverId. It stays
+        // the raw stored string for that reason, while the POST goes to the cleaned base: see
+        // [refreshUrl].
+        return performRefresh(
             accountKey = accountId,
-            absoluteRefreshUrl = "${baseUrl.trimTrailingSlash()}$REFRESH_PATH",
-            pinnedBaseUrl = baseUrl.trimTrailingSlash(),
+            absoluteRefreshUrl = pinned?.let(::refreshUrl),
+            pinnedBaseUrl = pinned,
             usedAccessToken = usedAccessToken,
         )
+    }
 
     override suspend fun ensureFreshAccessToken(
         accountId: String?,
@@ -376,7 +476,7 @@ abstract class CommonTokenDataStore(
         // same key the refresh actually targets rather than a bare-key approximation of it.
         val accountKey = accountId ?: activeAccountKey
         val slot = accountKey ?: BARE_FLIGHT_KEY
-        if (Clock.System.now().toEpochMilliseconds() < (proactiveSuppressedUntil[slot] ?: 0L)) {
+        if (nowEpochMillis() < (proactiveSuppressedUntil[slot] ?: 0L)) {
             return currentAccessToken
         }
         Diag.d(
@@ -392,7 +492,7 @@ abstract class CommonTokenDataStore(
         val pinned = baseUrl.trimTrailingSlash().takeIf { it.isNotEmpty() }
         val result = performRefresh(
             accountKey = accountKey,
-            absoluteRefreshUrl = pinned?.let { "$it$REFRESH_PATH" },
+            absoluteRefreshUrl = pinned?.let(::refreshUrl),
             pinnedBaseUrl = pinned,
             usedAccessToken = currentAccessToken,
             bestEffort = true,
@@ -404,7 +504,7 @@ abstract class CommonTokenDataStore(
             // spends its own connect timeout BEFORE being sent, serially. Suppressed per slot; the
             // request still goes out on its old bearer and a real 401 still gets the full reactive
             // ladder.
-            suppressProactiveRenewal(slot, Clock.System.now().toEpochMilliseconds() + PROACTIVE_RETRY_COOLDOWN_MS)
+            suppressProactiveRenewal(slot, nowEpochMillis() + PROACTIVE_RETRY_COOLDOWN_MS)
             return currentAccessToken
         }
         val renewed = (if (accountId != null) getAccessTokenFor(accountId) else getAccessToken())
@@ -426,11 +526,132 @@ abstract class CommonTokenDataStore(
     }
 
     /**
+     * Joined onto the **cleaned** base, never the raw stored string: a stored web-UI URL
+     * (`https://host/login?redirect_to=…`) would 4xx the refresh for ever, and an unattributed 4xx
+     * keeps the session. See `core/network/CLAUDE.md`.
+     */
+    private fun refreshUrl(pinnedBaseUrl: String): String = "${cleanServerUrl(pinnedBaseUrl)}$REFRESH_PATH"
+
+    /**
      * Copy-on-write so the hot-path read above needs no lock. A lost update under a race just costs a
      * redundant renewal attempt, never a wrong suppression.
      */
     private fun suppressProactiveRenewal(slot: String, untilEpochMillis: Long) {
         proactiveSuppressedUntil = proactiveSuppressedUntil + (slot to untilEpochMillis)
+    }
+
+    /** The [flights] / [rejectedRefreshes] / [proactiveSuppressedUntil] key for an account slot. */
+    private fun slotKey(account: String?): String = account ?: BARE_FLIGHT_KEY
+
+    /**
+     * Retire [slot]'s rejected-token marker.
+     *
+     * Called from the flight lock on a success, from [stateMutex] on a teardown — where the marker's
+     * token has just been deleted, so leaving it behind retains a dead credential in memory for the
+     * life of the process for nothing — and from [stateMutex] when a sign-in writes a new pair.
+     *
+     * A lost update between the two locks can restore a record. For a token-keyed one that is inert:
+     * it names bytes no request will send again, which [isRecentlyRejected] never matches. A
+     * slot-wide one (null token) *would* still match, which is why the sign-in path clears as well:
+     * a teardown's clear that loses the race is followed by a login's clear that cannot, because no
+     * flight records against a slot whose pair is being replaced under [stateMutex]. Between the two,
+     * the slot holds no refresh token and nothing POSTs anyway.
+     */
+    private fun clearRejectedRefresh(slot: String) {
+        rejectedRefreshes = rejectedRefreshes - slot
+        clearRenewalBlocked(slot)
+    }
+
+    /** Back to [SessionHealth.Healthy] if the current block is [slot]'s; another slot's stays. */
+    private fun clearRenewalBlocked(slot: String) {
+        val blocked = _sessionHealth.value as? SessionHealth.RenewalBlocked ?: return
+        if (slotKey(blocked.accountId) == slot) _sessionHealth.value = SessionHealth.Healthy
+    }
+
+    /**
+     * True when [slot] is standing down and its deadline has not passed: either the endpoint is
+     * blocked for everyone (a null recorded token), or [refreshToken] is the exact credential a
+     * proactive renewal just had rejected.
+     *
+     * A reactive caller passes null and so is damped **only** by the endpoint-wide record. A
+     * token-specific rejection must never suppress it, because a settled reactive ladder is what
+     * drops the slot and routes the user to re-auth.
+     */
+    private fun isRecentlyRejected(slot: String, refreshToken: String?): Boolean {
+        val rejected = rejectedRefreshes[slot] ?: return false
+        if (nowEpochMillis() >= rejected.retryAfterEpochMillis) return false
+        return rejected.refreshToken == null || rejected.refreshToken == refreshToken
+    }
+
+    /**
+     * Stand the whole slot down for [INTERMEDIARY_BLOCK_COOLDOWN_MS] after a 403 that LibreChat did
+     * not author.
+     *
+     * This is the burst that classifying such a 403 as [RefreshResult.Transient] would otherwise
+     * reintroduce, and it is worth being explicit about because it is the same defect as #376 wearing
+     * a different hat. Keeping the slot is right — a network-layer block is not a dead credential —
+     * but it removes the accident that used to bound the *reactive* burst: a terminal rejection
+     * dropped the slot, so waiters 2..N found nothing to send and returned without POSTing. Keep the
+     * slot and every 401 in the fan-out POSTs again, on every fan-out, for as long as the block
+     * lasts. Measured at 8 POSTs for a 7-wide fan-out before this existed
+     * (`RefreshBurstThroughClientTest`), repeating indefinitely — aimed at the auth endpoint of a
+     * deployment that has already decided it does not like this client.
+     *
+     * Deliberately narrow: only the `ForbiddenByIntermediary` arm records this. A 5xx ladder has the
+     * same shape (N callers x 3 attempts per fan-out, slot kept) but that behaviour is older than
+     * this change and retrying a 5xx is legitimate, so it is left alone rather than quietly altered
+     * here.
+     */
+    private fun recordIntermediaryBlock(slot: String) {
+        rejectedRefreshes = rejectedRefreshes + (
+            slot to RejectedRefresh(
+                refreshToken = null,
+                retryAfterEpochMillis = nowEpochMillis() +
+                    INTERMEDIARY_BLOCK_COOLDOWN_MS,
+            )
+            )
+        // Published so the shell can offer an exit from a kept session that cannot renew — see [SessionHealth].
+        _sessionHealth.value = SessionHealth.RenewalBlocked(accountId = slot.ifEmpty { null })
+    }
+
+    /**
+     * Record — or on success clear — [slot]'s rejected-token marker for [sentToken].
+     *
+     * This exists because [ensureFreshAccessToken]'s own cooldown cannot damp the burst that triggers
+     * it: that gate is read at the top of the function, *before* [performRefresh] takes the flight
+     * lock, and written at the bottom, *after* it is released. A request fan-out therefore passes the
+     * gate N times before the first failure has landed, and every waiter then POSTs — the coalescing
+     * check keys on the access token having *changed*, which is exactly what a failed refresh does
+     * not do. Recording here, inside the lock, is what lets waiters 2..N of the SAME burst see it.
+     *
+     * Proactive callers only. A reactive caller must keep spending its full ladder, because a settled
+     * ladder is what drops the slot and routes the user to re-auth; reading a cached failure there
+     * would keep a dead session alive forever. Reactive waiters already coalesce for free — the first
+     * ladder's `invalidateRefresh` empties the slot and the rest return without a POST.
+     *
+     * Copy-on-write behind one [Volatile] write, like [proactiveSuppressedUntil]: one slot's reads and
+     * writes are serialized by that slot's flight lock, and a lost update across slots can only cost a
+     * redundant POST.
+     */
+    private fun recordProactiveOutcome(slot: String, sentToken: String?, result: RefreshResult) {
+        if (result == RefreshResult.Refreshed || sentToken == null) {
+            clearRejectedRefresh(slot)
+            return
+        }
+        // Never narrow an endpoint-wide stand-down into a token-keyed one while it is still in force.
+        // A proactive caller is the one most likely to meet a bouncer first, and downgrading its
+        // record here would un-damp every reactive waiter behind it — the whole point of
+        // [recordIntermediaryBlock]. Once that deadline passes this falls through and replaces the
+        // stale record, which is what should happen: the block is over, this token's rejection is the
+        // current news.
+        if (isRecentlyRejected(slot, null)) return
+        rejectedRefreshes = rejectedRefreshes + (
+            slot to RejectedRefresh(
+                refreshToken = sentToken,
+                retryAfterEpochMillis = nowEpochMillis() +
+                    PROACTIVE_RETRY_COOLDOWN_MS,
+            )
+            )
     }
 
     /**
@@ -439,7 +660,7 @@ abstract class CommonTokenDataStore(
      */
     private fun isNearingExpiry(token: String): Boolean {
         val expiresAt = memoizedExpiryOf(token) ?: return false
-        return expiresAt - Clock.System.now().toEpochMilliseconds() <= PROACTIVE_RENEWAL_SKEW_MS
+        return expiresAt - nowEpochMillis() <= PROACTIVE_RENEWAL_SKEW_MS
     }
 
     /**
@@ -503,129 +724,207 @@ abstract class CommonTokenDataStore(
         bestEffort: Boolean = false,
     ): RefreshResult =
         flightFor(accountKey).withLock {
-            // Coalesce: another caller rotated this slot while we waited for the flight lock, so its
-            // POST already did our work. Only a *changed* value counts — an absent one means a teardown
-            // or a hard-expiry dropped the slot, which must still fall through to the loop below and
-            // settle as HardExpired rather than reporting a refresh that never happened.
+            val slot = slotKey(accountKey)
+            // Coalesce FIRST, ahead of the suppression gate below. Another caller rotated this slot
+            // while we waited for the flight lock, so its POST already did our work. Only a
+            // *changed* value counts — an absent one means a teardown or a hard-expiry dropped the
+            // slot, which must still fall through to the ladder and settle as HardExpired rather
+            // than reporting a refresh that never happened.
             //
-            // Read outside [stateMutex], like the stored-refresh-token read below: the failure mode is
-            // one-directional. A stale read can only miss a rotation, which costs a redundant POST —
-            // never the reverse.
+            // The order is load-bearing: the refresh token is NOT rotated on a 2xx that took the
+            // server's reuse path, so a slot can hold a rejection marker for the very token it is
+            // still storing while its access token has already been renewed by someone else.
+            // Checking suppression first would answer Transient there and send the caller back out
+            // on a bearer that is known to be stale.
+            //
+            // Read outside [stateMutex], like the stored-refresh-token read in the ladder: the
+            // failure mode is one-directional. A stale read can only miss a rotation, which costs a
+            // redundant POST — never the reverse.
             if (usedAccessToken != null) {
-                val current = readValue(accessKey(accountKey)).nonBlankOrNull()
+                val current = sessions.readAccess(accountKey).nonBlankOrNull()
                 if (current != null && current != usedAccessToken) {
                     Diag.d(
                         "Auth",
                         origin = LogOrigin.CLIENT,
                         attrs = mapOf("event" to "refresh_coalesced"),
                     ) { "Token already rotated by a concurrent refresh; skipping this POST" }
+                    // No marker handling here: the flight that rotated the slot cleared it in
+                    // [commitRefresh] on its way out, whichever path that flight came in on.
                     return@withLock RefreshResult.Refreshed
                 }
             }
-            // Any auth rejection ⇒ a genuinely dead session ⇒ route to re-auth, even if a later attempt
-            // hit a transient blip; a purely transient run (5xx / rate-limit / transport) keeps the
-            // session. This fold is the terminal classification for every non-Success exit of the loop.
-            var sawHardRejection = false
-            // The epoch the most recent attempt captured. [settle] drops the slot against it, so a
-            // teardown that landed while the last POST was in flight still wins.
-            var lastEpoch = NO_EPOCH
-            suspend fun settle(): RefreshResult =
-                if (sawHardRejection && !bestEffort) {
-                    // The session is dead, so drop the slot. `isLoggedIn()` is a token-PRESENCE check:
-                    // a retained dead pair is replayed on every later cold start.
-                    invalidateRefresh(accountKey, lastEpoch)
+            // The exact bytes this flight would POST, read before the attempt so a rejection is
+            // recorded against the token that was actually rejected. Only the proactive path needs
+            // it, so the reactive path keeps its original single storage read.
+            val tokenToSend = if (bestEffort) sessions.readCookies(accountKey)?.refreshToken.nonBlankOrNull() else null
+            // Evaluated for reactive callers too (they pass a null token), because an endpoint-wide
+            // block damps everyone — see [recordIntermediaryBlock].
+            if (isRecentlyRejected(slot, tokenToSend)) {
+                Diag.d(
+                    "Auth",
+                    origin = LogOrigin.CLIENT,
+                    attrs = mapOf("event" to "refresh_suppressed"),
+                ) { "This refresh was rejected moments ago; skipping the POST" }
+                return@withLock RefreshResult.Transient
+            }
+            val result = refreshUnderFlightLock(
+                accountKey = accountKey,
+                absoluteRefreshUrl = absoluteRefreshUrl,
+                pinnedBaseUrl = pinnedBaseUrl,
+                bestEffort = bestEffort,
+            )
+            if (bestEffort) recordProactiveOutcome(slot, tokenToSend, result)
+            result
+        }
+
+    /**
+     * The refresh itself: the bounded attempt ladder and the terminal classification. Split out of
+     * [performRefresh] so that function can hold the flight lock across its pre-checks and its
+     * post-record — see [recordProactiveOutcome] for why that has to be inside it.
+     *
+     * Caller owns the flight lock, and owns the coalescing check. Never takes the lock (the mutex is
+     * not reentrant).
+     */
+    @Suppress("ReturnCount") // debt: 10 returns
+    private suspend fun refreshUnderFlightLock(
+        accountKey: String?,
+        absoluteRefreshUrl: String?,
+        pinnedBaseUrl: String?,
+        bestEffort: Boolean,
+    ): RefreshResult {
+        // Any auth rejection ⇒ a genuinely dead session ⇒ route to re-auth, even if a later attempt
+        // hit a transient blip; a purely transient run (5xx / rate-limit / transport) keeps the
+        // session. This fold is the terminal classification for every non-Success exit of the loop.
+        var sawHardRejection = false
+        // The epoch the most recent attempt captured. [settle] drops the slot against it, so a
+        // teardown that landed while the last POST was in flight still wins.
+        var lastEpoch = NO_EPOCH
+        suspend fun settle(): RefreshResult =
+            if (sawHardRejection && !bestEffort) {
+                // The session is dead, so drop the slot. `isLoggedIn()` is a token-PRESENCE check:
+                // a retained dead pair is replayed on every later cold start.
+                invalidateRefresh(accountKey, lastEpoch)
+                Diag.w(
+                    "Auth",
+                    origin = LogOrigin.CLIENT,
+                    attrs = mapOf("event" to "session_torn_down", "reason" to "refresh_rejected"),
+                ) { "Session expired - cleared the account's tokens" }
+                RefreshResult.HardExpired
+            } else {
+                RefreshResult.Transient
+            }
+        // Hoisted so the inter-attempt sleep at the bottom of the loop can be guarded on the ladder's
+        // own length. Guarding it on MAX_REFRESH_ATTEMPTS instead made a best-effort renewal — whose
+        // ladder is one attempt long — sleep after its *only* attempt, holding the flight lock for
+        // 150-300 ms on the way out and putting that on the critical path of every request behind it.
+        val attempts = if (bestEffort) 1 else MAX_REFRESH_ATTEMPTS
+        repeat(attempts) { attempt ->
+            // Capture the slot's epoch BEFORE the stored-token read, so any teardown of THIS slot
+            // that races the POST below is detected (and its result discarded) with no lock held
+            // across the network call. Re-read each attempt: a teardown or a sibling that landed
+            // between retries must be seen.
+            val (epochAtStart, storedCookies) = stateMutex.withLock { epochOf(accountKey) to sessions.readCookies(accountKey) }
+            lastEpoch = epochAtStart
+            val storedRefreshToken = storedCookies?.refreshToken
+            if (storedRefreshToken.isNullOrBlank()) {
+                // Attempt 0 with no token = no session at all → hard. A LATER attempt losing the
+                // token means a teardown (logout/removal) landed mid-loop and already owns the
+                // routing → Transient, so we don't double-emit session-expired over it. A
+                // best-effort renewal never makes that call at all — see [bestEffort].
+                return if (attempt == 0 && !bestEffort) {
                     Diag.w(
                         "Auth",
                         origin = LogOrigin.CLIENT,
-                        attrs = mapOf("event" to "session_torn_down", "reason" to "refresh_rejected"),
-                    ) { "Session expired - cleared the account's tokens" }
+                        attrs = mapOf("event" to "session_expired", "reason" to "no_refresh_token"),
+                    ) { "No refresh token available" }
+                    // Drop the slot here too, not just in [settle]. A torn pair (refresh gone,
+                    // access retained) would otherwise keep `isLoggedIn()` true forever, which is
+                    // the same replay this path exists to end. A no-op when the slot is empty.
+                    invalidateRefresh(accountKey, epochAtStart)
                     RefreshResult.HardExpired
                 } else {
+                    // A best-effort renewal against an empty slot, or a teardown that landed
+                    // between retries. Logged so every renewal reconciles to an outcome: this is
+                    // the one arm that can return without a POST, and untraced it makes
+                    // `refresh_proactive` read as a POST counter when it isn't.
+                    Diag.d(
+                        "Auth",
+                        origin = LogOrigin.CLIENT,
+                        attrs = mapOf("event" to "refresh_skipped", "reason" to "no_refresh_token"),
+                    ) { "No refresh token in this slot; skipping the refresh without a POST" }
                     RefreshResult.Transient
                 }
-            repeat(if (bestEffort) 1 else MAX_REFRESH_ATTEMPTS) { attempt ->
-                // Capture the slot's epoch BEFORE the stored-token read, so any teardown of THIS slot
-                // that races the POST below is detected (and its result discarded) with no lock held
-                // across the network call. Re-read each attempt: a teardown or a sibling that landed
-                // between retries must be seen.
-                val epochAtStart = stateMutex.withLock { epochOf(accountKey) }
-                lastEpoch = epochAtStart
-                val storedRefreshToken = readValue(refreshKey(accountKey))
-                if (storedRefreshToken.isNullOrBlank()) {
-                    // Attempt 0 with no token = no session at all → hard. A LATER attempt losing the
-                    // token means a teardown (logout/removal) landed mid-loop and already owns the
-                    // routing → Transient, so we don't double-emit session-expired over it. A
-                    // best-effort renewal never makes that call at all — see [bestEffort].
-                    return@withLock if (attempt == 0 && !bestEffort) {
-                        Diag.w(
-                            "Auth",
-                            origin = LogOrigin.CLIENT,
-                            attrs = mapOf("event" to "session_expired", "reason" to "no_refresh_token"),
-                        ) { "No refresh token available" }
-                        // Drop the slot here too, not just in [settle]. A torn pair (refresh gone,
-                        // access retained) would otherwise keep `isLoggedIn()` true forever, which is
-                        // the same replay this path exists to end. A no-op when the slot is empty.
-                        invalidateRefresh(accountKey, epochAtStart)
-                        RefreshResult.HardExpired
-                    } else {
-                        // A best-effort renewal against an empty slot, or a teardown that landed
-                        // between retries. Logged so every renewal reconciles to an outcome: this is
-                        // the one arm that can return without a POST, and untraced it makes
-                        // `refresh_proactive` read as a POST counter when it isn't.
-                        Diag.d(
-                            "Auth",
-                            origin = LogOrigin.CLIENT,
-                            attrs = mapOf("event" to "refresh_skipped", "reason" to "no_refresh_token"),
-                        ) { "No refresh token in this slot; skipping the refresh without a POST" }
-                        RefreshResult.Transient
+            }
+
+            val delayMillis: Long =
+                when (
+                    val outcome =
+                        attemptRefresh(accountKey, epochAtStart, checkNotNull(storedCookies), absoluteRefreshUrl, pinnedBaseUrl)
+                ) {
+                    RefreshAttempt.Success -> return RefreshResult.Refreshed
+                    // A teardown/re-authentication owns the routing for this slot; never double-emit
+                    // a session-expired from here and never re-persist over it.
+                    RefreshAttempt.Discarded -> return RefreshResult.Transient
+                    RefreshAttempt.KeystoreCleared -> return RefreshResult.HardExpired
+                    // Server unreachable: retrying now only holds the flight lock across another full
+                    // request timeout; stop. A session already confirmed dead by a prior 401 still
+                    // routes to re-auth; otherwise keep the session (a later request/relaunch recovers).
+                    RefreshAttempt.TransportError -> return settle()
+                    // Never `settle()`: a gateway rejection says nothing about whether the session
+                    // is alive, so it must not promote a prior 401 into a logout. See GatewayBlocked.
+                    RefreshAttempt.GatewayBlocked -> return RefreshResult.Transient
+                    RefreshAttempt.AuthRejected -> {
+                        sawHardRejection = true
+                        retryBackoffMillis(attempt)
+                    }
+                    // Unlike a 401, this one is not ambiguous — settle on the first answer instead of
+                    // re-POSTing a token the server has already refused to verify. `settle()` still
+                    // honours bestEffort, so a proactive renewal keeps the slot and reports Transient.
+                    RefreshAttempt.AuthRejectedTerminal -> {
+                        sawHardRejection = true
+                        return settle()
+                    }
+                    // Never `settle()`: like GatewayBlocked, this says nothing about the session, so it
+                    // must not promote an earlier 401 in the same ladder into a logout.
+                    RefreshAttempt.ForbiddenByIntermediary -> {
+                        // Stand the slot down before returning, so the reactive waiters behind this
+                        // one in the same fan-out do not each spend their own POST on a bouncer that
+                        // will answer all of them identically.
+                        recordIntermediaryBlock(slotKey(accountKey))
+                        return RefreshResult.Transient
+                    }
+                    // Terminal for the slot but never `settle()`: that is the expiry path, and an
+                    // expiry fails over to another account. Transient leaves the routing to the
+                    // shell's [authGate]; see [endSessionForTwoFactorSetup].
+                    is RefreshAttempt.TwoFactorSetupRequired -> {
+                        endSessionForTwoFactorSetup(accountKey, epochAtStart, outcome.tempToken)
+                        return RefreshResult.Transient
+                    }
+                    RefreshAttempt.Retryable -> retryBackoffMillis(attempt)
+                    is RefreshAttempt.RateLimited -> {
+                        val wait = outcome.retryAfterMillis
+                        // Honor the server's Retry-After when we can wait it out under the flight
+                        // lock; if it exceeds our cap, stop retrying (keep the session) rather than
+                        // re-POSTing while still rate-limited.
+                        if (wait != null && wait > REFRESH_RETRY_MAX_DELAY_MS) {
+                            return RefreshResult.Transient
+                        }
+                        wait ?: retryBackoffMillis(attempt)
                     }
                 }
 
-                val delayMillis: Long =
-                    when (
-                        val outcome =
-                            attemptRefresh(accountKey, epochAtStart, storedRefreshToken, absoluteRefreshUrl, pinnedBaseUrl)
-                    ) {
-                        RefreshAttempt.Success -> return@withLock RefreshResult.Refreshed
-                        // A teardown/re-authentication owns the routing for this slot; never double-emit
-                        // a session-expired from here and never re-persist over it.
-                        RefreshAttempt.Discarded -> return@withLock RefreshResult.Transient
-                        RefreshAttempt.KeystoreCleared -> return@withLock RefreshResult.HardExpired
-                        // Server unreachable: retrying now only holds the flight lock across another full
-                        // request timeout; stop. A session already confirmed dead by a prior 401 still
-                        // routes to re-auth; otherwise keep the session (a later request/relaunch recovers).
-                        RefreshAttempt.TransportError -> return@withLock settle()
-                        // Never `settle()`: a gateway rejection says nothing about whether the session
-                        // is alive, so it must not promote a prior 401 into a logout. See GatewayBlocked.
-                        RefreshAttempt.GatewayBlocked -> return@withLock RefreshResult.Transient
-                        RefreshAttempt.AuthRejected -> {
-                            sawHardRejection = true
-                            retryBackoffMillis(attempt)
-                        }
-                        RefreshAttempt.Retryable -> retryBackoffMillis(attempt)
-                        is RefreshAttempt.RateLimited -> {
-                            val wait = outcome.retryAfterMillis
-                            // Honor the server's Retry-After when we can wait it out under the flight
-                            // lock; if it exceeds our cap, stop retrying (keep the session) rather than
-                            // re-POSTing while still rate-limited.
-                            if (wait != null && wait > REFRESH_RETRY_MAX_DELAY_MS) {
-                                return@withLock RefreshResult.Transient
-                            }
-                            wait ?: retryBackoffMillis(attempt)
-                        }
-                    }
-
-                if (attempt < MAX_REFRESH_ATTEMPTS - 1) delay(delayMillis)
-            }
-            // Budget exhausted with no terminal outcome; classify by whether any attempt was rejected.
-            settle()
+            if (attempt < attempts - 1) delay(delayMillis)
         }
+        // Budget exhausted with no terminal outcome; classify by whether any attempt was rejected.
+        return settle()
+    }
 
     /** One refresh POST + classification. Caller owns the flight lock and the retry/backoff loop. */
+    @Suppress("TooGenericExceptionCaught") // separates keystore corruption from transport failure; neither may throw
     private suspend fun attemptRefresh(
         accountKey: String?,
         epochAtStart: Int,
-        storedRefreshToken: String,
+        storedCookies: AuthCookies,
         absoluteRefreshUrl: String?,
         pinnedBaseUrl: String?,
     ): RefreshAttempt =
@@ -636,21 +935,38 @@ abstract class CommonTokenDataStore(
                     // Without it the plugin would fall back to the *live* base URL and pair server B's
                     // headers with server A's pinned refresh URL.
                     pinnedBaseUrl?.let { attributes.put(PinnedServerBaseUrlKey, it) }
-                    header("Cookie", "refreshToken=$storedRefreshToken")
-                    setBody(mapOf("refreshToken" to storedRefreshToken))
+                    attachAuthCookies(storedCookies, pinnedBaseUrl)
+                    setBody(mapOf("refreshToken" to storedCookies.refreshToken))
                 }
             // The refresh client has no response validator, so a non-2xx returns here instead of
             // throwing — inspect the status directly rather than relying on a deserialization failure.
             val status = httpResponse.status.value
             when {
-                status in 200..299 -> handleSuccess(accountKey, epochAtStart, httpResponse, storedRefreshToken)
-                status == 401 || status == 403 -> {
+                status in 200..299 -> handleSuccess(accountKey, epochAtStart, httpResponse, storedCookies)
+                // 401 is the ambiguous one the ladder exists for: the backend answers it identically
+                // for a dead session and a transiently-missed session lookup. Retried.
+                status == 401 -> {
+                    Diag.w(
+                        "Auth",
+                        origin = LogOrigin.SERVER,
+                        attrs = mapOf("event" to "refresh_rejected", "status" to "401"),
+                    ) { "Auth rejected during token refresh" }
+                    RefreshAttempt.AuthRejected
+                }
+                status == 403 -> classifyForbidden(httpResponse)
+                // Upstream's `res.status(4xx).redirect('/login')` arms reach the wire as a **302**:
+                // Express's `redirect()` overwrites the status it was chained onto. This client does
+                // not follow a POST's redirect, so the 302 is what arrives here, and a server-rooted
+                // `/login` Location is LibreChat reporting that the credential's user no longer
+                // exists — terminal. A gateway's 302 points at an absolute portal URL and never
+                // matches; see [isLoginRedirect].
+                status in 300..399 && isLoginRedirect(httpResponse.headers[HttpHeaders.Location]) -> {
                     Diag.w(
                         "Auth",
                         origin = LogOrigin.SERVER,
                         attrs = mapOf("event" to "refresh_rejected", "status" to status.toString()),
                     ) { "Auth rejected during token refresh" }
-                    RefreshAttempt.AuthRejected
+                    RefreshAttempt.AuthRejectedTerminal
                 }
                 status == 429 -> {
                     val retryAfter = parseRetryAfterMillis(httpResponse)
@@ -680,6 +996,8 @@ abstract class CommonTokenDataStore(
                 attrs = mapOf("event" to "refresh_gateway_blocked"),
             ) { "Access gateway rejected the token refresh" }
             RefreshAttempt.GatewayBlocked
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (isKeystoreException(e)) {
                 Diag.e(
@@ -705,19 +1023,114 @@ abstract class CommonTokenDataStore(
             }
         }
 
+    /**
+     * Classify a `403` from the refresh endpoint by who produced it.
+     *
+     * LibreChat's own refresh rejections are **terminal**: every 403 body `refreshController` sends
+     * is a dead credential — `jwt.verify` threw (which is also where an expired `exp` lands), the
+     * OpenID grant was refused, or a `?retry` found no session — never the transient lookup miss
+     * that its *401* can mean. So these settle immediately instead of spending the ladder. Three
+     * more POSTs cannot rescue a token the server has already refused to verify, and the burst they
+     * make is what trips a reverse proxy's brute-force detection (#376). The controller's
+     * `redirect('/login')` arms are not 403s on the wire and are classified where they arrive, in
+     * [attemptRefresh]'s 3xx arm.
+     *
+     * A 403 that carries none of those bodies **did not come from LibreChat**. A proxy bouncer, a WAF
+     * or an IP ban answers 403 too, and that says nothing about whether the session is alive — so it
+     * must not drop the user's tokens. Reading one as a dead session is how a network-layer block
+     * becomes a logout the user cannot undo until the block lifts.
+     *
+     * Unrecognised therefore means [Transient][RefreshAttempt.ForbiddenByIntermediary], which fails
+     * safe in the direction that matters: an unexpected LibreChat 403 costs a kept-alive session the
+     * next 401 re-examines, while the opposite mistake costs a forced logout.
+     */
+    private suspend fun classifyForbidden(httpResponse: HttpResponse): RefreshAttempt {
+        val body = try {
+            httpResponse.bodyAsText()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            ""
+        }
+        val serverAuthored = LIBRECHAT_REFRESH_REJECTIONS.any { body.contains(it, ignoreCase = true) }
+        return if (serverAuthored) {
+            Diag.w(
+                "Auth",
+                origin = LogOrigin.SERVER,
+                attrs = mapOf("event" to "refresh_rejected", "status" to "403"),
+            ) { "Auth rejected during token refresh" }
+            RefreshAttempt.AuthRejectedTerminal
+        } else {
+            Diag.w(
+                "Auth",
+                origin = LogOrigin.NETWORK,
+                attrs = mapOf("event" to "refresh_forbidden_unattributed", "status" to "403") +
+                    describeForbidden(httpResponse, body),
+            ) { "A 403 not attributable to LibreChat blocked the refresh; keeping the session" }
+            RefreshAttempt.ForbiddenByIntermediary
+        }
+    }
+
+    /**
+     * Low-cardinality facts about an unattributed 403, for the diagnostics export: status alone
+     * cannot say who minted it. LibreChat's own 403 is `text/html` and 21 bytes; a block page is
+     * kilobytes of HTML with a `Server` or `CF-Ray` header. Nothing here may be a credential: the
+     * request's cookie is never read back, and the snippet is the body of a refused request's response.
+     */
+    private fun describeForbidden(httpResponse: HttpResponse, body: String): Map<String, String> = buildMap {
+        // The refresh path is a constant, so anything else here is the stored base URL leaking into it.
+        val requestUrl = httpResponse.call.request.url
+        put("requestPath", requestUrl.encodedPath.take(FORBIDDEN_SNIPPET_MAX))
+        requestUrl.encodedQuery.takeIf { it.isNotEmpty() }?.let { put("requestQuery", it.take(FORBIDDEN_HEADER_MAX)) }
+        put("bodyLength", body.length.toString())
+        httpResponse.headers[HttpHeaders.ContentType]?.let { put("contentType", it.take(FORBIDDEN_HEADER_MAX)) }
+        httpResponse.headers[HttpHeaders.Server]?.let { put("server", it.take(FORBIDDEN_HEADER_MAX)) }
+        httpResponse.headers[HttpHeaders.Via]?.let { put("via", it.take(FORBIDDEN_HEADER_MAX)) }
+        // Cloudflare stamps both on every response it answers itself; their presence is the fact.
+        if (httpResponse.headers.contains("CF-Ray")) put("cfRay", "present")
+        if (httpResponse.headers.contains("cf-mitigated")) put("cfMitigated", "present")
+        val snippet = body
+            .replace(Regex("<[^>]*>"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (snippet.isNotEmpty()) put("bodySnippet", snippet.take(FORBIDDEN_SNIPPET_MAX))
+    }
+
+    /**
+     * True for the `Location` of upstream's `redirect('/login')` — and only that.
+     *
+     * **Relative only, deliberately.** A forward-auth proxy (Authelia, oauth2-proxy, a Cloudflare
+     * Access rule) also answers a 302 pointing at a login page, but at an *absolute* URL on its own
+     * portal — `https://auth.example.com/login?rd=…`. A substring test for `/login` accepts that and
+     * reads a network-layer block as a dead LibreChat credential, which is the exact mistake the
+     * provenance split exists to prevent: it would drop the user's tokens over a block they cannot
+     * clear. Express's `res.redirect('/login')` emits the path verbatim, so requiring a server-rooted
+     * path costs nothing and excludes every off-authority portal.
+     */
+    private fun isLoginRedirect(location: String?): Boolean {
+        val target = location?.trim() ?: return false
+        // `//host/login` is protocol-relative and therefore off-authority, despite the leading slash.
+        if (!target.startsWith("/") || target.startsWith("//")) return false
+        val path = target.substringBefore('?').substringBefore('#').trimEnd('/')
+        return path == "/login"
+    }
+
     /** Parse a `Retry-After` header (delta-seconds form only) into millis; null when absent/unparseable. */
     private fun parseRetryAfterMillis(httpResponse: HttpResponse): Long? =
         httpResponse.headers[HttpHeaders.RetryAfter]?.trim()?.toLongOrNull()?.let { it * 1000 }
 
     /** Parse + commit a 2xx refresh. A malformed body or a discarded commit is not a hard failure. */
+    @Suppress("TooGenericExceptionCaught") // a 2xx with a non-JSON body is recoverable, not a dead session
     private suspend fun handleSuccess(
         accountKey: String?,
         epochAtStart: Int,
         httpResponse: HttpResponse,
-        storedRefreshToken: String,
+        storedCookies: AuthCookies,
     ): RefreshAttempt {
         val body: RefreshResponse = try {
             httpResponse.body()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // A 2xx whose body isn't the expected JSON (e.g. an HTML interstitial from a proxy).
             // Recoverable, not a dead session.
@@ -729,14 +1142,26 @@ abstract class CommonTokenDataStore(
             ) { "Refresh response body not parseable" }
             return RefreshAttempt.Retryable
         }
+        // Must be decided before the cookies are read: the enrollment 200 clears the refreshToken
+        // cookie, so CookieHelper.update throws, and read as Retryable that re-POSTs a deleted session
+        // under the flight lock and keeps the dead slot — the refresh limbo.
+        // An enrollment answer without its setup token still means the session is gone.
+        if (body.isTwoFactorSetupRequired) {
+            return body.tempToken?.takeIf { it.isNotBlank() }?.let(RefreshAttempt::TwoFactorSetupRequired)
+                ?: RefreshAttempt.AuthRejectedTerminal
+        }
+        // A 2xx carrying no token at all is malformed: recoverable, like an unparseable body.
+        val accessToken = body.token?.takeIf { it.isNotBlank() } ?: return RefreshAttempt.Retryable
         // The backend rotates the refresh token on every successful refresh and returns the new one
         // via Set-Cookie; persist it. A 2xx without a rotated cookie means the server didn't rotate
         // (reuse path) — the stored token stays valid, so retain it rather than dropping the slot.
-        val rotated = CookieHelper.extractRefreshToken(httpResponse.headers)
-        if (rotated == null) {
-            Diag.d("Auth", origin = LogOrigin.SERVER) { "Refresh 2xx without rotated cookie; retaining stored token" }
+        val cookies = try {
+            CookieHelper.update(storedCookies, httpResponse.headers)
+        } catch (_: IllegalStateException) {
+            Logger.w { "Refresh response had incomplete session cookies" }
+            return RefreshAttempt.Retryable
         }
-        return if (commitRefresh(accountKey, epochAtStart, body.token, rotated ?: storedRefreshToken)) {
+        return if (commitRefresh(accountKey, epochAtStart, SessionCredentials(accessToken, cookies))) {
             RefreshAttempt.Success
         } else {
             RefreshAttempt.Discarded
@@ -753,8 +1178,7 @@ abstract class CommonTokenDataStore(
     private suspend fun commitRefresh(
         accountKey: String?,
         epochAtStart: Int,
-        access: String,
-        refresh: String,
+        session: SessionCredentials,
     ): Boolean = stateMutex.withLock {
         if (epochOf(accountKey) != epochAtStart) {
             // A logout / clear / removal / re-authentication of THIS slot landed mid-POST — discard so
@@ -763,8 +1187,14 @@ abstract class CommonTokenDataStore(
             Logger.d { "Token refresh discarded: session changed during refresh" }
             return@withLock false
         }
-        writeValues(mapOf(accessKey(accountKey) to access, refreshKey(accountKey) to refresh))
-        if (accountKey == activeAccountKey) cachedAccessToken = access
+        sessions.writeSession(accountKey, session)
+        if (accountKey == activeAccountKey) cachedAuth = RequestAuth(session.accessToken, session.cookies.openId)
+        // A commit retires this slot's rejected-token marker on EVERY path, not just the proactive
+        // one that records them. A reactive refresh's success is the same proof of life, and the
+        // server's reuse path answers 2xx *without* rotating the refresh token — so a marker recorded
+        // for those exact bytes would otherwise go on suppressing proactive renewal for the rest of
+        // its cooldown against a token that has just demonstrably worked.
+        clearRejectedRefresh(slotKey(accountKey))
         Logger.d { "Token refreshed successfully" }
         true
     }
@@ -778,10 +1208,39 @@ abstract class CommonTokenDataStore(
      */
     private suspend fun invalidateRefresh(accountKey: String?, epochAtStart: Int) = stateMutex.withLock {
         if (epochOf(accountKey) != epochAtStart) return@withLock
+        dropSlotLocked(accountKey)
+        clearRenewalBlocked(slotKey(accountKey))
+    }
+
+    /** Empty [accountKey]'s token slot and bump its epoch. Caller holds [stateMutex]. */
+    private fun dropSlotLocked(accountKey: String?) {
         bumpEpoch(accountKey)
-        removeValue(accessKey(accountKey))
-        removeValue(refreshKey(accountKey))
-        if (accountKey == activeAccountKey) cachedAccessToken = null
+        sessions.removeSession(accountKey)
+        if (accountKey == activeAccountKey) cachedAuth = RequestAuth(null)
+    }
+
+    override suspend fun endSessionForReauth(accountId: String?, forTwoFactorSetup: Boolean) {
+        stateMutex.withLock {
+            dropSlotLocked(accountId)
+            if (forTwoFactorSetup && accountId != null) writeValue(twoFactorSetupKey(accountId), MARKER_SET)
+            // Also clears the health banner this sign-out was chosen from.
+            clearRejectedRefresh(slotKey(accountId))
+            // Latch the one-shot expiry report (see [TokenManager.endSessionForReauth]); [setTokens]
+            // re-arms it. Active binding only — a straggler on another account keeps its own report.
+            if (accountId == activeAccountKey) sessionExpiryReported = true
+        }
+        Diag.i(
+            "Auth",
+            origin = LogOrigin.CLIENT,
+            attrs = mapOf("event" to "session_ended_for_reauth"),
+        ) { "User chose to sign in again after a blocked renewal" }
+    }
+
+    // Under [stateMutex] so a switch can't land between the active-binding check and the latch, which
+    // would latch the incoming account's report instead.
+    override suspend fun beginSignOut(accountId: String?) = stateMutex.withLock {
+        if (!tokenInitialized) loadCacheFromStorage()
+        if (accountId == activeAccountKey) sessionExpiryReported = true
     }
 
     private suspend fun flightFor(accountKey: String?): Mutex = flightMutex.withLock {
@@ -817,7 +1276,9 @@ abstract class CommonTokenDataStore(
             Diag.d("Auth") { "session expiry discovered with no subscriber - leaving the signal armed" }
             return
         }
-        sessionExpiryReported = true
+        // A ban ends nothing by itself, but upstream deletes a violator's sessions when it bans, so the
+        // next refresh fails and reports EXPIRED. Latching on the ban would swallow exactly that.
+        if (reason != SessionEndReason.BANNED) sessionExpiryReported = true
         _sessionExpired.tryEmit(reason)
     }
 
@@ -835,19 +1296,90 @@ abstract class CommonTokenDataStore(
      */
     private fun resetSessionExpiryLatch() {
         sessionExpiryReported = false
+        // A required step belongs to the session that raised it; every path that re-arms the latch
+        // establishes, switches or tears one down, after which it no longer applies.
+        authGates.clear()
     }
 
-    // --- SecureTokenStorage ---
-
-    override suspend fun getRefreshToken(): String? = readValue(refreshKey(activeAccountKey))
-
-    override suspend fun storeTokens(accessToken: String, refreshToken: String) {
-        setTokens(accessToken, refreshToken)
+    // Same scoping, and the same read-through-when-unwarmed reasoning, as [emitSessionExpired]. An
+    // enrollment report latches the expiry report at once, not only when the shell ends the session:
+    // a 401 landing in between would otherwise announce an expiry, fail over to another account and
+    // replace the setup route.
+    override fun reportAuthGate(gate: AuthGate) {
+        val recorded = authGates.report(gate, if (tokenInitialized) activeAccountKey else readValue(KEY_ACTIVE_ACCOUNT))
+        if (recorded && gate is AuthGate.TwoFactorSetupRequired) sessionExpiryReported = true
     }
 
-    override suspend fun clearAll() {
-        clearTokens()
+    override fun consumeAuthGate(gate: AuthGate) = authGates.consume(gate)
+
+    override suspend fun isTwoFactorSetupRequired(accountId: String): Boolean =
+        stateMutex.withLock { readValue(twoFactorSetupKey(accountId)) != null }
+
+    private fun twoFactorSetupKey(accountId: String): String = accountScopedName(accountId, KEY_TWO_FACTOR_SETUP_REQUIRED)
+
+    /**
+     * A refresh answered the enrollment 200: the server enforces 2FA, this account has none, and it
+     * has already deleted the session and cleared the `refreshToken` cookie. So the slot goes, as on
+     * a hard rejection — but this is **not** an expiry and must never be routed as one: an expiry
+     * fails over to another signed-in account, and the user would be moved off the account whose
+     * setup they have to finish. The shell routes on [authGate] instead.
+     *
+     * The expiry report is latched for the active binding (exactly as [endSessionForReauth] does), so
+     * the requests still in flight on the dropped bearer — each of which now finds an empty slot and
+     * settles HardExpired — cannot announce an expiry or start a failover behind the setup screen.
+     * [setTokens] re-arms it once setup signs the user in.
+     */
+    private suspend fun endSessionForTwoFactorSetup(accountKey: String?, epochAtStart: Int, tempToken: String) {
+        stateMutex.withLock {
+            if (epochOf(accountKey) != epochAtStart) return@withLock
+            dropSlotLocked(accountKey)
+            clearRenewalBlocked(slotKey(accountKey))
+            // Persisted for every account, active or not: a non-active account gets no gate (the shell
+            // must not leave the account the user is on), so this marker is the only record of why
+            // its slot is empty, and it outlives a restart that drops the in-memory gate too.
+            if (accountKey != null) writeValue(twoFactorSetupKey(accountKey), MARKER_SET)
+            if (accountKey == activeAccountKey) {
+                sessionExpiryReported = true
+                authGates.report(AuthGate.TwoFactorSetupRequired(accountKey, tempToken), activeAccountKey)
+            }
+        }
+        Diag.w(
+            "Auth",
+            origin = LogOrigin.SERVER,
+            attrs = mapOf("event" to "refresh_enrollment_required"),
+        ) { "Server requires 2FA setup before this session can continue" }
     }
+
+    // --- RefreshCookieCredentials ---
+
+    /**
+     * Read directly off the account's own slot, unlocked.
+     *
+     * No [stateMutex]: this reads a keyed slot rather than the active-account binding the mutex
+     * guards, and taking it would put a per-image keystore decrypt behind the same lock an account
+     * switch flips under. The value can therefore be read either side of a concurrent rotation — which
+     * is the race [RefreshCookieCredentials] documents and its caller's one-shot 403 retry resolves.
+     *
+     * A null [accountId] returns null rather than falling back to the bare key: that slot holds a
+     * *staged* sign-in's token mid add-account flow, and the caller's gate is the only other thing
+     * standing between it and a server the user has not finished authenticating to.
+     */
+    override suspend fun refreshTokenFor(accountId: String?): String? = authCookiesFor(accountId)?.refreshToken
+
+    override suspend fun authCookiesFor(accountId: String?): AuthCookies? = stateMutex.withLock {
+        accountId?.let { sessions.readCookies(it)?.takeIf { cookies -> cookies.refreshToken.isNotBlank() } }
+    }
+
+    override suspend fun getRequestAuthFor(accountId: String?): RequestAuth = stateMutex.withLock {
+        // The per-request hot path (twice per request through the switch barrier): serve the active
+        // slot from memory, like [getAccessTokenFor]. On iOS a storage read is a Keychain IPC.
+        val auth = if (tokenInitialized && accountId == activeAccountKey) cachedAuth else storedAuth(accountId)
+        auth.copy(bearer = auth.bearer.nonBlankOrNull())
+    }
+
+    override suspend fun getStagedRequestAuth(): RequestAuth = getRequestAuthFor(null)
+
+    override suspend fun sessionFor(accountId: String): SessionCredentials? = stateMutex.withLock { sessions.readSession(accountId) }
 
     protected open fun isKeystoreException(e: Exception): Boolean = false
 
@@ -862,11 +1394,34 @@ abstract class CommonTokenDataStore(
         /** Keystore corruption cleared the slot. Terminal → HardExpired. */
         data object KeystoreCleared : RefreshAttempt
 
-        /** 401/403 — the session was rejected. Retried (may be a transient server false-negative). */
+        /** 401 — the session was rejected. Retried (may be a transient server false-negative). */
         data object AuthRejected : RefreshAttempt
+
+        /**
+         * A 403 carrying one of LibreChat's own refresh rejections, or its 302 to `/login`. Terminal →
+         * the session really is dead, so settle now rather than spending the ladder on it. See
+         * [classifyForbidden] and [isLoginRedirect].
+         */
+        data object AuthRejectedTerminal : RefreshAttempt
+
+        /**
+         * A 403 that is not attributable to LibreChat — a proxy bouncer, a WAF, an IP ban, a wrong
+         * path in front of the route. Terminal → Transient: it is no evidence about the session, so it
+         * must never drop the slot. It does publish [SessionHealth.RenewalBlocked], because a kept
+         * session that cannot renew is useless until the user is offered a way out.
+         */
+        data object ForbiddenByIntermediary : RefreshAttempt
 
         /** A received 5xx / malformed-2xx response. Retried with local backoff. */
         data object Retryable : RefreshAttempt
+
+        /**
+         * The enrollment 200 (v0.8.9-rc1): the server deleted the session because the account must
+         * set up 2FA first. Terminal for the slot, never an expiry — see `endSessionForTwoFactorSetup`.
+         */
+        data class TwoFactorSetupRequired(val tempToken: String) : RefreshAttempt {
+            override fun toString(): String = "TwoFactorSetupRequired"
+        }
 
         /** 429 with the server's requested delay (ms), when present. Retried honoring it. */
         data class RateLimited(val retryAfterMillis: Long?) : RefreshAttempt
@@ -888,9 +1443,12 @@ abstract class CommonTokenDataStore(
     }
 
     companion object {
+        const val KEY_SESSION = SecureSessionRecords.KEY_SESSION
         const val KEY_ACCESS_TOKEN = "access_token"
         const val KEY_REFRESH_TOKEN = "refresh_token"
         private const val KEY_ACTIVE_ACCOUNT = "active_account_id"
+        private const val KEY_TWO_FACTOR_SETUP_REQUIRED = "two_factor_setup_required"
+        private const val MARKER_SET = "1"
         private const val REFRESH_PATH = "/api/auth/refresh"
 
         /** [flights] key for the bare (null-account) refresh path. */
@@ -923,6 +1481,44 @@ abstract class CommonTokenDataStore(
          * full reactive ladder immediately.
          */
         private const val PROACTIVE_RETRY_COOLDOWN_MS = 60_000L
+
+        /**
+         * How long a slot stops POSTing at all after a 403 something other than LibreChat minted.
+         *
+         * Applies to reactive callers as well as proactive ones, which is the difference from
+         * [PROACTIVE_RETRY_COOLDOWN_MS] and the reason the two are not one constant. Erring long is
+         * the safe direction here: the session is deliberately kept, so the cost of waiting is that
+         * requests run on an expired bearer until the block lifts, while the cost of erring short is
+         * hammering the auth endpoint of a deployment whose bouncer is already blocking this client.
+         *
+         * The price, stated plainly because it is the one place the provenance design's two halves
+         * interact: while this is in force the gate is in front of *every* caller, so a credential
+         * that is genuinely dead is not recognised as dead — and the user not routed to re-auth —
+         * until it lapses. For a block that *lifts* that is a delay of at most this long, and
+         * `a recorded block delays but does not prevent recognising a dead credential` pins it. For
+         * a block that persists it is indefinite: every lapse buys one more refused POST and another
+         * stand-down, with the session kept throughout. That is why the block is also published as
+         * [SessionHealth.RenewalBlocked]: the shell offers the exit this cooldown cannot provide on
+         * its own. See `core/data/CLAUDE.md`.
+         */
+        private const val INTERMEDIARY_BLOCK_COOLDOWN_MS = 60_000L
+
+        /**
+         * The bodies LibreChat's `refreshController` sends with its own `403`s. Matching one is what
+         * distinguishes a dead credential from a 403 minted by something in front of the server —
+         * see [classifyForbidden]. Registered in `scripts/mirrors.json`, because nothing fails to
+         * decode when upstream rewords one of these: the client just silently stops recognising a
+         * dead session and keeps it alive instead.
+         */
+        private val LIBRECHAT_REFRESH_REJECTIONS = listOf(
+            "Invalid refresh token",
+            "Invalid OpenID refresh token",
+            "No session found",
+        )
+
+        /** Caps on what [describeForbidden] copies out of an unattributed 403 into the log. */
+        private const val FORBIDDEN_HEADER_MAX = 40
+        private const val FORBIDDEN_SNIPPET_MAX = 160
 
         /** Total refresh attempts (initial + retries) before a persistent failure is classified. */
         private const val MAX_REFRESH_ATTEMPTS = 3

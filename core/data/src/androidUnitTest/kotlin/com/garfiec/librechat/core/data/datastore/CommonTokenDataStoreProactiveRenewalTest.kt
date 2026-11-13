@@ -162,7 +162,7 @@ class CommonTokenDataStoreProactiveRenewalTest {
         store.ensureFreshAccessToken(null, TEST_SERVER, stale)
 
         assertThat(posts[0]).isEqualTo(1)
-        assertThat(store.store[accessKeyOf(ACCOUNT)]).isNotEqualTo(stale)
+        assertThat(store.persistedAccess(ACCOUNT)).isNotEqualTo(stale)
     }
 
     /**
@@ -193,6 +193,30 @@ class CommonTokenDataStoreProactiveRenewalTest {
         }
 
     /**
+     * `""` reaches the wire as "unpinned", not as a relative path or an empty server id.
+     *
+     * It is a DEFENCE, not a repair: Ktor resolves `/api/auth/refresh` against the same live base
+     * an unpinned POST uses, and `ServerHeadersPlugin.resolveBaseUrl` drops an empty pin before it
+     * looks a server up, so the two spellings are indistinguishable from outside today. This pins
+     * that they stay that way if either downstream normalization is ever removed.
+     */
+    @Test
+    fun `an empty snapshot base URL leaves the refresh unpinned`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val urls = mutableListOf<String>()
+            val engine = unconfinedMockEngine { request ->
+                urls += request.url.toString()
+                respond(refreshResponseBody(jwt(900)), HttpStatusCode.OK, jsonResponseHeaders)
+            }
+            val live = "https://live-elsewhere.example.com"
+            val store = seeded(refreshClientOf(engine, baseUrl = live), jwt(-60))
+
+            store.refreshAccessTokenFor(ACCOUNT, "")
+
+            assertThat(urls).containsExactly("$live/api/auth/refresh")
+        }
+
+    /**
      * **A proactive renewal must never log anyone out.** The backend answers `401` identically for a
      * dead session and a transiently-missed one, which is why the reactive path retries before
      * settling. A single best-effort attempt cannot tell them apart, so it must not settle the
@@ -215,8 +239,8 @@ class CommonTokenDataStoreProactiveRenewalTest {
             val bearer = store.ensureFreshAccessToken(ACCOUNT, TEST_SERVER, stale)
 
             assertThat(reported).isEqualTo(0)
-            assertThat(store.store[accessKeyOf(ACCOUNT)]).isEqualTo(stale)
-            assertThat(store.store[refreshKeyOf(ACCOUNT)]).isEqualTo("R0")
+            assertThat(store.persistedAccess(ACCOUNT)).isEqualTo(stale)
+            assertThat(store.persistedRefresh(ACCOUNT)).isEqualTo("R0")
             assertThat(bearer).isEqualTo(stale)
             // One attempt, not the reactive ladder's three: retrying cannot change the answer for a
             // caller that is going to ignore it either way.
@@ -268,7 +292,7 @@ class CommonTokenDataStoreProactiveRenewalTest {
 
             assertThat(posts).isEqualTo(0)
             assertThat(bearer).isEqualTo(stale)
-            assertThat(store.store[accessKeyOf(ACCOUNT)]).isEqualTo(stale)
+            assertThat(store.persistedAccess(ACCOUNT)).isEqualTo(stale)
         }
 
     /**
@@ -310,6 +334,6 @@ class CommonTokenDataStoreProactiveRenewalTest {
 
         assertThat(posts).isEqualTo(2)
         assertThat(bearerB).isNotEqualTo(staleB)
-        assertThat(store.store[accessKeyOf("acctB")]).isEqualTo(bearerB)
+        assertThat(store.persistedAccess("acctB")).isEqualTo(bearerB)
     }
 }

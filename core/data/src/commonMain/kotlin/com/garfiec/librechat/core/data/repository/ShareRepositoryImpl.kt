@@ -1,19 +1,34 @@
 package com.garfiec.librechat.core.data.repository
 
 import com.garfiec.librechat.core.common.BackendVersion
+import com.garfiec.librechat.core.common.identity.cleanServerUrl
+import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.common.result.apiCallCatching
 import com.garfiec.librechat.core.common.result.safeApiCall
+import com.garfiec.librechat.core.common.result.toSafeError
 import com.garfiec.librechat.core.model.SharedLink
+import com.garfiec.librechat.core.model.request.UpdateShareRequest
 import com.garfiec.librechat.core.model.response.ForkConversationResponse
+import com.garfiec.librechat.core.model.response.ShareLinkLookup
+import com.garfiec.librechat.core.model.response.SharedConversationSnapshot
 import com.garfiec.librechat.core.model.response.SharedLinksResponse
+import com.garfiec.librechat.core.model.share.MAX_SHARED_LINK_SEARCH_LENGTH
+import com.garfiec.librechat.core.model.share.SharedLinksSort
 import com.garfiec.librechat.core.network.api.ShareApi
 import com.garfiec.librechat.core.network.client.ServerUrlProvider
+import kotlinx.coroutines.flow.StateFlow
 
 class ShareRepositoryImpl(
     private val shareApi: ShareApi,
     private val serverUrlProvider: ServerUrlProvider,
     private val configRepository: ConfigRepository,
+    private val shareChanges: ShareChangeSignal,
 ) : ShareRepository {
+
+    override val revision: StateFlow<Long> = shareChanges.revision
+
+    private fun <T> Result<T>.bumpOnSuccess(): Result<T> = also { if (it is Result.Success) shareChanges.bump() }
 
     /**
      * Backends older than 0.8.7-rc1 filter `GET /api/share` on the `isPublic` query param and default
@@ -31,44 +46,101 @@ class ShareRepositoryImpl(
         return if (isConfirmedModern) null else true
     }
 
-    override suspend fun createShareLink(conversationId: String): Result<String> {
-        return safeApiCall {
-            val sharedLink = shareApi.createShareLink(conversationId)
-            val shareId = sharedLink.shareId
+    // Mirrors web's `buildShareLinkUrl` (scripts/mirrors.json `share-url-format`).
+    override fun shareUrl(shareId: String): String =
+        "${cleanServerUrl(serverUrlProvider.getBaseUrl())}/share/$shareId"
+
+    override suspend fun lookupShareLink(conversationId: String): Result<ShareLinkLookup> =
+        safeApiCall { shareApi.getShareLink(conversationId) }
+
+    override suspend fun createShareLink(
+        conversationId: String,
+        targetMessageId: String?,
+        snapshotFiles: Boolean?,
+    ): Result<String> =
+        safeApiCall { createOrAdopt(conversationId, targetMessageId, snapshotFiles) }.bumpOnSuccess()
+
+    private suspend fun createOrAdopt(
+        conversationId: String,
+        targetMessageId: String?,
+        snapshotFiles: Boolean?,
+    ): String =
+        try {
+            shareApi.createShareLink(conversationId, targetMessageId, snapshotFiles).shareId
                 ?: throw IllegalStateException("Server returned no shareId")
-            val baseUrl = serverUrlProvider.getBaseUrl().trimEnd('/')
-            "$baseUrl/share/$shareId"
+        } catch (e: ApiException) {
+            if (e.statusCode != HTTP_CONFLICT) throw e
+            shareApi.getShareLink(conversationId).liveShareId() ?: throw e
+        }
+
+    private fun ShareLinkLookup.liveShareId(): String? = shareId?.takeIf { success }
+
+    override suspend fun getSharedLinksPaginated(
+        cursor: String?,
+        sort: SharedLinksSort,
+        search: String?,
+    ): Result<SharedLinksResponse> {
+        val query = search?.trim()?.take(MAX_SHARED_LINK_SEARCH_LENGTH)?.trim()?.ifEmpty { null }
+        return safeApiCall {
+            shareApi.getSharedLinks(
+                cursor = cursor,
+                sortBy = sort.sortBy,
+                sortDirection = sort.sortDirection,
+                search = query,
+                isPublic = isPublicFilter(),
+            )
         }
     }
 
-    override suspend fun getSharedLinksPaginated(cursor: String?): Result<SharedLinksResponse> {
-        return safeApiCall {
-            shareApi.getSharedLinks(cursor = cursor, isPublic = isPublicFilter())
-        }
-    }
+    override suspend fun updateShareLink(
+        shareId: String,
+        targetMessageId: String?,
+        snapshotFiles: Boolean?,
+    ): Result<SharedLink> =
+        apiCallCatching<Result<SharedLink>>(
+            {
+                Result.Success(
+                    shareApi.updateShareLink(shareId, UpdateShareRequest(targetMessageId, snapshotFiles)),
+                )
+            },
+        ) { e ->
+            // The link is gone: still an error for the caller, but a list holding it is now stale.
+            if ((e as? ApiException)?.statusCode == HTTP_NOT_FOUND) shareChanges.bump()
+            e.toSafeError()
+        }.bumpOnSuccess()
 
-    override suspend fun updateShareLink(shareId: String): Result<SharedLink> {
-        return safeApiCall {
-            shareApi.updateShareLink(shareId)
-        }
-    }
+    override suspend fun deleteShareLink(shareId: String): Result<Unit> =
+        apiCallCatching<Result<Unit>>(
+            {
+                shareApi.deleteShareLink(shareId)
+                Result.Success(Unit)
+            },
+        ) { e ->
+            // Already gone is what the caller asked for. Not routed through safeApiCall, which
+            // would log an expected outcome as an error.
+            if ((e as? ApiException)?.statusCode == HTTP_NOT_FOUND) Result.Success(Unit) else e.toSafeError()
+        }.bumpOnSuccess()
 
-    override suspend fun deleteShareLink(shareId: String): Result<Unit> {
-        return safeApiCall {
-            shareApi.deleteShareLink(shareId)
-        }
-    }
+    override suspend fun getSharedSnapshot(shareId: String): Result<SharedConversationSnapshot> =
+        safeApiCall { shareApi.getSharedSnapshot(shareId) }
+
+    override suspend fun downloadSharedFile(shareId: String, fileId: String): Result<ByteArray> =
+        safeApiCall { shareApi.downloadSharedFile(shareId, fileId) }
 
     override suspend fun forkSharedConversation(
         shareId: String,
         targetMessageIndex: Int?,
+        shareRevision: String?,
     ): Result<ForkConversationResponse> {
-        // Deliberately not version-gated: a pre-0.8.8 server 404s, which safeApiCall already
-        // turns into the error the (future) caller has to handle anyway, and the call only ever
-        // happens because a user pressed a button — there is nothing to fail closed on ahead of
-        // time. Gating on a date here would just hide the button on dev servers that have it.
+        // Not gated here: the viewer hides Continue on a server confirmed older than the route
+        // (0.8.8-rc1) and reads a 404 from an unplaced one (SharedChatViewModel.canContinue).
         return safeApiCall {
-            shareApi.forkSharedConversation(shareId, targetMessageIndex)
+            shareApi.forkSharedConversation(shareId, targetMessageIndex, shareRevision)
         }
+    }
+
+    private companion object {
+        const val HTTP_CONFLICT = 409
+        const val HTTP_NOT_FOUND = 404
     }
 }

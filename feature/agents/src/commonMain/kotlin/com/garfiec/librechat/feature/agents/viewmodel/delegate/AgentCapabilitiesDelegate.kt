@@ -14,6 +14,7 @@ import com.garfiec.librechat.core.model.permissions.PermissionType
 import com.garfiec.librechat.core.model.permissions.hasAccessOrPermissive
 import com.garfiec.librechat.feature.agents.viewmodel.AgentEditorStateHandle
 import com.garfiec.librechat.feature.agents.viewmodel.AgentEditorViewModel
+import com.garfiec.librechat.feature.agents.viewmodel.AgentInferenceEndpoint
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
@@ -42,7 +43,57 @@ class AgentCapabilitiesDelegate(
         observeWebSearchAvailability()
         observeSkillsAvailability()
         observeSubagentsAvailability()
+        observeBuiltinToolAccess()
         observeServerVersion()
+        observeFileRemovalSemantics()
+        observeDropParams()
+        observeEndpointConfigs()
+    }
+
+    /**
+     * v0.8.8-rc4 (#16007, landed 2026-09-17) made removing an agent's file delete it when the
+     * caller owns it and no other agent references it. A date gate so a dev build past that commit
+     * gets the confirmation too; PRESENT only, so a server that cannot be placed keeps the removal
+     * as it was rather than warning about a deletion it may not perform. See VERSION_GATES.md.
+     */
+    private fun observeFileRemovalSemantics() {
+        stateHandle.scope.launch {
+            configRepository.detectedBackend.collect { detected ->
+                val deletes = BackendVersion.supportsFeature(detected, "0.8.8-rc4", "2026-09-17")
+                // thinkingDisplay `updates`: the same gate as ChatViewModel's, kept in step with it;
+                // see VERSION_GATES.md.
+                val updates = BackendVersion.supportsFeature(detected, "0.8.8", "2026-09-29")
+                stateHandle.update {
+                    copy(agentFileRemovalDeletes = deletes, isThinkingDisplayUpdatesAvailable = updates)
+                }
+            }
+        }
+    }
+
+    /** `endpointsDropParamsMap` is stripped for unauthenticated callers, so it can arrive late. */
+    private fun observeDropParams() {
+        stateHandle.scope.launch {
+            configRepository.startupConfig.collect { config ->
+                stateHandle.update { copy(dropParamsMap = config?.endpointsDropParamsMap) }
+            }
+        }
+        stateHandle.scope.launch {
+            configRepository.endpointConfigs.collect { configs ->
+                val endpoints = configs.mapValues { (_, config) ->
+                    AgentInferenceEndpoint(config.customParams?.defaultParamsEndpoint, config.customParams?.declaredKeys.orEmpty())
+                }
+                stateHandle.update { copy(inferenceEndpoints = endpoints) }
+            }
+        }
+    }
+
+    /** The endpoint configs pick the parameter set of an agent on a custom endpoint (`parameterProvider`). */
+    private fun observeEndpointConfigs() {
+        stateHandle.scope.launch {
+            configRepository.endpointConfigs.collect { configs ->
+                stateHandle.update { copy(endpointConfigs = configs) }
+            }
+        }
     }
 
     /**
@@ -60,9 +111,15 @@ class AgentCapabilitiesDelegate(
                     BackendVersion.isCompatibleOrNewer(version, "0.8.5-rc1")
                 stateHandle.update {
                     copy(
+                        filtersInferenceParameters = version != null &&
+                            BackendVersion.isCompatibleOrNewer(version, "0.8.9-rc1"),
                         showCollaborativeToggle = show,
                         isHandoffsAvailable = handoffsAvailable,
                         isAclAvailable = handoffsAvailable,
+                        isAgentFileUnlinkAvailable = version != null &&
+                            BackendVersion.isCompatibleOrNewer(version, "0.8.8-rc1"),
+                        isToolApprovalVersionSupported = version != null &&
+                            BackendVersion.isCompatibleOrNewer(version, "0.8.9-rc1"),
                     )
                 }
             }
@@ -92,7 +149,13 @@ class AgentCapabilitiesDelegate(
                     ToolConstants.ASK_USER_QUESTION in agentsCapabilities
                 stateHandle.update {
                     copy(
+                        toolApprovalPolicy = configs["agents"]?.toolApproval,
                         isCodeInterpreterAvailable = codeAvailable,
+                        // Web shows the Code section only on this capability; no fail-open here.
+                        isStatefulCodeAvailable = STATEFUL_CODE_SESSIONS in agentsCapabilities,
+                        // Opt-in upstream (not a default capability) and fail-closed on web.
+                        isCodeBackgroundAvailable = RUN_IN_BACKGROUND in agentsCapabilities,
+                        statefulCodeConfig = configs["agents"]?.statefulCodeSessions,
                         isChainAvailable = chainAvailable,
                         isGenericToolsAvailable = genericToolsAvailable,
                         isAskUserQuestionAvailable = askAvailable,
@@ -146,6 +209,44 @@ class AgentCapabilitiesDelegate(
     }
 
     /**
+     * The role grants web's catalog requires on top of a builtin's capability
+     * (`Tools/items/catalog.ts` `BUILTIN_ROLE_PERMISSIONS`): RUN_CODE, WEB_SEARCH and FILE_SEARCH
+     * `USE`, plus file search's own capability. They hide the row and
+     * the section only: a save still writes back a tool the agent already has (`buildToolsList`
+     * never reads them), as web's form keeps the flag of a row it doesn't show. Fail-open on an
+     * unknown role and an empty capability list, like the sibling gates.
+     */
+    private fun observeBuiltinToolAccess() {
+        stateHandle.scope.launch {
+            combine(configRepository.endpointConfigs, roleRepository.userPermissions) { configs, role ->
+                val agentsCapabilities = configs["agents"]?.capabilities ?: emptyList()
+                BuiltinToolAccess(
+                    fileSearchAvailable = agentsCapabilities.isEmpty() || ToolConstants.FILE_SEARCH in agentsCapabilities,
+                    runCode = role.hasAccessOrPermissive(PermissionType.RUN_CODE, Permission.USE),
+                    webSearch = role.hasAccessOrPermissive(PermissionType.WEB_SEARCH, Permission.USE),
+                    fileSearch = role.hasAccessOrPermissive(PermissionType.FILE_SEARCH, Permission.USE),
+                )
+            }.collect { access ->
+                stateHandle.update {
+                    copy(
+                        isFileSearchAvailable = access.fileSearchAvailable,
+                        canUseRunCode = access.runCode,
+                        canUseWebSearch = access.webSearch,
+                        canUseFileSearch = access.fileSearch,
+                    )
+                }
+            }
+        }
+    }
+
+    private data class BuiltinToolAccess(
+        val fileSearchAvailable: Boolean,
+        val runCode: Boolean,
+        val webSearch: Boolean,
+        val fileSearch: Boolean,
+    )
+
+    /**
      * Observes the agents endpoint `capabilities` array and the user's SKILLS
      * permission to gate the Skills section (upstream `showSkills =
      * hasSkillsAccess && skillsEnabled`, where `skillsEnabled =
@@ -186,7 +287,7 @@ class AgentCapabilitiesDelegate(
      * the first page. Stopping at 100 truncates the picker, and — because this
      * same list resolves chip names — a skill already saved on the agent whose
      * id sits past page one renders as a raw id, which reads as data loss on a
-     * configuration the user did not touch. The `maxCatalogSkills` interface key
+     * configuration the user did not touch. `endpoints.agents.skills.maxCatalogSkills`
      * bounds what the model is shown, not what the picker lists, so it is no
      * mitigation. Upstream fixed the same defect in #14429.
      */
@@ -326,5 +427,7 @@ class AgentCapabilitiesDelegate(
          * exists only so a misbehaving cursor cannot loop indefinitely.
          */
         const val MAX_SKILL_CATALOG_PAGES = 50
+        const val STATEFUL_CODE_SESSIONS = "stateful_code_sessions"
+        const val RUN_IN_BACKGROUND = "run_in_background"
     }
 }

@@ -87,6 +87,13 @@ data class Agent(
      */
     @SerialName("additional_instructions") val additionalInstructions: String? = null,
     /**
+     * The prompt group whose text the agent runs as its instructions (v0.8.9-rc1):
+     * `{ source: "native", groupId, selection }`, or `{ source, restricted: true }` for an editor
+     * without VIEW on the group. Raw: mobile only reads whether a link exists, and never sends the
+     * field, which leaves the link as it is (the update route reads absent as "no change").
+     */
+    val instructionsPrompt: JsonElement? = null,
+    /**
      * Runtime-supplied per-tool kwargs. The upstream Mongoose schema
      * (`packages/data-schemas/src/schema/agent.ts:47-49`) declares this as
      * `[{ type: Mixed }]` (an array of mixed values), so consumers must
@@ -120,12 +127,40 @@ data class Agent(
     /** Subagent spawning configuration — isolated-context child agents. Forward-compat (v0.8.6). */
     val subagents: AgentSubagentsConfig? = null,
     /**
-     * Keeps the code-interpreter sandbox alive between tool calls in a run instead of
-     * booting a fresh one each time. Gated server-side by the `stateful_code_sessions`
-     * agent capability. Mobile has no editor toggle yet — round-tripped so an agent
-     * edited on mobile doesn't lose the flag an admin set on web.
+     * Commit author identity the agent's Git commands use on an attached machine (v0.8.8-rc2).
+     * The editor's Code section writes it only when the user changed it (an explicit `null`
+     * UNSETS it), so an identity set on the web survives a save that never touched it.
+     */
+    @SerialName("git_identity") val gitIdentity: AgentGitIdentity? = null,
+    /** The default workspace new chats use on the agent's machine; `""` = the last one used (v0.8.8-rc2). */
+    @SerialName("code_workspace_id") val codeWorkspaceId: String? = null,
+    /**
+     * The machine this agent runs code on; absent means the deployment's default. Served by the
+     * LIST route and `/expanded`, not by `GET /api/agents/:id`. The editor writes it only when the
+     * user changed it: the update route changes it only when the key is present.
+     */
+    @SerialName("code_environment_id") val codeEnvironmentId: String? = null,
+    /**
+     * Machines the agent's author allows a chat to pick instead of [codeEnvironmentId] (v0.8.9-rc1).
+     * LIST route and `/expanded` only, written like [codeEnvironmentId].
+     */
+    @SerialName("code_environment_ids") val codeEnvironmentIds: List<String>? = null,
+    /**
+     * Which skills the agent is exposed to while skills are enabled (v0.8.8-rc2). A missing value
+     * preserves the legacy semantics server-side, which is exactly why this is a raw String and
+     * not an enum: an unrecognized value would throw at decode and fail the whole agent.
+     */
+    @SerialName("skills_scope") val skillsScope: String? = null,
+    /**
+     * Runs code on the stateful Code API (a persistent workspace, or an attached machine) instead
+     * of the stateless sandbox. Gated by the `stateful_code_sessions` agent capability; edited in
+     * the editor's Code section.
      */
     @SerialName("stateful_code_sessions") val statefulCodeSessions: Boolean? = null,
+    /** Who shares the stateful workspace: `user`, `agent-user` or `conversation` ([StatefulCodeScope]). */
+    @SerialName("stateful_code_environment") val statefulCodeEnvironment: String? = null,
+    /** Whether the workspace's AGENTS.md / CLAUDE.md is loaded: `prefer`, `defer` or `off`. */
+    val repositoryInstructions: String? = null,
     /**
      * Memory partition for this agent: `"agent"` isolates memories per (user, agent),
      * `"user"`/null uses the shared personal pool. Round-tripped only — mobile surfaces

@@ -5,6 +5,7 @@ import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.model.EndpointConfig
 import com.garfiec.librechat.core.model.config.StartupConfig
 import com.garfiec.librechat.core.model.response.Category
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -23,10 +24,45 @@ data class VersionCheckResult(
     val isCompatible: Boolean,
 )
 
+/** Outcome of [ConfigRepository.resolveServer]. */
+sealed interface ServerResolution {
+    /**
+     * [url] is the address that served LibreChat: a candidate exactly as it was passed in, or the
+     * address that candidate's `/api/config` redirected to.
+     */
+    data class Resolved(val url: String, val config: StartupConfig) : ServerResolution
+
+    data class Failed(val error: Result.Error) : ServerResolution
+}
+
+/** A startup config with the server it was read from or fetched for (`deriveServerId`). */
+data class ServerStartupConfig(val serverId: String, val config: StartupConfig)
+
 interface ConfigRepository {
     val startupConfig: StateFlow<StartupConfig?>
+
+    /**
+     * [startupConfig] tagged with its server. During a switch the active URL flips before the
+     * in-memory config is reseeded, so [startupConfig] alone can pair the old server's config with
+     * the new URL; anything persisted per server reads this instead and checks the id.
+     */
+    val startupConfigForServer: StateFlow<ServerStartupConfig?>
+
+    /**
+     * One emission per config the server answered ([fetchStartupConfig] succeeding, or
+     * [publishStartupConfig]), equal or not. [startupConfig] dedupes an unchanged config, so a reader
+     * that has to notice "the server spoke again" (lifting a state a route reported) collects this.
+     * Not replayed; a cached or reseeded config is not a refresh.
+     */
+    val startupConfigRefreshes: Flow<StartupConfig>
     val endpointConfigs: StateFlow<Map<String, EndpointConfig>>
     val availableModels: StateFlow<Map<String, List<String>>>
+
+    /**
+     * The active server's base URL, which the config's relative icon paths (an endpoint's or a
+     * spec's `iconURL`, `/images/…`) are joined to.
+     */
+    val serverUrl: Flow<String>
 
     /**
      * The backend version detected from `/api/config` (via the `version` field
@@ -49,17 +85,26 @@ interface ConfigRepository {
      */
     val detectedBackend: StateFlow<DetectedBackend?>
 
-    suspend fun validateServerUrl(url: String): Result<StartupConfig>
+    /**
+     * Finds which of [candidates] — base URLs, most specific first — serves LibreChat, by fetching
+     * `/api/config` from each in turn with [headers] attached. Publishes nothing and writes no cache:
+     * every probe runs under a [com.garfiec.librechat.core.network.client.PendingRequestIdentity] for
+     * its candidate, so neither the live server's state nor any account's identity is touched, and
+     * the caller stores the winner and then calls [publishStartupConfig].
+     *
+     * The next candidate is tried only when this one *answered* and was not LibreChat (a 4xx, or a
+     * body that isn't LibreChat's config): the host is there, the deployment root isn't. A timeout,
+     * an unreachable host, a TLS rejection, an access gateway or a 5xx stops the search, since the
+     * same host fails the same way at another path and the user needs that error, not a second wait.
+     */
+    suspend fun resolveServer(candidates: List<String>, headers: Map<String, String>): ServerResolution
 
     /**
-     * Validates that the request pipeline's current target is a LibreChat server WITHOUT
-     * publishing the fetched config to the in-memory state or the srv:-keyed disk cache.
-     * For add-account validation: the call runs under the pending server's request identity
-     * while the live account stays active, so [validateServerUrl]'s writes would surface the
-     * pending server's config to the live session and poison the live server's cache entry
-     * (the cache key derives from the live URL, not the probed one).
+     * Makes [config] the active server's startup config: in-memory state, its srv:-keyed cache
+     * entry, and the config snapshot log. Call after the server URL it came from has been stored,
+     * since the cache key derives from the live URL.
      */
-    suspend fun probeServerUrl(): Result<StartupConfig>
+    suspend fun publishStartupConfig(config: StartupConfig)
 
     /**
      * Replaces the in-memory config state with the active server's cached entries (empty when

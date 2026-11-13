@@ -80,6 +80,14 @@ data class MessageContentPart(
     val content: JsonElement? = null,
     val tokenCount: Int? = null,
     val summarizing: Boolean? = null,
+    /** SUMMARY/ERROR parts: the round failed, so the part carries no usable text of its own. */
+    val failed: Boolean? = null,
+    /**
+     * SUMMARY/ERROR parts: `"user"` when the compaction was requested from the context indicator
+     * rather than produced by the automatic detour. Absent on compactions stored before the marker
+     * existed, so it can only ever confirm, never rule out.
+     */
+    val initiatedBy: String? = null,
     val summaryVersion: Int? = null,
     val model: String? = null,
     val provider: String? = null,
@@ -89,6 +97,14 @@ data class MessageContentPart(
     val groupId: Int? = null,
     val stepIndex: Int? = null,
     val siblingIndex: Int? = null,
+    /**
+     * The stored-file references a part can carry, read only to tell whether a turn would resend
+     * files from history (upstream `FileLocatorPart`): a direct `file_id`, a `file` locator, and a
+     * steer's own attached `files`.
+     */
+    @SerialName("file_id") val fileId: String? = null,
+    val file: JsonElement? = null,
+    val files: JsonElement? = null,
 )
 
 @Serializable

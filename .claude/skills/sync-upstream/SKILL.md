@@ -66,7 +66,7 @@ Working directory is already the mobile repo root — do **not** `cd` elsewhere;
 Fail LOUD on any ambiguity below — never guess a baseline or target for the user.
 
 1. **Submodule.** `git submodule status`. If `upstream/` missing:
-   `git submodule add https://github.com/danny-avila/LibreChat.git upstream && git submodule update --init`.
+   `git submodule add https://github.com/LibreChat-AI/LibreChat.git upstream && git submodule update --init`.
 2. **Version file.** `cat UPSTREAM_VERSION`. If missing, create from `version.properties`
    `backendTargetVersion` + submodule HEAD (`tag=v<version>`, `commit=<HEAD>`, `date=$(date +%Y-%m-%d)`).
 3. **Clean tree.** `git status --porcelain`. If dirty → **ask the user** to commit/stash; wait.
@@ -99,8 +99,39 @@ Fail LOUD on any ambiguity below — never guess a baseline or target for the us
    revision, bad registry); fix the setup and re-run rather than reporting it as a finding.
    Carry every DRIFT and `??` row into the Phase 2 interview as its own item — a `??` means upstream
    renamed or deleted the symbol, so the registry entry is wrong either way.
+   The `artifact-*` rows are a different kind of mirror: what a React artifact may `import`
+   (web's Sandpack dependencies, the shadcn components and their mount paths, the libraries the
+   artifact prompt advertises). The client side is vendored JavaScript, not Kotlin, so they are
+   reconciled with **`/update-web-assets`** (re-pin in `scripts/artifact-modules/package.json`,
+   move the shadcn source URLs to the new commit, `--sync`), not by WF2's implementers. Also move
+   those URLs when `UPSTREAM_VERSION` moves, even if the rows are `ok`: the shadcn-ui bundle's
+   version is the upstream commit its sources came from. See `reference/upstream-paths.md`,
+   "Artifact runtime dependencies".
    Registry: `scripts/mirrors.json`. Adding a mirror to the codebase means adding an entry there in
    the same PR.
+9. **Client transport contract.** `packages/chat/src/core/` (`@librechat/chat`, upstream #16964)
+   is upstream's typed `ChatTransport` (`types.ts`: send/reconnect/abort/status/resume/steer/queue,
+   result variants, refusal codes, `generationProtocolVersion`) plus its reference SSE frame parser
+   (`transport/`) and stream reducer (`reducer.ts`, `steps/`). It is the closest thing upstream has
+   to a written spec of the streaming protocol this client implements, so diff it before anything
+   else reads the range:
+   ```bash
+   cd upstream
+   git cat-file -e {base_commit}:packages/chat/src/core/types.ts 2>/dev/null && echo base
+   git cat-file -e {target_commit}:packages/chat/src/core/types.ts 2>/dev/null && echo target
+   git diff {base_commit}..{target_commit} -- packages/chat/src/core/ \
+     > ../.claude/sync-upstream/artifacts/contract-diff.patch
+   ```
+   Set `contractState`:
+   - `absent` — in neither commit. The range predates the package (landed 2026-10-10); continue.
+   - `introduced` — only in target. Every capability in the file is a candidate gap, not just a diff.
+   - `changed` — non-empty patch, otherwise. If `types.ts` vanished from target, the contract moved:
+     find where with `git log --diff-filter=R --stat` before passing it on.
+   - `unchanged` — in both, empty patch.
+
+   Watch the directory, not one file — the package is still landing as a PR stack and may split it.
+   Pass `contractState` and the patch's absolute path into WF1, and carry its findings into the
+   Phase 2 interview as their own group.
 
 If a prior run's artifacts exist (`ls .claude/sync-upstream/artifacts/`), offer to resume from them.
 
@@ -116,6 +147,8 @@ Workflow({ name: "sync-upstream-discovery", args: {
   mode, baseCommit, targetCommit, targetMode, baseVersion, anchorTag,
   skillDir: "<abs path to .claude/skills/sync-upstream>",
   artifactsDir: "<abs path to .claude/sync-upstream/artifacts>",
+  contractState,           // Phase 0 step 9
+  contractDiffPath: "<abs path to artifacts/contract-diff.patch>",
 } })
 ```
 
@@ -139,6 +172,14 @@ This is the single human gate. Present the converged report, then use `AskUserQu
 - **Drifted mirrors** (Phase 0 step 8): each one is a hand-maintained copy that upstream has moved
   underneath. They are cheap to reconcile and invisible if skipped — present them explicitly rather
   than folding them into the general findings list.
+- **Artifact dependencies** (the `artifact-*` mirror rows): name each package web added, dropped
+  or re-pinned, and for each one added, its last release date and any advisories (the dependency
+  policy applies). Ask per package: bundle it, bundle it behind the consent prompt (an `advisory`
+  in its registry entry), or leave it unbundled (artifacts importing it show "not bundled"). Run
+  `/update-web-assets` for the approved ones after WF2, on the same branch.
+- **Transport contract** (Phase 0 step 9): findings that trace to `packages/chat/src/core/`, grouped
+  by the `ChatTransport` member they touch. When `contractState` is `introduced`, say plainly which
+  capabilities the client has no equivalent for yet.
 - Items marked `backend-blocked` are shown as knowingly-skipped, never built.
 
 Persist the approved, scoped list to `artifacts/approved-{target}.md`. If the user cancels, archive the

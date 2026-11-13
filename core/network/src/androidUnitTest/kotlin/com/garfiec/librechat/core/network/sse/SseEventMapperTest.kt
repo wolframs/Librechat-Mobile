@@ -1,11 +1,15 @@
+@file:Suppress("MaxLineLength") // wire-format JSON fixtures stay on one line, as the server sends them
+
 package com.garfiec.librechat.core.network.sse
 
+import com.garfiec.librechat.core.model.RunStepStatus
 import com.garfiec.librechat.core.model.StreamEvent
 import com.google.common.truth.Truth.assertThat
 import kotlinx.serialization.json.Json
 import org.junit.Before
 import org.junit.Test
 
+@Suppress("LargeClass") // debt: 948-line file
 class SseEventMapperTest {
 
     private val json = Json {
@@ -96,6 +100,165 @@ class SseEventMapperTest {
         val tc = result as StreamEvent.ToolCallComplete
         assertThat(tc.toolCallId).isEqualTo("call_1")
         assertThat(tc.output).isEqualTo("Results here")
+        assertThat(tc.inputValidationError).isFalse()
+    }
+
+    @Test
+    fun `a completion the server rejected at schema validation carries the flag`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_run_step_completed","data":{"result":{"id":"step_1","tool_call":{"id":"call_1","name":"ask_user_question","output":"Error: Array must contain at most 4 element(s)\n Please fix your mistakes.","inputValidationError":true}}}}""",
+        )
+
+        val tc = mapper.map(event) as StreamEvent.ToolCallComplete
+
+        assertThat(tc.inputValidationError).isTrue()
+    }
+
+    // --- on_ptc_tool_call (v0.8.9-rc1, upstream `PtcToolCallEvent` / `createPtcProgressEmitter`) ---
+
+    @Test
+    fun `an inner programmatic tool call maps start and settle`() {
+        val start = mapper.map(
+            SseEvent(
+                event = "",
+                data = """{"event":"on_ptc_tool_call","data":{"tool_call_id":"call_9","call_id":"c1","name":"search_code_mcp_github","status":"running","args":"q=foo","runId":"r1"}}""",
+            ),
+        ) as StreamEvent.PtcToolCall
+        assertThat(start.toolCallId).isEqualTo("call_9")
+        assertThat(start.callId).isEqualTo("c1")
+        assertThat(start.name).isEqualTo("search_code_mcp_github")
+        assertThat(start.status).isEqualTo(StreamEvent.PtcToolCall.STATUS_RUNNING)
+        assertThat(start.args).isEqualTo("q=foo")
+
+        val settle = mapper.map(
+            SseEvent(
+                event = "",
+                data = """{"event":"on_ptc_tool_call","data":{"tool_call_id":"call_9","call_id":"c1","name":"search_code_mcp_github","status":"error","error":"rate limited","durationMs":412.7}}""",
+            ),
+        ) as StreamEvent.PtcToolCall
+        assertThat(settle.status).isEqualTo(StreamEvent.PtcToolCall.STATUS_ERROR)
+        assertThat(settle.error).isEqualTo("rate limited")
+        assertThat(settle.durationMs).isEqualTo(412L)
+        assertThat(settle.args).isNull()
+    }
+
+    @Test
+    fun `an inner call without its ids is dropped`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_ptc_tool_call","data":{"tool_call_id":"call_9","name":"x","status":"running"}}""",
+        )
+        assertThat(mapper.map(event)).isNull()
+    }
+
+    @Test
+    fun `a completion stamped attached_workspace carries its executor`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_run_step_completed","data":{"result":{"id":"step_1","tool_call":{"id":"call_1","name":"bash_tool","output":"stdout:\\nok\\n[exit code: 0]","executor":"attached_workspace"}}}}""",
+        )
+        val tc = mapper.map(event) as StreamEvent.ToolCallComplete
+        assertThat(tc.executor).isEqualTo("attached_workspace")
+    }
+
+    // --- on_steer_applied quotes (v0.8.8-rc2) ---
+
+    @Test
+    fun `an applied steer carries the quotes its injected part kept`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_steer_applied","data":{"steerId":"s1","clientSteerId":"local-1",""" +
+                """"index":3,"part":{"type":"steer","steer":"be brief","quotes":["excerpt a","excerpt b"]}}}""",
+        )
+        val applied = mapper.map(event) as StreamEvent.SteerApplied
+        assertThat(applied.steerId).isEqualTo("s1")
+        assertThat(applied.clientSteerId).isEqualTo("local-1")
+        assertThat(applied.quotes).containsExactly("excerpt a", "excerpt b").inOrder()
+    }
+
+    @Test
+    fun `a part injected without quotes reports an empty list`() {
+        // Empty is the signal, not an absence to shrug at: it means a pre-quotes server injected
+        // the words bare, so the client still holds the only copy of the excerpts.
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_steer_applied","data":{"steerId":"s1","part":{"type":"steer","steer":"be brief"}}}""",
+        )
+        val applied = mapper.map(event) as StreamEvent.SteerApplied
+        assertThat(applied.quotes).isEmpty()
+        assertThat(applied.clientSteerId).isNull()
+    }
+
+    // --- on_run_step_closed (v0.8.8-rc2) ---
+
+    private fun runStep(stepId: String, callId: String) = SseEvent(
+        event = "",
+        data = """{"event":"on_run_step","data":{"id":"$stepId","stepDetails":{"type":"tool_calls",""" +
+            """"tool_calls":[{"id":"$callId","name":"search","args":""}]},"agentId":"agent_1","groupId":1}}""",
+    )
+
+    private fun runStepClosed(stepId: String, status: String, stamps: String = "") = SseEvent(
+        event = "",
+        data = """{"event":"on_run_step_closed","data":{"id":"$stepId","index":0,"type":"tool_calls",""" +
+            """"status":"$status"$stamps}}""",
+    )
+
+    @Test
+    fun `maps on_run_step_closed onto the tool call its step announced`() {
+        // The closure names the STEP; every tool-call event on this side is keyed by the tool_call
+        // id, and only the announcing on_run_step carries both.
+        mapper.map(runStep("step_1", "call_1"))
+
+        val closed = mapper.map(runStepClosed("step_1", "cancelled")) as StreamEvent.ToolCallClosed
+        assertThat(closed.toolCallId).isEqualTo("call_1")
+        assertThat(closed.status).isEqualTo(RunStepStatus.CANCELLED)
+        assertThat(closed.agentId).isEqualTo("agent_1")
+        assertThat(closed.groupId).isEqualTo(1)
+    }
+
+    @Test
+    fun `a closure for a step this connection never saw is dropped`() {
+        // A reconnect can replay from after the step was created, and message_creation steps have
+        // no tool call at all. Neither is an error worth surfacing.
+        assertThat(mapper.map(runStepClosed("step_never_seen", "completed"))).isNull()
+    }
+
+    @Test
+    fun `an unrecognized terminal status degrades to no event`() {
+        mapper.map(runStep("step_1", "call_1"))
+        assertThat(mapper.map(runStepClosed("step_1", "some_future_state"))).isNull()
+    }
+
+    @Test
+    fun `duration is derived only when both stamps are present and ordered`() {
+        mapper.map(runStep("step_a", "call_a"))
+        val timed = mapper.map(
+            runStepClosed("step_a", "completed", ""","created_at":1000,"closed_at":3500"""),
+        ) as StreamEvent.ToolCallClosed
+        assertThat(timed.durationMs).isEqualTo(2500)
+
+        // created_at is optional upstream, so its absence means "not derivable", not "instant".
+        mapper.map(runStep("step_b", "call_b"))
+        val untimed = mapper.map(
+            runStepClosed("step_b", "completed", ""","closed_at":3500"""),
+        ) as StreamEvent.ToolCallClosed
+        assertThat(untimed.durationMs).isNull()
+
+        // A step opened in one process and closed in another after a checkpoint resume can carry
+        // stamps from clocks that disagree; a wrong duration is worse than an absent one.
+        mapper.map(runStep("step_c", "call_c"))
+        val skewed = mapper.map(
+            runStepClosed("step_c", "completed", ""","created_at":5000,"closed_at":1000"""),
+        ) as StreamEvent.ToolCallClosed
+        assertThat(skewed.durationMs).isNull()
+    }
+
+    @Test
+    fun `resetState forgets the step to tool call mapping`() {
+        mapper.map(runStep("step_1", "call_1"))
+        mapper.resetState()
+        assertThat(mapper.map(runStepClosed("step_1", "completed"))).isNull()
     }
 
     @Test
@@ -273,6 +436,16 @@ class SseEventMapperTest {
         )
         val result = mapper.map(event) as StreamEvent.Created
         assertThat(result.conversationId).isEqualTo("c1")
+        assertThat(result.privacyRevision).isNull()
+    }
+
+    @Test
+    fun `maps a redacted turn's privacy revision from the created message`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"created":true,"message":{"conversationId":"c1","messageId":"m1","parentMessageId":"m0","privacyRevision":"r1","text":"[EMAIL]"}}""",
+        )
+        assertThat((mapper.map(event) as StreamEvent.Created).privacyRevision).isEqualTo("r1")
     }
 
     @Test
@@ -296,6 +469,29 @@ class SseEventMapperTest {
         assertThat(result.aggregatedContent[0].text).isEqualTo("Previously streamed text")
     }
 
+    @Test
+    fun `a sync frame names the reply the run is writing`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"sync":true,"resumeState":{"aggregatedContent":[],"responseMessageId":"resp-1"}}""",
+        )
+        assertThat((mapper.map(event) as StreamEvent.Sync).responseMessageId).isEqualTo("resp-1")
+        val unnamed = SseEvent(event = "", data = """{"sync":true,"resumeState":{"aggregatedContent":[]}}""")
+        assertThat((mapper.map(unnamed) as StreamEvent.Sync).responseMessageId).isNull()
+    }
+
+    @Test
+    fun `a sync frame drops the null slots of its sparse aggregatedContent`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"sync":true,"resumeState":{"aggregatedContent":[{"type":"text","text":"a"},null,{"type":"text","text":"b"}]}}""",
+        )
+
+        val result = mapper.map(event) as StreamEvent.Sync
+
+        assertThat(result.aggregatedContent.map { it.text }).containsExactly("a", "b").inOrder()
+    }
+
     /**
      * The server omits `pendingSteers` entirely when its queue is empty rather than sending `[]`
      * (upstream writes `pendingSteers.length > 0 ? pendingSteers : undefined`). Absence therefore
@@ -315,6 +511,75 @@ class SseEventMapperTest {
         val synced = events.filterIsInstance<StreamEvent.PendingSteersSynced>()
         assertThat(synced).hasSize(1)
         assertThat(synced.single().pendingSteers).isEmpty()
+    }
+
+    @Test
+    fun `a sync frame carrying the run's context reading emits it after the snapshot`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"sync":true,"resumeState":{"aggregatedContent":[{"type":"text","text":"hi"}],
+                "contextUsage":{"breakdown":{"maxContextTokens":100000,"instructionTokens":4000,"messageTokens":6000},
+                "remainingContextTokens":88000,"resumedOutputTokens":500}}}""",
+        )
+
+        val events = mapper.mapFrame(event).filterNot { it is StreamEvent.PendingSteersSynced }
+
+        assertThat(events[0]).isInstanceOf(StreamEvent.Sync::class.java)
+        val usage = (events[1] as StreamEvent.ContextUsageUpdate).usage
+        assertThat(usage.remainingContextTokens).isEqualTo(88_000)
+        assertThat(usage.resumedOutputTokens).isEqualTo(500)
+        assertThat(usage.usedTokens).isEqualTo(12_500)
+    }
+
+    @Test
+    fun `a sync frame's collected usage becomes a backfill, after the context reading`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"sync":true,"resumeState":{"aggregatedContent":[{"type":"text","text":"hi"}],
+                "contextUsage":{"breakdown":{"maxContextTokens":100000}},
+                "collectedUsage":[
+                  {"input_tokens":4000,"output_tokens":900,"runId":"r1","seq":1,"cost":0.02,
+                   "input_token_details":{"cache_creation":10,"cache_read":3000},"provider":"anthropic"},
+                  {"input_tokens":30,"output_tokens":8,"runId":"r1","seq":2,"usage_type":"activity-label"}
+                ]}}""",
+        )
+
+        val events = mapper.mapFrame(event).filterNot { it is StreamEvent.PendingSteersSynced }
+
+        assertThat(events[1]).isInstanceOf(StreamEvent.ContextUsageUpdate::class.java)
+        val backfill = events[2] as StreamEvent.UsageBackfill
+        assertThat(backfill.usages).hasSize(2)
+        val first = backfill.usages[0]
+        assertThat(first.runId).isEqualTo("r1")
+        assertThat(first.seq).isEqualTo(1)
+        assertThat(first.cost).isEqualTo(0.02)
+        assertThat(first.inputTokenDetails?.cacheRead).isEqualTo(3000)
+        assertThat(first.inputTokenDetails?.cacheCreation).isEqualTo(10)
+        assertThat(backfill.usages[1].usageType).isEqualTo("activity-label")
+    }
+
+    @Test
+    fun `a sync frame without collected usage emits no backfill`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"sync":true,"resumeState":{"aggregatedContent":[{"type":"text","text":"hi"}],"collectedUsage":[]}}""",
+        )
+
+        assertThat(mapper.mapFrame(event).filterIsInstance<StreamEvent.UsageBackfill>()).isEmpty()
+    }
+
+    @Test
+    fun `a malformed resume context reading is dropped without losing the rest of the frame`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"sync":true,"resumeState":{"aggregatedContent":[{"type":"text","text":"hi"}],
+                "contextUsage":{"breakdown":"not an object"}}}""",
+        )
+
+        val events = mapper.mapFrame(event)
+
+        assertThat(events.filterIsInstance<StreamEvent.ContextUsageUpdate>()).isEmpty()
+        assertThat(events.filterIsInstance<StreamEvent.Sync>()).hasSize(1)
     }
 
     @Test
@@ -646,9 +911,164 @@ class SseEventMapperTest {
     }
 
     @Test
+    fun `keeps the attachment's step id, which rc1 stamps beside the agent id`() {
+        val event = SseEvent(
+            event = "attachment",
+            data = """{"type":"ui_resources","toolCallId":"call_ui","agentId":"agent_1","stepId":"step_9","ui_resources":[]}""",
+        )
+        val result = mapper.map(event) as StreamEvent.AttachmentCreated
+        assertThat(result.agentId).isEqualTo("agent_1")
+        assertThat(result.stepId).isEqualTo("step_9")
+    }
+
+    @Test
+    fun `a step id of the wrong shape drops only that field`() {
+        val event = SseEvent(
+            event = "attachment",
+            data = """{"type":"ui_resources","toolCallId":"call_ui","stepId":{"x":1},"ui_resources":[]}""",
+        )
+        val result = mapper.map(event) as StreamEvent.AttachmentCreated
+        assertThat(result.stepId).isNull()
+        assertThat(result.toolCallId).isEqualTo("call_ui")
+    }
+
+    @Test
     fun `still drops an attachment carrying neither a file nor a payload`() {
         val event = SseEvent(event = "attachment", data = """{"type":"memory","messageId":"m1"}""")
         assertThat(mapper.map(event)).isNull()
+    }
+
+    // --- Code-interpreter outputs and sandbox lifecycle ---
+    //
+    // These fixtures are SYNTHESIZED from the upstream server source at the cited lines, NOT
+    // captured from a live server. Real captures from a server running stateful code sessions are
+    // still owed; replace these once they exist.
+    //   - stored output:   `Object.assign(file, { messageId, toolCallId, agentId })`,
+    //                      packages/api/src/files/code/process.ts:385,529,576
+    //   - workspaceChange: `addStatefulWorkspaceChange`, api/server/controllers/agents/callbacks.js:57-74,
+    //                      shape `WorkspaceChange` in packages/data-provider/src/schemas.ts:1042-1046
+    //   - fallback:        `createDownloadFallback`, api/server/services/Files/Code/process.js:343-375
+    //                      (no file_id, no type; expiresAt = now + 86400000, process.ts:404)
+    //   - sandbox:         `{event:'on_sandbox_starting', data:{tool_call_id, runId}}`,
+    //                      callbacks.js:303-306, packages/data-provider/src/types/runs.ts:52-60
+    //   - completion args: the web client replaces the tool call with `result.tool_call`,
+    //                      client/src/hooks/SSE/useStepHandler.ts:1450-1453
+
+    @Test
+    fun `maps a stored code output with its agent, size, ids and workspace change`() {
+        val event = SseEvent(
+            event = "attachment",
+            data = """{"file_id":"file_abc","filename":"report.md","filepath":"/uploads/u1/file_abc__report.md","type":"text/markdown","bytes":2048,"source":"local","conversationId":"convo_1","messageId":"run_1","toolCallId":"call_1","agentId":"agent_a","workspaceChange":{"profile":"stateful","operation":"created","path":"report.md"}}""",
+        )
+        val att = mapper.map(event) as StreamEvent.AttachmentCreated
+        assertThat(att.fileId).isEqualTo("file_abc")
+        assertThat(att.agentId).isEqualTo("agent_a")
+        assertThat(att.bytes).isEqualTo(2048)
+        assertThat(att.messageId).isEqualTo("run_1")
+        assertThat(att.conversationId).isEqualTo("convo_1")
+        assertThat(att.workspaceChange!!.profile).isEqualTo("stateful")
+        assertThat(att.workspaceChange!!.operation).isEqualTo("created")
+        assertThat(att.workspaceChange!!.path).isEqualTo("report.md")
+        assertThat(att.expiresAt).isNull()
+    }
+
+    @Test
+    fun `maps an updated workspace path`() {
+        val event = SseEvent(
+            event = "attachment",
+            data = """{"file_id":"file_abc","filename":"data.csv","type":"text/csv","toolCallId":"call_2","workspaceChange":{"profile":"stateful","operation":"updated","path":"out/data.csv"}}""",
+        )
+        val change = (mapper.map(event) as StreamEvent.AttachmentCreated).workspaceChange!!
+        assertThat(change.operation).isEqualTo("updated")
+        assertThat(change.path).isEqualTo("out/data.csv")
+    }
+
+    @Test
+    fun `a malformed workspace change drops only the change`() {
+        val event = SseEvent(
+            event = "attachment",
+            data = """{"file_id":"file_abc","filename":"a.txt","type":"text/plain","workspaceChange":"created"}""",
+        )
+        val att = mapper.map(event) as StreamEvent.AttachmentCreated
+        assertThat(att.fileId).isEqualTo("file_abc")
+        assertThat(att.workspaceChange).isNull()
+    }
+
+    @Test
+    fun `maps a download fallback with no file_id, keeping the id null`() {
+        val event = SseEvent(
+            event = "attachment",
+            data = """{"filename":"big.csv","filepath":"/api/files/code/download/sess_1/id_1?execution_profile=stateful","expiresAt":1760086400000,"conversationId":"convo_1","toolCallId":"call_1","messageId":"run_1","agentId":"agent_a"}""",
+        )
+        val att = mapper.map(event) as StreamEvent.AttachmentCreated
+        assertThat(att.fileId).isNull()
+        assertThat(att.type).isNull()
+        assertThat(att.filename).isEqualTo("big.csv")
+        assertThat(att.filepath).isEqualTo("/api/files/code/download/sess_1/id_1?execution_profile=stateful")
+        assertThat(att.expiresAt).isEqualTo(1_760_086_400_000)
+        assertThat(att.agentId).isEqualTo("agent_a")
+    }
+
+    @Test
+    fun `a non-primitive expiry or id drops only that field, not the attachment`() {
+        val event = SseEvent(
+            event = "attachment",
+            data = """{"filename":"big.csv","filepath":"/api/files/code/download/s/f","expiresAt":{"ms":1},"bytes":[1],"messageId":{},"conversationId":[],"agentId":{"id":"a"},"toolCallId":"call_1"}""",
+        )
+        val att = mapper.map(event) as StreamEvent.AttachmentCreated
+        assertThat(att.filename).isEqualTo("big.csv")
+        assertThat(att.toolCallId).isEqualTo("call_1")
+        assertThat(att.expiresAt).isNull()
+        assertThat(att.bytes).isNull()
+        assertThat(att.messageId).isNull()
+        assertThat(att.conversationId).isNull()
+        assertThat(att.agentId).isNull()
+    }
+
+    @Test
+    fun `an object-valued sandbox tool call id drops the event rather than throwing`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_sandbox_starting","data":{"tool_call_id":{"id":"call_1"},"runId":["run_1"]}}""",
+        )
+        assertThat(mapper.map(event)).isNull()
+    }
+
+    @Test
+    fun `maps on_sandbox_starting through the LangGraph data path`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_sandbox_starting","data":{"tool_call_id":"call_1","runId":"run_1"}}""",
+        )
+        val starting = mapper.map(event) as StreamEvent.SandboxStarting
+        assertThat(starting.toolCallId).isEqualTo("call_1")
+        assertThat(starting.runId).isEqualTo("run_1")
+    }
+
+    @Test
+    fun `drops on_sandbox_starting without a tool call id`() {
+        val event = SseEvent(event = "", data = """{"event":"on_sandbox_starting","data":{"runId":"run_1"}}""")
+        assertThat(mapper.map(event)).isNull()
+    }
+
+    @Test
+    fun `reads the args the completion carries`() {
+        mapper.map(runStep("step_1", "call_1"))
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_run_step_completed","data":{"result":{"id":"step_1","index":0,"type":"tool_call","tool_call":{"id":"call_1","name":"execute_code","args":{"lang":"py","code":"print(42)"},"output":"stdout:\n42\n","progress":1,"type":"tool_call"}}}}""",
+        )
+        val complete = mapper.map(event) as StreamEvent.ToolCallComplete
+        assertThat(complete.input).isEqualTo("""{"lang":"py","code":"print(42)"}""")
+    }
+
+    @Test
+    fun `a completion without args leaves the input null`() {
+        val event = SseEvent(
+            event = "",
+            data = """{"event":"on_run_step_completed","data":{"result":{"id":"step_1","tool_call":{"id":"call_1","output":"ok"}}}}""",
+        )
+        assertThat((mapper.map(event) as StreamEvent.ToolCallComplete).input).isNull()
     }
 
     // --- Legacy Flat Format ---

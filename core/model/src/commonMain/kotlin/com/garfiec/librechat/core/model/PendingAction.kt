@@ -133,7 +133,18 @@ data class ToolApprovalRequest(
     val arguments: JsonElement? = null,
     @SerialName("tool_call_id") val toolCallId: String = "",
     val description: String? = null,
-)
+    /**
+     * Server-authored provenance (v0.8.9-rc1): [SOURCE_LIBRECHAT_CODE] for the server's own code
+     * tools (`bash_tool`, `create_file`, `edit_file`), absent for user, MCP and action tools and for
+     * older servers. Only this field, never the name, lets the review show "Run command" or "Edit
+     * file": an MCP tool can be called `bash_tool` too. See `approval/ApprovalPreview.kt`.
+     */
+    val source: String? = null,
+) {
+    companion object {
+        const val SOURCE_LIBRECHAT_CODE = "librechat_code"
+    }
+}
 
 /**
  * Which decisions the policy permits for one paused call.
@@ -147,7 +158,38 @@ data class ToolReviewConfig(
     @SerialName("action_name") val actionName: String = "",
     @SerialName("tool_call_id") val toolCallId: String = "",
     @SerialName("allowed_decisions") val allowedDecisions: List<String> = emptyList(),
-)
+    /**
+     * Server-authored (v0.8.9-rc1): the user may approve this call for the rest of the
+     * conversation, sent as [com.garfiec.librechat.core.model.request.ToolApprovalResolution.scope]
+     * `session`. The only signal: the admin `allowAlways` switch never reaches clients. A
+     * `session` scope on a call without it is a 403, so it is offered per call, never per batch.
+     */
+    @SerialName("allow_always") val allowAlways: Boolean = false,
+    /**
+     * Set when the agent's mode for this tool is `chat` or `always`: a plain approve then teaches
+     * a remembered grant. One of [ToolApprovalRememberScopes]; a String so a value this build
+     * doesn't know still decodes.
+     */
+    @SerialName("remember_scope") val rememberScope: String? = null,
+    /** Why remembering can't work for this call; one of [ToolApprovalRememberUnavailable]. */
+    @SerialName("remember_unavailable") val rememberUnavailable: String? = null,
+) {
+    val canAllowAlways: Boolean get() = allowAlways && ToolApprovalDecisions.APPROVE in allowedDecisions
+}
+
+/** Wire values of [ToolReviewConfig.rememberScope]. */
+object ToolApprovalRememberScopes {
+    const val CHAT = "chat"
+    const val ALWAYS = "always"
+}
+
+/** Wire values of [ToolReviewConfig.rememberUnavailable]. */
+object ToolApprovalRememberUnavailable {
+    const val CONNECTION = "connection"
+    const val DISABLED = "disabled"
+    const val STORAGE = "storage"
+    const val BACKGROUND = "background"
+}
 
 /** Wire values of [ToolReviewConfig.allowedDecisions] / [ToolApprovalResolution.decision]. */
 object ToolApprovalDecisions {
@@ -233,4 +275,22 @@ data class PendingSteer(
     val steerId: String? = null,
     val text: String? = null,
     val createdAt: Long? = null,
+    /**
+     * The excerpts the steer was sent with (v0.8.8-rc2).
+     *
+     * Claim-on-read like the rest of the report: the server hands these over as it drops its own
+     * copy, so a client that re-homes the text without them loses the user's selections for good.
+     */
+    val quotes: List<String> = emptyList(),
+    /** This client's own id for the steer, when the server learned it. Correlates a report with
+     *  the optimistic chip whose 202 has not landed yet. */
+    val clientSteerId: String? = null,
+    /**
+     * The steer is queued as an interrupt (sent with `preempt`, or armed later through
+     * `/chat/steer/arm`). Carried on every report, so a chip re-seeded on reconnect keeps its
+     * interrupting look.
+     */
+    val preempt: Boolean? = null,
+    /** Server revision of [preempt], for last-writer-wins when two reports disagree. */
+    val preemptRevision: Int? = null,
 )

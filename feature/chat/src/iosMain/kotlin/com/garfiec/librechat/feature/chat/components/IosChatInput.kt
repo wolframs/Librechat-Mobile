@@ -1,48 +1,48 @@
+@file:Suppress("ForbiddenImport") // the composer styles its own field (ChatInputDefaults) for both interface styles
+
 package com.garfiec.librechat.feature.chat.components
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.garfiec.librechat.core.data.datastore.ContextBarPlacement
 import com.garfiec.librechat.core.data.datastore.DuringRunAction
-import com.garfiec.librechat.core.model.usage.ContextUsage
-import com.garfiec.librechat.core.model.usage.TokenUsage
-import com.garfiec.librechat.feature.chat.model.McpServerDisplayData
+import com.garfiec.librechat.core.ui.components.AdaptiveSnackbarHost
+import com.garfiec.librechat.core.ui.components.rememberDraftField
+import com.garfiec.librechat.feature.chat.model.ComposerPickerItem
+import com.garfiec.librechat.feature.chat.model.PickerSkill
 import com.garfiec.librechat.feature.chat.model.PromptMentionDisplayData
 import com.garfiec.librechat.feature.chat.resources.Res
-import com.garfiec.librechat.feature.chat.resources.cd_attach_file
+import com.garfiec.librechat.feature.chat.resources.cd_open_tools_menu
 import com.garfiec.librechat.feature.chat.resources.cd_paste_image
 import com.garfiec.librechat.feature.chat.viewmodel.ChatInputGates
 import com.garfiec.librechat.feature.chat.viewmodel.DuringRunSendTarget
-import com.garfiec.librechat.feature.chat.viewmodel.PendingSteerChip
-import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun IosChatInput(
     inputText: String,
     isStreaming: Boolean,
-    onInputChanged: (String) -> Unit,
+    onInputChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     /**
@@ -55,49 +55,43 @@ fun IosChatInput(
     canQueue: Boolean = false,
     onDuringRunSend: () -> Unit = {},
     onSteer: () -> Unit = {},
+    onInterrupt: () -> Unit = {},
     canSteer: Boolean = false,
-    duringRunAction: DuringRunAction = DuringRunAction.QUEUE,
+    builtInSearchOn: Boolean = false,
+    duringRunAction: DuringRunAction = DuringRunAction.STEER,
     duringRunSendTarget: DuringRunSendTarget = DuringRunSendTarget.QUEUE,
-    pendingSteers: List<PendingSteerChip> = emptyList(),
-    onCancelSteer: (steerId: String) -> Unit = {},
-    pendingQuotes: List<String> = emptyList(),
-    onRemoveQuote: (index: Int) -> Unit = {},
+    chrome: ComposerChrome = ComposerChrome(),
     onSetDuringRunAction: (DuringRunAction) -> Unit = {},
     queuedPausedCount: Int = 0,
+    queueHeldForRefusal: Boolean = false,
+    isTemporaryChat: Boolean = false,
     onSendQueuedMessages: () -> Unit = {},
     isEditingQueued: Boolean = false,
     onCommitEdit: () -> Unit = {},
     onCancelEdit: () -> Unit = {},
     isAwaitingUploadSend: Boolean = false,
     arePicksUnsettled: Boolean = false,
+    comparison: ComposerComparison? = null,
+    comparisonHint: ComposerComparisonHint = ComposerComparisonHint.NONE,
     onCancelPendingSend: () -> Unit = {},
-    queuedMessages: List<QueuedMessage> = emptyList(),
-    onEditQueuedMessage: (localId: String) -> Unit = {},
-    onCancelQueuedMessage: (localId: String) -> Unit = {},
-    onReorderQueuedMessages: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     fontSizeMultiplier: Float = 1f,
-    enabledTools: Set<String> = emptySet(),
-    pinnedToolKeys: List<String> = emptyList(),
-    onToggleTool: (String) -> Unit = {},
-    mcpServers: List<McpServerDisplayData> = emptyList(),
-    selectedMcpServerNames: Set<String> = emptySet(),
+    canFold: Boolean = false,
     isRecording: Boolean = false,
     isTranscribing: Boolean = false,
     onStartRecording: () -> Unit = {},
     onStopRecording: () -> Unit = {},
     selectedModelDisplay: String? = null,
     isCodeInterpreterAvailable: Boolean = true,
-    attachedFiles: List<AttachedFile> = emptyList(),
-    onRemoveFile: (AttachedFile) -> Unit = {},
     hasClipboardImage: Boolean = false,
     onPasteImage: (() -> Unit)? = null,
     gates: ChatInputGates = ChatInputGates(),
-    contextUsage: ContextUsage? = null,
-    tokenUsage: TokenUsage? = null,
-    contextUsageEnabled: Boolean = false,
-    contextBarPlacement: ContextBarPlacement = ContextBarPlacement.OPTIONS_SHEET,
     promptSuggestions: List<PromptMentionDisplayData> = emptyList(),
-    onSlashCommandSelected: (PromptMentionDisplayData) -> Unit = {},
+    skillSuggestions: List<PickerSkill> = emptyList(),
+    isLoadingSkills: Boolean = false,
+    skillsLoadFailed: Boolean = false,
+    canPickSkills: Boolean = false,
+    onRetrySkills: () -> Unit = {},
+    onPickerSelect: (ComposerPickerItem) -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -106,63 +100,66 @@ fun IosChatInput(
         isStreaming = isStreaming,
         isRecording = isRecording,
         isTranscribing = isTranscribing,
-        enabledTools = enabledTools,
-        pinnedToolKeys = pinnedToolKeys,
-        mcpServers = mcpServers,
-        selectedMcpServerNames = selectedMcpServerNames,
+        chrome = chrome,
         selectedModelDisplay = selectedModelDisplay,
         isCodeInterpreterAvailable = isCodeInterpreterAvailable,
-        attachedFiles = attachedFiles,
         gates = gates,
         canQueue = canQueue,
         canSteer = canSteer,
+        builtInSearchOn = builtInSearchOn,
         duringRunAction = duringRunAction,
         duringRunSendTarget = duringRunSendTarget,
-        pendingSteers = pendingSteers,
-        pendingQuotes = pendingQuotes,
         isEditingQueued = isEditingQueued,
         isAwaitingUploadSend = isAwaitingUploadSend,
         arePicksUnsettled = arePicksUnsettled,
-        contextUsage = contextUsage,
-        tokenUsage = tokenUsage,
-        contextUsageEnabled = contextUsageEnabled,
-        contextBarPlacement = contextBarPlacement,
+        comparisonHint = comparisonHint,
         promptSuggestions = promptSuggestions,
+        skillSuggestions = skillSuggestions,
+        isLoadingSkills = isLoadingSkills,
+        skillsLoadFailed = skillsLoadFailed,
+        canPickSkills = canPickSkills,
     )
 
     CommonChatInputCore(
         state = state,
         onSend = onSend,
         onStop = onStop,
-        onSelectPrompt = onSlashCommandSelected,
-        onToggleTool = onToggleTool,
+        onSelectPickerItem = onPickerSelect,
+        onPickerTextChange = onInputChange,
         onQueue = onQueue,
         onDuringRunSend = onDuringRunSend,
         onSteer = onSteer,
-        onCancelSteer = onCancelSteer,
-        onRemoveQuote = onRemoveQuote,
+        onInterrupt = onInterrupt,
+        onRetrySkills = onRetrySkills,
         onSetDuringRunAction = onSetDuringRunAction,
         queuedPausedCount = queuedPausedCount,
+        queueHeldForRefusal = queueHeldForRefusal,
+        isTemporaryChat = isTemporaryChat,
         onSendQueuedMessages = onSendQueuedMessages,
         onCommitEdit = onCommitEdit,
         onCancelEdit = onCancelEdit,
         onCancelPendingSend = onCancelPendingSend,
-        queuedMessages = queuedMessages,
-        onEditQueuedMessage = onEditQueuedMessage,
-        onCancelQueuedMessage = onCancelQueuedMessage,
-        onReorderQueuedMessages = onReorderQueuedMessages,
         fontSizeMultiplier = fontSizeMultiplier,
-        onRemoveFile = onRemoveFile,
+        canFold = canFold,
         modifier = modifier,
         leadingButtons = {
-            // "+" button to open tools bottom sheet (matches Android behavior)
-            FilledTonalIconButton(
-                onClick = onOpenTools,
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = stringResource(Res.string.cd_attach_file),
+            // "+" opens the options sheet, not a file picker, as on Android.
+            Box {
+                IconButton(
+                    onClick = onOpenTools,
+                    colors = ChatInputDefaults.toolsButtonColors(),
+                    modifier = Modifier.size(BoxButtonSize),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = stringResource(Res.string.cd_open_tools_menu),
+                    )
+                }
+                ToolsButtonDots(
+                    compactSuggested = chrome.compactSuggested,
+                    enabledTools = chrome.enabledTools,
+                    selectedMcpServerNames = chrome.selectedMcpServerNames,
+                    showEphemeralTools = gates.showEphemeralTools,
                 )
             }
 
@@ -170,29 +167,41 @@ fun IosChatInput(
             if (hasClipboardImage && onPasteImage != null) {
                 IconButton(
                     onClick = onPasteImage,
-                    modifier = Modifier.size(40.dp),
+                    colors = ChatInputDefaults.toolsButtonColors(),
+                    modifier = Modifier.size(BoxButtonSize),
                 ) {
                     Icon(
                         imageVector = Icons.Default.ContentPaste,
                         contentDescription = stringResource(Res.string.cd_paste_image),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.width(4.dp))
         },
         textFieldContent = {
-            // Text field with mic button overlaid at trailing edge.
-            // The mic is a separate composable (not trailingIcon) to
-            // avoid iOS text-magnifier gesture conflicts, but visually
-            // it sits inside the field's rounded border.
             Box(
                 modifier = Modifier.weight(1f),
             ) {
+                // inputText reaches here a frame or more after each keystroke; the field keeps its own
+                // text and takes only the ViewModel's own writes (STT, prompt insertion, the clear on send).
+                val field = rememberDraftField(inputText)
+                val commandStyle = pickerCommandStyle()
+                val pickerCommandToken = remember(commandStyle, canPickSkills) {
+                    VisualTransformation { text ->
+                        val range = pickerCommandRange(text.text, canPickSkills)
+                            ?: return@VisualTransformation TransformedText(text, OffsetMapping.Identity)
+                        val styled = AnnotatedString.Builder(text).apply {
+                            addStyle(commandStyle, range.first, range.last + 1)
+                        }.toAnnotatedString()
+                        TransformedText(styled, OffsetMapping.Identity)
+                    }
+                }
+                val compactComparison = comparison?.takeIf { it.compact }
+                val comparisonCollapsed = compactComparison?.collapsedFor(field.value.text) == true
+                val comparisonCollapse by animateComposerComparisonCollapse(comparisonCollapsed)
+                // The composer draws its own field (ChatInputDefaults), glass included; not the adaptive one.
                 OutlinedTextField(
-                    value = inputText,
-                    onValueChange = onInputChanged,
+                    value = field.value,
+                    onValueChange = { field.onValueChange(it, onInputChange) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp, max = 160.dp),
@@ -200,52 +209,49 @@ fun IosChatInput(
                         ChatInputPlaceholder(
                             isRecording = isRecording,
                             selectedModelDisplay = selectedModelDisplay,
+                            comparisonHint = comparisonHint,
                         )
                     },
+                    leadingIcon = remember(comparison) { composerFieldLeadingIcon(comparison) },
+                    prefix = compactComparison?.let {
+                        { ComposerComparisonReserve(collapse = { comparisonCollapse }) }
+                    },
+                    suffix = { ComposerAffixAnchor() },
                     textStyle = MaterialTheme.typography.bodyLarge,
-                    shape = ChatInputDefaults.shape,
+                    visualTransformation = pickerCommandToken,
                     colors = ChatInputDefaults.textFieldColors(),
                     keyboardOptions = ChatInputDefaults.keyboardOptions,
                     keyboardActions = KeyboardActions.Default,
                     maxLines = 6,
-                    // Invisible spacer reserves room for the overlaid mic button
-                    trailingIcon = {
-                        Spacer(modifier = Modifier.width(36.dp))
-                    },
                 )
 
-                // Mic button overlaid at trailing edge of the text field
-                IconButton(
-                    onClick = {
-                        if (isRecording) {
-                            onStopRecording()
-                        } else {
-                            onStartRecording()
-                        }
-                    },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 4.dp),
-                    enabled = !isTranscribing,
-                ) {
-                    VoiceMicIndicator(
-                        isRecording = isRecording,
-                        isTranscribing = isTranscribing,
+                if (compactComparison != null) {
+                    ComposerComparisonMorph(
+                        comparison = compactComparison,
+                        collapsed = comparisonCollapsed,
+                        collapse = { comparisonCollapse },
+                        modifier = Modifier.align(Alignment.TopStart),
                     )
                 }
             }
         },
-        trailingSpacer = {
-            Spacer(modifier = Modifier.width(4.dp))
+        // The mic sits in the button row, apart from the field, so it never competes with the
+        // field's text-magnifier gesture.
+        trailingButtons = {
+            IconButton(
+                onClick = { if (isRecording) onStopRecording() else onStartRecording() },
+                modifier = Modifier.size(BoxButtonSize),
+                enabled = !isTranscribing,
+            ) {
+                VoiceMicIndicator(isRecording = isRecording, isTranscribing = isTranscribing)
+            }
         },
         bottomContent = {
             // Snackbar for file attachment toast
-            SnackbarHost(
+            AdaptiveSnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         },
     )
-
 }

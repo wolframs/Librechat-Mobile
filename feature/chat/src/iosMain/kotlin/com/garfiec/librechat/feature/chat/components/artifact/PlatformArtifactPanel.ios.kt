@@ -13,13 +13,12 @@ import com.garfiec.librechat.feature.chat.components.web.loadVendoredHtml
 import com.garfiec.librechat.feature.chat.components.web.rememberWebAssetBaseUrl
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.cValue
-import platform.Foundation.NSURL
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
 
 /**
  * iOS preview surface — a `WKWebView` hosting the artifact's rendered HTML. The
- * shell, header, selector, and code body are shared in the common `ArtifactPanel`.
+ * shell, header, selector, and code body are shared in the common `ArtifactViewer`.
  */
 @OptIn(ExperimentalForeignApi::class)
 @Composable
@@ -28,9 +27,10 @@ actual fun ArtifactPreviewSurface(
     type: String,
     isDarkTheme: Boolean,
     modifier: Modifier,
+    allowedLibraries: Set<String>,
 ) {
-    val html = remember(content, type, isDarkTheme) {
-        ArtifactWebContent.buildHtml(content, type, isDarkTheme, inline = false)
+    val html = remember(content, type, isDarkTheme, allowedLibraries) {
+        ArtifactWebContent.buildHtml(content, type, isDarkTheme, inline = false, allowedLibraries = allowedLibraries)
     }
 
     // Track what HTML is currently loaded to avoid reloading on every recomposition —
@@ -39,6 +39,7 @@ actual fun ArtifactPreviewSurface(
     var loadedHtml by remember { mutableStateOf("") }
 
     val assetBase = rememberWebAssetBaseUrl() ?: return
+    val navigationPolicy = remember { LocalOnlyNavigationPolicy() }
 
     UIKitView(
         modifier = modifier.fillMaxSize(),
@@ -51,6 +52,7 @@ actual fun ArtifactPreviewSurface(
                 configuration = config,
             )
             webView.setOpaque(false)
+            webView.navigationDelegate = navigationPolicy
             webView.loadVendoredHtml(html, assetBase)
             loadedHtml = html
             webView
@@ -66,13 +68,7 @@ actual fun ArtifactPreviewSurface(
 
 @Composable
 actual fun rememberShareArtifact(): (Artifact) -> Unit = remember {
-    { artifact ->
-        shareArtifact(
-            title = artifact.title,
-            content = artifact.content,
-            language = artifact.language ?: "",
-        )
-    }
+    { artifact -> shareArtifact(artifact.content) }
 }
 
 // iOS has no API to place a home-screen launcher icon, so the affordance is unavailable.

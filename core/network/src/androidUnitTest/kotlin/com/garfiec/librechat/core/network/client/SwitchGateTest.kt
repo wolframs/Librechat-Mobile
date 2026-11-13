@@ -3,7 +3,8 @@ package com.garfiec.librechat.core.network.client
 import com.garfiec.librechat.core.common.identity.AccountId
 import com.garfiec.librechat.core.common.identity.AccountState.Resolved
 import com.garfiec.librechat.core.common.identity.InMemoryActiveAccountProvider
-import com.garfiec.librechat.core.network.client.SessionEndReason
+import com.garfiec.librechat.core.common.identity.deriveAccountId
+import com.garfiec.librechat.core.common.identity.deriveServerId
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -15,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.junit.Test
+import kotlin.test.assertFailsWith
 
 /**
  * Snapshot semantics of [SwitchGate.captureSnapshot]: the bearer is keyed to the snapshot's account
@@ -23,6 +25,8 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SwitchGateTest {
+
+    private val accountA = deriveAccountId(deriveServerId("https://a.example.com"), "user-a").value
 
     private class FakeTokenManager(
         private val liveToken: String?,
@@ -77,19 +81,74 @@ class SwitchGateTest {
     }
 
     @Test
+    fun `a sign in transition waits for the cold start seed before clearing its binding`() = runTest {
+        val seeded = CompletableDeferred<Unit>()
+        val gate = SwitchGate(
+            activeAccountProvider = InMemoryActiveAccountProvider(),
+            serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
+            tokenManager = FakeTokenManager(null),
+            accountReadyGate = object : AccountReadyGate {
+                override suspend fun awaitReady() = seeded.await()
+            },
+        )
+        var detached = false
+        val transition = launch { gate.withSwitch { detached = true } }
+        yield()
+        assertThat(detached).isFalse()
+
+        seeded.complete(Unit)
+        transition.join()
+
+        assertThat(detached).isTrue()
+    }
+
+    @Test
+    fun `a bound account refuses a different deployment before reading or renewing credentials`() = runTest {
+        val tokens = object : TokenManager by FakeTokenManager("a-token") {
+            override suspend fun getAccessTokenFor(accountId: String): String? =
+                error("credentials must not be read for a mismatched server")
+        }
+        for (url in listOf(
+            "https://b.example.com", "http://a.example.com", "https://a.example.com:8443",
+            "https://a.example.com/other", "", "file:///tmp/server",
+        )) {
+            val gate = SwitchGate(
+                activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
+                serverUrlProvider = FakeServerUrlProvider(url),
+                tokenManager = tokens,
+                accountReadyGate = null,
+            )
+            val failure = assertFailsWith<IllegalStateException> { gate.captureSnapshot(renewIfStale = true) }
+            assertThat(failure).hasMessageThat().isEqualTo("Active account does not belong to the configured server")
+        }
+    }
+
+    @Test
+    fun `equivalent server URLs keep the bound account authenticated`() = runTest {
+        val gate = SwitchGate(
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
+            serverUrlProvider = FakeServerUrlProvider("https://A.EXAMPLE.COM:443/"),
+            tokenManager = FakeTokenManager("a-token", mapOf(accountA to "a-token")),
+            accountReadyGate = null,
+        )
+
+        assertThat(gate.captureSnapshot().bearer).isEqualTo("a-token")
+    }
+
+    @Test
     fun `snapshot bearer is keyed to the snapshot account, not the live cache`() = runTest {
         // Sign-in staging in progress: the live cache holds the STAGED account's token, but the
         // resolved account A must snapshot its own keyed token.
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
-            tokenManager = FakeTokenManager(liveToken = "staged-b", keyed = mapOf("acct-a" to "a-keyed")),
+            tokenManager = FakeTokenManager(liveToken = "staged-b", keyed = mapOf(accountA to "a-keyed")),
             accountReadyGate = null,
         )
 
         val snapshot = gate.captureSnapshot()
 
-        assertThat(snapshot.accountId).isEqualTo("acct-a")
+        assertThat(snapshot.accountId).isEqualTo(accountA)
         assertThat(snapshot.bearer).isEqualTo("a-keyed")
         assertThat(snapshot.isPending).isFalse()
     }
@@ -98,7 +157,7 @@ class SwitchGateTest {
     fun `snapshot bearer is null for a resolved account with an empty keyed slot`() = runTest {
         // Must not fall through to the live cache (which may hold another account's staged token).
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
             tokenManager = FakeTokenManager(liveToken = "staged-b", keyed = emptyMap()),
             accountReadyGate = null,
@@ -124,7 +183,7 @@ class SwitchGateTest {
     fun `pending identity short-circuits without reading the live providers`() = runTest {
         // Live providers that would fail the test if consulted.
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
             serverUrlProvider = object : ServerUrlProvider {
                 override fun getBaseUrl(): String = error("live URL must not be read for a pending request")
             },
@@ -150,9 +209,9 @@ class SwitchGateTest {
     @Test
     fun `pending identity bypasses a closed switch gate`() = runTest {
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
-            tokenManager = FakeTokenManager(liveToken = "a-token", keyed = mapOf("acct-a" to "a-token")),
+            tokenManager = FakeTokenManager(liveToken = "a-token", keyed = mapOf(accountA to "a-token")),
             accountReadyGate = null,
         )
         val flipStarted = CompletableDeferred<Unit>()
@@ -181,14 +240,14 @@ class SwitchGateTest {
 
     /**
      * Proactive renewal is opt-in per capture. The default must stay off: logout and the post-login
-     * profile fetch snapshot through here too, and renewing for either is wrong rather than merely
-     * wasteful — logout would rotate a token it is about to revoke.
+     * profile fetch snapshot through here too, and each decides for itself whether to renew — logout
+     * renews only once it knows the account holds a refresh token to revoke with.
      */
     @Test
     fun `the default capture never renews`() = runTest {
-        val tokens = FakeTokenManager(liveToken = "a", keyed = mapOf("acct-a" to "a-keyed"))
+        val tokens = FakeTokenManager(liveToken = "a", keyed = mapOf(accountA to "a-keyed"))
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
             tokenManager = tokens,
             accountReadyGate = null,
@@ -203,11 +262,11 @@ class SwitchGateTest {
     fun `an opted-in capture renews and snapshots the renewed bearer`() = runTest {
         val tokens = FakeTokenManager(
             liveToken = "a",
-            keyed = mapOf("acct-a" to "a-stale"),
+            keyed = mapOf(accountA to "a-stale"),
             renewsTo = "a-renewed",
         )
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
             tokenManager = tokens,
             accountReadyGate = null,
@@ -225,9 +284,9 @@ class SwitchGateTest {
     fun `a pending identity never renews even when opted in`() = runTest {
         // An add-account probe has no keyed account to refresh, and renewing the *active* account's
         // token on its behalf would be the live session's traffic done under another flow's identity.
-        val tokens = FakeTokenManager(liveToken = "a", keyed = mapOf("acct-a" to "a-keyed"))
+        val tokens = FakeTokenManager(liveToken = "a", keyed = mapOf(accountA to "a-keyed"))
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
             tokenManager = tokens,
             accountReadyGate = null,
@@ -260,18 +319,19 @@ class SwitchGateTest {
             override fun getBaseUrl(): String = "https://server-${reads++}.example.com"
         }
 
+        val shiftingAccount = deriveAccountId(deriveServerId("https://server-1.example.com"), "user-a").value
         val baseline = ShiftingUrlProvider()
         SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(shiftingAccount))),
             serverUrlProvider = baseline,
-            tokenManager = FakeTokenManager(liveToken = "a", keyed = mapOf("acct-a" to "a-stale")),
+            tokenManager = FakeTokenManager(liveToken = "a", keyed = mapOf(shiftingAccount to "a-stale")),
             accountReadyGate = null,
         ).captureSnapshot()
 
         val shifting = ShiftingUrlProvider()
-        val tokens = FakeTokenManager(liveToken = "a", keyed = mapOf("acct-a" to "a-stale"))
+        val tokens = FakeTokenManager(liveToken = "a", keyed = mapOf(shiftingAccount to "a-stale"))
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(shiftingAccount))),
             serverUrlProvider = shifting,
             tokenManager = tokens,
             accountReadyGate = null,
@@ -297,9 +357,9 @@ class SwitchGateTest {
         val releaseRenewal = CompletableDeferred<Unit>()
         val renewalStarted = CompletableDeferred<Unit>()
         val gate = SwitchGate(
-            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId("acct-a"))),
+            activeAccountProvider = InMemoryActiveAccountProvider(Resolved(AccountId(accountA))),
             serverUrlProvider = FakeServerUrlProvider("https://a.example.com"),
-            tokenManager = object : TokenManager by FakeTokenManager("a", mapOf("acct-a" to "a-keyed")) {
+            tokenManager = object : TokenManager by FakeTokenManager("a", mapOf(accountA to "a-keyed")) {
                 override suspend fun ensureFreshAccessToken(
                     accountId: String?,
                     baseUrl: String,

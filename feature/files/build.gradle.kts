@@ -2,7 +2,7 @@ plugins {
     id("librechat.kmp.feature")
 }
 
-extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+android {
     namespace = "com.garfiec.librechat.feature.files"
 }
 
@@ -10,7 +10,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":core:network"))
-            implementation(libs.ktor.client.core)
+            implementation(project(":core:logging"))
             implementation(libs.kermit)
             implementation(libs.coil3.compose)
         }

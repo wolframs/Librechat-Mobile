@@ -15,26 +15,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,12 +36,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.garfiec.librechat.core.model.ApiKey
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveCircularProgressIndicator
+import com.garfiec.librechat.core.ui.components.AdaptiveFloatingActionButton
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedButton
+import com.garfiec.librechat.core.ui.components.AdaptiveScaffold
+import com.garfiec.librechat.core.ui.components.AdaptiveSnackbarHost
+import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
+import com.garfiec.librechat.core.ui.components.EmptyState
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBar
+import com.garfiec.librechat.core.ui.components.topbar.AdaptiveTopBarSpec
+import com.garfiec.librechat.core.ui.components.topbar.BarIcons
+import com.garfiec.librechat.core.ui.components.topbar.BarNavigation
+import com.garfiec.librechat.core.ui.components.topbar.BarTitle
 import com.garfiec.librechat.feature.settings.resources.*
 import com.garfiec.librechat.feature.settings.resources.Res
+import com.garfiec.librechat.feature.settings.viewmodel.ApiKeysLoadFailure
 import com.garfiec.librechat.feature.settings.viewmodel.ApiKeysViewModel
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
@@ -72,25 +79,21 @@ fun ApiKeysScreen(
         viewModel.dismissError()
     }
 
-    Scaffold(
+    AdaptiveScaffold(
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { AdaptiveSnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(Res.string.title_api_keys)) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(Res.string.cd_back),
-                        )
-                    }
-                },
+            AdaptiveTopBar(
+                spec = AdaptiveTopBarSpec(
+                    navigation = BarNavigation(BarIcons.Back, stringResource(Res.string.cd_back), onNavigateBack),
+                    title = BarTitle(stringResource(Res.string.title_api_keys)),
+                    actions = emptyList(),
+                ),
             )
         },
         floatingActionButton = {
-            if (uiState.error == null || uiState.keys.isNotEmpty()) {
-                FloatingActionButton(onClick = viewModel::showCreateDialog) {
+            if (uiState.loadFailure == null || uiState.keys.isNotEmpty()) {
+                AdaptiveFloatingActionButton(onClick = viewModel::showCreateDialog) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = stringResource(Res.string.cd_create_api_key),
@@ -106,16 +109,20 @@ fun ApiKeysScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            val loadFailure = uiState.loadFailure
             when {
                 uiState.isLoading && uiState.keys.isEmpty() -> {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        CircularProgressIndicator()
+                        AdaptiveCircularProgressIndicator()
                     }
                 }
-                !uiState.isLoading && uiState.error != null && uiState.keys.isEmpty() -> {
+                !uiState.isLoading && loadFailure != null && uiState.keys.isEmpty() -> {
+                    ApiKeysLoadFailureState(failure = loadFailure, onRetry = viewModel::loadKeys)
+                }
+                !uiState.isLoading && uiState.keys.isEmpty() -> {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
@@ -132,42 +139,16 @@ fun ApiKeysScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(
-                                text = stringResource(Res.string.api_keys_not_available),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = stringResource(Res.string.api_keys_not_supported),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                !uiState.isLoading && uiState.keys.isEmpty() -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Key,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
                                 text = stringResource(Res.string.no_api_keys),
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
                             )
                             Text(
                                 text = stringResource(Res.string.no_api_keys_desc),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
                             )
                         }
                     }
@@ -197,14 +178,14 @@ fun ApiKeysScreen(
 
     // Delete confirmation dialog
     keyToDelete?.let { key ->
-        AlertDialog(
+        AdaptiveAlertDialog(
             onDismissRequest = { keyToDelete = null },
             title = { Text(stringResource(Res.string.dialog_title_delete_api_key)) },
             text = {
                 Text(stringResource(Res.string.dialog_delete_api_key_message, key.name))
             },
             confirmButton = {
-                TextButton(
+                AdaptiveTextButton(
                     onClick = {
                         val id = key.id
                         keyToDelete = null
@@ -220,7 +201,7 @@ fun ApiKeysScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { keyToDelete = null }) {
+                AdaptiveTextButton(onClick = { keyToDelete = null }) {
                     Text(stringResource(Res.string.action_cancel))
                 }
             },
@@ -239,7 +220,7 @@ fun ApiKeysScreen(
 }
 
 @Composable
-private fun ApiKeyCard(
+internal fun ApiKeyCard(
     apiKey: ApiKey,
     isDeleting: Boolean,
     onDeleteClick: () -> Unit,
@@ -283,6 +264,7 @@ private fun ApiKeyCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 val createdAt = apiKey.createdAt
@@ -296,7 +278,7 @@ private fun ApiKeyCard(
                 }
             }
             if (isDeleting) {
-                CircularProgressIndicator(
+                AdaptiveCircularProgressIndicator(
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.dp,
                 )
@@ -316,4 +298,24 @@ private fun ApiKeyCard(
 private fun formatDate(dateString: String): String {
     // Simple date formatting - show the date portion
     return dateString.substringBefore("T").ifBlank { dateString }
+}
+
+/** The list couldn't load: "not available" for a server without the route, else the error and Retry. */
+@Composable
+private fun ApiKeysLoadFailureState(failure: ApiKeysLoadFailure, onRetry: () -> Unit) {
+    when (failure) {
+        ApiKeysLoadFailure.NotSupported -> EmptyState(
+            title = stringResource(Res.string.api_keys_not_available),
+            description = stringResource(Res.string.api_keys_not_supported),
+            icon = Icons.Default.Key,
+        )
+        is ApiKeysLoadFailure.Failed -> EmptyState(
+            title = stringResource(Res.string.api_keys_load_failed),
+            description = failure.message,
+            icon = Icons.Default.Key,
+            action = {
+                AdaptiveOutlinedButton(onClick = onRetry) { Text(stringResource(Res.string.action_retry)) }
+            },
+        )
+    }
 }

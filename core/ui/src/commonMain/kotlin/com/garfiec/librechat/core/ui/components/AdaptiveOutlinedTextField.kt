@@ -1,0 +1,283 @@
+package com.garfiec.librechat.core.ui.components
+
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.KeyboardActionHandler
+import androidx.compose.foundation.text.input.OutputTransformation
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.then
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldColors
+import androidx.compose.material3.TextFieldLabelScope
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
+import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.glass.GlassControlColors
+import com.garfiec.librechat.core.ui.theme.isLiquidGlass
+
+/**
+ * In Liquid Glass, the iOS rounded field (M3's filled [TextField] without its indicator line).
+ * [shape] and [colors] only apply in Material.
+ */
+@Composable
+fun AdaptiveOutlinedTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    textStyle: TextStyle = LocalTextStyle.current,
+    label: @Composable (() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    prefix: @Composable (() -> Unit)? = null,
+    suffix: @Composable (() -> Unit)? = null,
+    supportingText: @Composable (() -> Unit)? = null,
+    isError: Boolean = false,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    singleLine: Boolean = false,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    minLines: Int = 1,
+    interactionSource: MutableInteractionSource? = null,
+    shape: Shape = OutlinedTextFieldDefaults.shape,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
+) {
+    if (keyboardOptions.undoesSmartPunctuation()) {
+        StraightenedTextField(value, onValueChange) { field, onFieldChange ->
+            AdaptiveOutlinedTextField(
+                value = field, onValueChange = onFieldChange,
+                modifier = modifier, enabled = enabled, readOnly = readOnly, textStyle = textStyle, label = label,
+                placeholder = placeholder, leadingIcon = leadingIcon, trailingIcon = trailingIcon, prefix = prefix,
+                suffix = suffix, supportingText = supportingText, isError = isError,
+                visualTransformation = visualTransformation, keyboardOptions = keyboardOptions,
+                keyboardActions = keyboardActions, singleLine = singleLine, maxLines = maxLines, minLines = minLines,
+                interactionSource = interactionSource, shape = shape, colors = colors,
+            )
+        }
+        return
+    }
+    if (!isLiquidGlass) {
+        OutlinedTextField(
+            value = value, onValueChange = onValueChange, modifier = modifier, enabled = enabled,
+            readOnly = readOnly, textStyle = textStyle, label = label,
+            placeholder = oneLinePlaceholder(placeholder, singleLine || maxLines == 1),
+            leadingIcon = leadingIcon, trailingIcon = trailingIcon, prefix = prefix, suffix = suffix,
+            supportingText = supportingText, isError = isError, visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, singleLine = singleLine,
+            maxLines = maxLines, minLines = minLines, interactionSource = interactionSource, shape = shape,
+            colors = colors,
+        )
+        return
+    }
+    TextField(
+        value = value, onValueChange = onValueChange, modifier = modifier, enabled = enabled,
+        readOnly = readOnly, textStyle = textStyle, label = label,
+        placeholder = oneLinePlaceholder(placeholder, singleLine || maxLines == 1),
+        leadingIcon = leadingIcon, trailingIcon = trailingIcon, prefix = prefix, suffix = suffix,
+        supportingText = supportingText, isError = isError, visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, singleLine = singleLine,
+        maxLines = maxLines, minLines = minLines, interactionSource = interactionSource, shape = GlassFieldShape,
+        colors = glassFieldColors(colors),
+    )
+}
+
+/** The [TextFieldValue] overload of [AdaptiveOutlinedTextField]; see there. */
+@Composable
+fun AdaptiveOutlinedTextField(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    textStyle: TextStyle = LocalTextStyle.current,
+    label: @Composable (() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    prefix: @Composable (() -> Unit)? = null,
+    suffix: @Composable (() -> Unit)? = null,
+    supportingText: @Composable (() -> Unit)? = null,
+    isError: Boolean = false,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    singleLine: Boolean = false,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    minLines: Int = 1,
+    interactionSource: MutableInteractionSource? = null,
+    shape: Shape = OutlinedTextFieldDefaults.shape,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
+) {
+    val onTyped: (TextFieldValue) -> Unit = if (keyboardOptions.undoesSmartPunctuation()) {
+        { typed -> onValueChange(typed.withoutSmartPunctuation(value.text)) }
+    } else {
+        onValueChange
+    }
+    if (!isLiquidGlass) {
+        OutlinedTextField(
+            value = value, onValueChange = onTyped, modifier = modifier, enabled = enabled,
+            readOnly = readOnly, textStyle = textStyle, label = label,
+            placeholder = oneLinePlaceholder(placeholder, singleLine || maxLines == 1),
+            leadingIcon = leadingIcon, trailingIcon = trailingIcon, prefix = prefix, suffix = suffix,
+            supportingText = supportingText, isError = isError, visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, singleLine = singleLine,
+            maxLines = maxLines, minLines = minLines, interactionSource = interactionSource, shape = shape,
+            colors = colors,
+        )
+        return
+    }
+    TextField(
+        value = value, onValueChange = onTyped, modifier = modifier, enabled = enabled,
+        readOnly = readOnly, textStyle = textStyle, label = label,
+        placeholder = oneLinePlaceholder(placeholder, singleLine || maxLines == 1),
+        leadingIcon = leadingIcon, trailingIcon = trailingIcon, prefix = prefix, suffix = suffix,
+        supportingText = supportingText, isError = isError, visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, singleLine = singleLine,
+        maxLines = maxLines, minLines = minLines, interactionSource = interactionSource, shape = GlassFieldShape,
+        colors = glassFieldColors(colors),
+    )
+}
+
+/** The [TextFieldState] overload of [AdaptiveOutlinedTextField]; see there. */
+@Composable
+fun AdaptiveOutlinedTextField(
+    state: TextFieldState,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    textStyle: TextStyle = LocalTextStyle.current,
+    label: @Composable (TextFieldLabelScope.() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    prefix: @Composable (() -> Unit)? = null,
+    suffix: @Composable (() -> Unit)? = null,
+    supportingText: @Composable (() -> Unit)? = null,
+    isError: Boolean = false,
+    inputTransformation: InputTransformation? = null,
+    outputTransformation: OutputTransformation? = null,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    onKeyboardAction: KeyboardActionHandler? = null,
+    lineLimits: TextFieldLineLimits = TextFieldLineLimits.Default,
+    interactionSource: MutableInteractionSource? = null,
+    shape: Shape = OutlinedTextFieldDefaults.shape,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
+) {
+    val transformation = if (keyboardOptions.undoesSmartPunctuation()) {
+        inputTransformation?.let { SmartPunctuationTransformation.then(it) } ?: SmartPunctuationTransformation
+    } else {
+        inputTransformation
+    }
+    if (!isLiquidGlass) {
+        OutlinedTextField(
+            state = state, modifier = modifier, enabled = enabled, readOnly = readOnly, textStyle = textStyle,
+            label = label, placeholder = oneLinePlaceholder(placeholder, lineLimits == TextFieldLineLimits.SingleLine),
+            leadingIcon = leadingIcon, trailingIcon = trailingIcon,
+            prefix = prefix, suffix = suffix, supportingText = supportingText, isError = isError,
+            inputTransformation = transformation, outputTransformation = outputTransformation,
+            keyboardOptions = keyboardOptions, onKeyboardAction = onKeyboardAction, lineLimits = lineLimits,
+            interactionSource = interactionSource, shape = shape, colors = colors,
+        )
+        return
+    }
+    TextField(
+        state = state, modifier = modifier, enabled = enabled, readOnly = readOnly, textStyle = textStyle,
+        label = label, placeholder = oneLinePlaceholder(placeholder, lineLimits == TextFieldLineLimits.SingleLine),
+        leadingIcon = leadingIcon, trailingIcon = trailingIcon,
+        prefix = prefix, suffix = suffix, supportingText = supportingText, isError = isError,
+        inputTransformation = transformation, outputTransformation = outputTransformation,
+        keyboardOptions = keyboardOptions, onKeyboardAction = onKeyboardAction, lineLimits = lineLimits,
+        interactionSource = interactionSource, shape = GlassFieldShape, colors = glassFieldColors(colors),
+    )
+}
+
+/**
+ * Holds a String field's text as a [TextFieldValue], so undoing an em dash (one character becomes
+ * two) can place the caret; the String overload of a text field can't.
+ */
+@Composable
+private fun StraightenedTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    content: @Composable (TextFieldValue, (TextFieldValue) -> Unit) -> Unit,
+) {
+    var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    var lastText by remember(value) { mutableStateOf(value) }
+    content(if (field.text == value) field else field.copy(text = value)) { typed ->
+        field = typed
+        if (typed.text != lastText) {
+            lastText = typed.text
+            onValueChange(typed.text)
+        }
+    }
+}
+
+/**
+ * A single-line field's placeholder stays on one line too. Left to wrap, it would make the empty field
+ * taller than the typed one, which would shrink on the first key. A placeholder Text with maxLines = 1
+ * ellipsizes at the field's width; one that would wrap is laid out on one line and cut at the edge.
+ */
+private fun oneLinePlaceholder(placeholder: (@Composable () -> Unit)?, singleLine: Boolean): (@Composable () -> Unit)? =
+    if (placeholder == null || !singleLine) placeholder else { { OneLine(placeholder) } }
+
+@Composable
+private fun OneLine(content: @Composable () -> Unit) {
+    Layout(content = { Box { content() } }, modifier = Modifier.clipToBounds()) { measurables, constraints ->
+        val child = measurables.single()
+        val wraps = constraints.hasBoundedWidth &&
+            child.minIntrinsicHeight(constraints.maxWidth) > child.minIntrinsicHeight(Constraints.Infinity)
+        val placeable = child.measure(if (wraps) constraints.copy(maxWidth = Constraints.Infinity) else constraints)
+        layout(constraints.constrainWidth(placeable.width), constraints.constrainHeight(placeable.height)) {
+            placeable.placeRelative(0, 0)
+        }
+    }
+}
+
+/**
+ * Borderless in every state (iOS shows focus with the caret). Text, label and icon colours are kept,
+ * so a caller that styles a disabled field to read as enabled still gets that.
+ */
+@Composable
+private fun glassFieldColors(colors: TextFieldColors): TextFieldColors {
+    val fill = GlassControlColors.fill
+    return colors.copy(
+        focusedContainerColor = fill,
+        unfocusedContainerColor = fill,
+        disabledContainerColor = fill,
+        errorContainerColor = fill,
+        focusedIndicatorColor = Color.Transparent,
+        unfocusedIndicatorColor = Color.Transparent,
+        disabledIndicatorColor = Color.Transparent,
+        errorIndicatorColor = Color.Transparent,
+        cursorColor = MaterialTheme.colorScheme.primary,
+    )
+}
+
+private val GlassFieldShape = RoundedCornerShape(10.dp)

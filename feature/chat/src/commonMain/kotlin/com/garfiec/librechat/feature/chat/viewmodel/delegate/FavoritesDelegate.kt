@@ -5,20 +5,17 @@ import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.data.repository.FavoritesRepository
 import com.garfiec.librechat.core.model.FavoritesLimits
 import com.garfiec.librechat.core.model.UserFavorite
+import com.garfiec.librechat.feature.chat.viewmodel.ChatNotice
 import com.garfiec.librechat.feature.chat.viewmodel.FavoritesHandle
 import kotlinx.coroutines.launch
 
 /**
- * Routes pin/unpin actions from chat-side pickers (model/agent selector) to
+ * Routes pin/unpin actions from chat-side pickers (model/agent/spec selector) to
  * [FavoritesRepository] and republishes the canonical list into its [FavoritesHandle].
  *
  * The repository owns the cached list and serializes writes via a Mutex, so
  * this delegate is a thin shim: it observes the shared flow and forwards
  * toggles. The settings-side `FavoritesViewModel` reads the same flow.
- *
- * Spec pinning is intentionally not surfaced yet — mobile has no spec picker
- * today, but [UserFavorite.spec] is preserved in round-trips so third-party
- * clients' pinned specs survive a save from this client.
  */
 class FavoritesDelegate(
     private val handle: FavoritesHandle,
@@ -57,33 +54,25 @@ class FavoritesDelegate(
     }
 
     /** Toggle an agent pin. Fire-and-forget — the repository does the optimistic update + rollback. */
-    fun toggleAgent(agentId: String) {
-        val current = favoritesRepository.favorites.value
-        val currentlyPinned = current.any { it.agentId == agentId }
-        val nextList = if (currentlyPinned) {
-            current.filterNot { it.agentId == agentId }
-        } else {
-            if (atLimit(current)) {
-                reportLimit()
-                return
-            }
-            current + UserFavorite(agentId = agentId)
-        }
-        persist(nextList)
-    }
+    fun toggleAgent(agentId: String) = toggle(UserFavorite(agentId = agentId)) { it.agentId == agentId }
 
     /** Toggle a model pin. A model favorite is identified by the (endpoint, model) pair. */
-    fun toggleModel(endpoint: String, model: String) {
+    fun toggleModel(endpoint: String, model: String) =
+        toggle(UserFavorite(endpoint = endpoint, model = model)) { it.endpoint == endpoint && it.model == model }
+
+    /** Toggle a model spec pin, by spec name. A spec entry carries only the name, never its endpoint or model. */
+    fun toggleSpec(name: String) = toggle(UserFavorite(spec = name)) { it.spec == name }
+
+    private fun toggle(entry: UserFavorite, matches: (UserFavorite) -> Boolean) {
         val current = favoritesRepository.favorites.value
-        val currentlyPinned = current.any { it.endpoint == endpoint && it.model == model }
-        val nextList = if (currentlyPinned) {
-            current.filterNot { it.endpoint == endpoint && it.model == model }
+        val nextList = if (current.any(matches)) {
+            current.filterNot(matches)
         } else {
             if (atLimit(current)) {
                 reportLimit()
                 return
             }
-            current + UserFavorite(endpoint = endpoint, model = model)
+            current + entry
         }
         persist(nextList)
     }
@@ -91,7 +80,7 @@ class FavoritesDelegate(
     private fun atLimit(current: List<UserFavorite>): Boolean = current.size >= FavoritesLimits.MAX_FAVORITES
 
     private fun reportLimit() {
-        handle.setError("You can pin up to ${FavoritesLimits.MAX_FAVORITES} favorites.")
+        handle.setError(ChatNotice.FAVORITES_LIMIT.marker(FavoritesLimits.MAX_FAVORITES))
     }
 
     private fun persist(nextList: List<UserFavorite>) {
@@ -100,7 +89,7 @@ class FavoritesDelegate(
                 is Result.Success -> Unit
                 is Result.Error -> {
                     Logger.w(result.exception) { "Failed to save favorites: ${result.message}" }
-                    handle.setError(result.message ?: "Could not update favorites.")
+                    handle.setError(result.message ?: ChatNotice.FAVORITES_UPDATE_FAILED.marker())
                 }
                 is Result.Loading -> Unit
             }
@@ -114,10 +103,12 @@ class FavoritesDelegate(
             val model = it.model
             if (endpoint != null && model != null) favoriteModelKey(endpoint, model) else null
         }
+        val specNames = list.mapNotNullTo(mutableSetOf()) { it.spec }
         handle.update {
             favorites = favorites.copy(
                 favoriteAgentIds = agentIds,
                 favoriteModelKeys = modelKeys,
+                favoriteSpecNames = specNames,
             )
         }
     }

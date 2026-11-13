@@ -63,14 +63,14 @@ class PersistentLogWriter internal constructor(
     ) {
         runCatching {
             val merged = LinkedHashMap(attrs)
-            throwable?.let { merged["throwable"] = formatThrowable(it, maxCrashThrowableChars) }
+            throwable?.let { merged["throwable"] = formatThrowable(it, maxCrashThrowableChars, keepTail = true) }
             val record = LogRecord(
                 ts = Clock.System.now().toString(),
                 level = Severity.Error.name,
                 tag = tag,
                 msg = redactor.redact(message),
                 attrs = redactor.redactAttrs(merged),
-                thread = threadName(),
+                thread = thread(),
                 origin = LogOrigin.CLIENT.wire,
             )
             sink.appendBlocking(json.encodeToString(record))
@@ -87,7 +87,7 @@ class PersistentLogWriter internal constructor(
             tag = tag,
             msg = redactor.redact(decoded.msg),
             attrs = redactor.redactAttrs(attrs),
-            thread = threadName(),
+            thread = thread(),
             origin = decoded.origin,
         )
         return json.encodeToString(record)
@@ -98,10 +98,11 @@ class PersistentLogWriter internal constructor(
      * the bounded buffer. Redaction (which strips embedded response bodies) is applied later by the
      * caller via [LogRedactor.redactAttrs] on the "throwable" value.
      */
-    private fun formatThrowable(throwable: Throwable, maxChars: Int): String {
-        val full = throwable.stackTraceToString()
-        return if (full.length <= maxChars) full else full.take(maxChars) + "…(truncated)"
-    }
+    private fun formatThrowable(throwable: Throwable, maxChars: Int, keepTail: Boolean = false): String =
+        truncateTrace(throwable.stackTraceToString(), maxChars, keepTail)
+
+    /** OkHttp names its threads after the request URL, so the name gets the same redaction as the message. */
+    private fun thread(): String = redactor.redact(threadName())
 
     private fun fallbackLine(level: String, tag: String): String =
         json.encodeToString(
@@ -110,7 +111,20 @@ class PersistentLogWriter internal constructor(
                 level = level,
                 tag = tag,
                 msg = "<unencodable log record>",
-                thread = threadName(),
+                thread = thread(),
             ),
         )
+}
+
+/**
+ * Cuts [trace] to about [maxChars]. With [keepTail] the middle is dropped instead of the end: a crash
+ * deep in a recursive layout pass has its throw site at the top and the callback that started the
+ * pass (and any cause chain) at the bottom, and both are needed to tell what happened.
+ */
+internal fun truncateTrace(trace: String, maxChars: Int, keepTail: Boolean): String {
+    if (trace.length <= maxChars) return trace
+    if (!keepTail) return trace.take(maxChars) + "…(truncated)"
+    val head = maxChars / 2
+    val tail = maxChars - head
+    return trace.take(head) + "\n…(${trace.length - maxChars} chars truncated)…\n" + trace.takeLast(tail)
 }

@@ -11,6 +11,7 @@ internal val CACHE_SUBDIRECTORIES = listOf(
     "shared_images",
     "shared_files",
     "camera_photos",
+    "keyboard_images",
     "pdf_preview",
     "voice_recording",
     "audio",
@@ -45,7 +46,9 @@ class CommonSessionCacheCleaner(
             for (subdir in CACHE_SUBDIRECTORIES) {
                 deleteDirectoryRecursively("$root/$subdir")
             }
-        } catch (e: Exception) {
+        } catch (e: IllegalStateException) {
+            // cacheRoot() throws via error() when the platform can't resolve it; both deletes report
+            // failure by return value.
             Logger.w(e) { "Failed to clear session caches on logout" }
         }
     }

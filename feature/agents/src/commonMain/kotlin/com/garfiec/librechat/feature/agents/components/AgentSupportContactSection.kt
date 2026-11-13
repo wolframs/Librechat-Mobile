@@ -5,11 +5,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.VerbatimKeyboardOptions
 import com.garfiec.librechat.feature.agents.components.model.SupportContactState
 import com.garfiec.librechat.feature.agents.resources.*
 import com.garfiec.librechat.feature.agents.resources.Res
@@ -36,12 +39,14 @@ fun AgentSupportContactSection(
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(modifier = Modifier.height(4.dp))
-        OutlinedTextField(
+        AdaptiveOutlinedTextField(
             value = supportContact.name,
             onValueChange = {
                 onSupportContactChange(supportContact.copy(name = it))
             },
-            placeholder = { Text(stringResource(Res.string.support_contact_placeholder)) },
+            placeholder = {
+                Text(stringResource(Res.string.support_contact_placeholder), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
             isError = nameError != null,
             supportingText = nameError?.let { error -> { Text(error) } },
             singleLine = true,
@@ -56,7 +61,7 @@ fun AgentSupportContactSection(
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(modifier = Modifier.height(4.dp))
-        OutlinedTextField(
+        AdaptiveOutlinedTextField(
             value = supportContact.email,
             onValueChange = {
                 onSupportContactChange(supportContact.copy(email = it))
@@ -65,6 +70,7 @@ fun AgentSupportContactSection(
             isError = emailError != null,
             supportingText = emailError?.let { error -> { Text(error) } },
             singleLine = true,
+            keyboardOptions = VerbatimKeyboardOptions.copy(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth(),
         )
     }

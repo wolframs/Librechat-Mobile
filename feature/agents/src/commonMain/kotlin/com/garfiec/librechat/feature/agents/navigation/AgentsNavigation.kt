@@ -23,7 +23,13 @@ import kotlinx.serialization.modules.subclass
 fun EntryProviderScope<NavKey>.agentsEntries(
     onNavigate: (NavKey) -> Unit,
     onBack: () -> Unit,
+    /** Swaps the first route for the second only while the first is on top (see Navigator.replace). */
+    onReplace: (route: NavKey, replacement: NavKey) -> Unit,
+    /** Removes a screen that closes itself, wherever it sits, without popping whatever is on top. */
+    onRemove: (NavKey) -> Unit,
+    onPopWhile: ((NavKey) -> Boolean) -> Unit,
     onStartChat: (String) -> Unit,
+    onStartChatWithPrompt: (agentId: String, prompt: String) -> Unit,
 ) {
     entry<AgentMarketplace> {
         AgentMarketplaceScreen(
@@ -36,22 +42,34 @@ fun EntryProviderScope<NavKey>.agentsEntries(
         AgentDetailScreen(
             onBack = onBack,
             onStartChat = onStartChat,
+            onStartChatWithPrompt = onStartChatWithPrompt,
             onEdit = { agentId -> onNavigate(AgentEditorEdit(agentId = agentId)) },
-            onDuplicate = { agentId -> onNavigate(AgentDetail(agentId = agentId)) },
+            // The copy's page takes this one's place, as Duplicate in the editor does: back from
+            // the copy returns to where the original was opened from, not to the original. Both
+            // results can land after the user has backed out (the page stays composed for its exit
+            // animation), so they act on this entry only, never on whatever is on top by then.
+            onDuplicate = { agentId -> onReplace(key, AgentDetail(agentId = agentId)) },
+            onClose = { onRemove(key) },
             agentId = key.agentId,
         )
     }
-    entry<AgentEditorCreate> {
+    entry<AgentEditorCreate> { key ->
         AgentEditorScreen(
             onBack = onBack,
-            onSave = { agentId -> onNavigate(AgentDetail(agentId = agentId)) },
+            onSave = { agentId -> onReplace(key, AgentDetail(agentId = agentId)) },
             agentId = null,
         )
     }
     entry<AgentEditorEdit> { key ->
+        val deletedDetail = AgentDetail(agentId = key.agentId)
         AgentEditorScreen(
             onBack = onBack,
-            onSave = { agentId -> onNavigate(AgentDetail(agentId = agentId)) },
+            // The editor is opened from the agent's detail page, which is still underneath. A save
+            // can land after the user has left through the drawer or sidebar, so it removes this
+            // entry only, never whatever is on top by then.
+            onSave = { onRemove(key) },
+            onDuplicate = { agentId -> onReplace(key, AgentDetail(agentId = agentId)) },
+            onDelete = { onPopWhile { it == key || it == deletedDetail } },
             agentId = key.agentId,
         )
     }

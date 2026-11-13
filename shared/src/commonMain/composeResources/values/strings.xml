@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Drawer -->
-    <string name="settings">Settings</string>
 
     <!-- Content descriptions -->
-    <string name="cd_back_to_conversations">Back to conversations</string>
 
     <!-- Version mismatch dialog -->
     <string name="version_mismatch_title">Backend Version Mismatch</string>
@@ -16,4 +14,15 @@
     <string name="session_expired_title">Signed out</string>
     <string name="session_expired_message">Your session has expired. Sign in again to continue.</string>
     <string name="session_expired_message_named">Your session for %1$s has expired. Sign in again to continue.</string>
+    <string name="session_expired_switched_named">Your session for %1$s has expired, so you’re now using %2$s. Sign in to %1$s again from the account switcher.</string>
+    <string name="session_expired_switched">Your session has expired, so you’re now using %1$s. Sign in again from the account switcher.</string>
+    <string name="session_banned_title">Account restricted</string>
+    <string name="session_banned_message">Your server has temporarily restricted this account, for example after too many requests or a policy violation. Until the restriction lifts, you can’t send messages, use agents or upload files, and you may be signed out. If it doesn’t lift, contact your server admin.</string>
+    <string name="session_banned_message_named">Your server has temporarily restricted %1$s, for example after too many requests or a policy violation. Until the restriction lifts, you can’t send messages, use agents or upload files, and you may be signed out. If it doesn’t lift, contact your server admin.</string>
+    <string name="session_renewal_blocked_message">Couldn’t renew your session — the server refused the refresh request.</string>
+    <string name="session_renewal_sign_in_again">Sign in again</string>
+    <string name="shared_link_switch_title">Switch account?</string>
+    <string name="shared_link_switch_message">This shared chat is on %1$s, where you’re signed in as %2$s. Switch to that account to open it here.</string>
+    <string name="shared_link_switch_confirm">Switch</string>
+    <string name="shared_link_open_in_browser">Open in browser</string>
 </resources>

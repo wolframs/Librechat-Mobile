@@ -16,26 +16,28 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
+import com.garfiec.librechat.core.ui.components.AdaptiveButton
+import com.garfiec.librechat.core.ui.components.AdaptiveCircularProgressIndicator
+import com.garfiec.librechat.core.ui.components.AdaptiveInputChip
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedButton
+import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
+import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
 import com.garfiec.librechat.core.ui.components.ErrorBanner
 import com.garfiec.librechat.feature.agents.components.AgentAclSharingSection
 import com.garfiec.librechat.feature.agents.components.AgentActionsPanel
@@ -44,7 +46,9 @@ import com.garfiec.librechat.feature.agents.components.AgentAvatarPicker
 import com.garfiec.librechat.feature.agents.components.AgentCapabilitiesSection
 import com.garfiec.librechat.feature.agents.components.AgentCategorySelector
 import com.garfiec.librechat.feature.agents.components.AgentChainSection
+import com.garfiec.librechat.feature.agents.components.AgentCodeBackgroundRow
 import com.garfiec.librechat.feature.agents.components.AgentCodeInterpreterSection
+import com.garfiec.librechat.feature.agents.components.AgentCodeSettingsSection
 import com.garfiec.librechat.feature.agents.components.AgentFileAttachments
 import com.garfiec.librechat.feature.agents.components.AgentFileContextSection
 import com.garfiec.librechat.feature.agents.components.AgentFileSearchSection
@@ -55,6 +59,7 @@ import com.garfiec.librechat.feature.agents.components.AgentSkillsSection
 import com.garfiec.librechat.feature.agents.components.AgentSubagentsSection
 import com.garfiec.librechat.feature.agents.components.AgentSupportContactSection
 import com.garfiec.librechat.feature.agents.components.AgentWebSearchSection
+import com.garfiec.librechat.feature.agents.components.ToolApprovalModeButton
 import com.garfiec.librechat.feature.agents.resources.*
 import com.garfiec.librechat.feature.agents.resources.Res
 import com.garfiec.librechat.feature.agents.viewmodel.AgentAclViewModel
@@ -81,6 +86,29 @@ internal fun AgentEditorForm(
     onShowToolDialog: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val codeSection by viewModel.codeSection.collectAsStateWithLifecycle()
+    uiState.pendingFileRemoval?.let { pending ->
+        AdaptiveAlertDialog(
+            onDismissRequest = viewModel::dismissAgentFileRemoval,
+            title = {
+                Text(
+                    pending.filename?.takeIf { it.isNotBlank() }
+                        ?.let { stringResource(Res.string.agent_file_remove_confirm_title, it) }
+                        ?: stringResource(Res.string.agent_file_remove_confirm_title_generic),
+                )
+            },
+            text = { Text(stringResource(Res.string.agent_file_remove_confirm_message)) },
+            confirmButton = {
+                AdaptiveTextButton(onClick = viewModel::confirmAgentFileRemoval) {
+                    Text(stringResource(Res.string.remove))
+                }
+            },
+            dismissButton = {
+                AdaptiveTextButton(onClick = viewModel::dismissAgentFileRemoval) { Text(stringResource(Res.string.cancel)) }
+            },
+        )
+    }
+
     Column(
         modifier = modifier
             .imePadding()
@@ -89,7 +117,7 @@ internal fun AgentEditorForm(
     ) {
         if (uiState.error != null) {
             ErrorBanner(
-                message = uiState.error,
+                message = uiState.error ?: stringResource(Res.string.error_unknown),
                 onRetry = { viewModel.dismissError() },
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -112,7 +140,7 @@ internal fun AgentEditorForm(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (uiState.isEditMode && !uiState.avatarUrl.isNullOrBlank()) {
-                TextButton(onClick = viewModel::resetAvatar) {
+                AdaptiveTextButton(onClick = viewModel::resetAvatar) {
                     Text(stringResource(Res.string.remove_avatar))
                 }
             }
@@ -121,13 +149,15 @@ internal fun AgentEditorForm(
         Spacer(modifier = Modifier.height(16.dp))
 
         // 2. Name field (required)
-        OutlinedTextField(
+        AdaptiveOutlinedTextField(
             value = uiState.name,
             onValueChange = viewModel::onNameChanged,
             label = {
                 Text(stringResource(Res.string.agent_name_label))
             },
-            placeholder = { Text(stringResource(Res.string.agent_name_placeholder)) },
+            placeholder = {
+                Text(stringResource(Res.string.agent_name_placeholder), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
             isError = uiState.nameError != null,
             supportingText = uiState.nameError?.let { error ->
                 { Text(error) }
@@ -139,7 +169,7 @@ internal fun AgentEditorForm(
         Spacer(modifier = Modifier.height(12.dp))
 
         // 3. Description field
-        OutlinedTextField(
+        AdaptiveOutlinedTextField(
             value = uiState.description,
             onValueChange = viewModel::onDescriptionChanged,
             label = { Text(stringResource(Res.string.agent_description_label)) },
@@ -166,10 +196,14 @@ internal fun AgentEditorForm(
         Spacer(modifier = Modifier.height(12.dp))
 
         // 5. Instructions field (multi-line) + Insert-variable menu
-        InstructionsField(
-            value = uiState.instructions,
-            onValueChange = viewModel::onInstructionsChanged,
-        )
+        if (uiState.instructionsLinkedToPrompt) {
+            LinkedInstructionsNote()
+        } else {
+            InstructionsField(
+                value = uiState.instructions,
+                onValueChange = viewModel::onInstructionsChanged,
+            )
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -191,8 +225,8 @@ internal fun AgentEditorForm(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Code Interpreter toggle (only shown when the server supports it)
-        if (uiState.isCodeInterpreterAvailable) {
+        // Code Interpreter toggle (the server's capability and the role's RUN_CODE)
+        if (uiState.isCodeInterpreterOffered) {
             AgentCodeInterpreterSection(
                 enabled = uiState.codeInterpreterEnabled,
                 onToggle = viewModel::onCodeInterpreterToggled,
@@ -207,15 +241,33 @@ internal fun AgentEditorForm(
                     },
                 )
             }
+            uiState.codeBackground?.let { checked ->
+                Spacer(modifier = Modifier.height(8.dp))
+                AgentCodeBackgroundRow(
+                    checked = checked,
+                    onToggle = viewModel::onCodeBackgroundToggled,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+            codeSection?.let { section ->
+                Spacer(modifier = Modifier.height(8.dp))
+                AgentCodeSettingsSection(
+                    view = section,
+                    onEvent = viewModel::onCodeSettingsEvent,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // Web Search toggle (only shown when the server has it configured)
-        if (uiState.isWebSearchAvailable) {
+        // Web Search toggle (the server's configuration and the role's WEB_SEARCH)
+        if (uiState.isWebSearchOffered) {
             AgentWebSearchSection(
                 enabled = uiState.webSearchEnabled,
                 onToggle = viewModel::onWebSearchToggled,
+                keysAction = uiState.webSearchKeysAction,
+                onKeys = viewModel::openWebSearchKeys,
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -253,23 +305,25 @@ internal fun AgentEditorForm(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // File Search toggle
-        AgentFileSearchSection(
-            enabled = uiState.fileSearchEnabled,
-            onToggle = viewModel::onFileSearchToggled,
-        )
-        if (uiState.fileSearchEnabled) {
-            AgentFileAttachments(
-                files = uiState.knowledgeFiles,
-                isUploading = AgentFileSlot.KNOWLEDGE in uiState.uploadingSlots,
-                onAddClick = onAddKnowledgeFile,
-                onRemove = { id ->
-                    viewModel.removeAgentFile(id, AgentFileSlot.KNOWLEDGE)
-                },
+        // File Search toggle (the server's capability and the role's FILE_SEARCH)
+        if (uiState.isFileSearchOffered) {
+            AgentFileSearchSection(
+                enabled = uiState.fileSearchEnabled,
+                onToggle = viewModel::onFileSearchToggled,
             )
-        }
+            if (uiState.fileSearchEnabled) {
+                AgentFileAttachments(
+                    files = uiState.knowledgeFiles,
+                    isUploading = AgentFileSlot.KNOWLEDGE in uiState.uploadingSlots,
+                    onAddClick = onAddKnowledgeFile,
+                    onRemove = { id ->
+                        viewModel.removeAgentFile(id, AgentFileSlot.KNOWLEDGE)
+                    },
+                )
+            }
 
-        Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         // File Context toggle (persistent files attached as context)
         AgentFileContextSection(
@@ -319,20 +373,29 @@ internal fun AgentEditorForm(
         // MCP tools sit in the same selected list as plugin tools: which server a capability was
         // installed from is a detail of its plumbing, not of what the agent can do. Only the ones
         // actually on the agent are listed — browsing the rest is the picker's job.
-        if (uiState.selectedMcpTools.isNotEmpty()) {
-            val mcpByName = remember(uiState.mcpTools) { uiState.mcpTools.associateBy { it.name } }
+        // A tool whose server has since gone away still renders, by raw name, so it can be removed
+        // rather than sitting invisibly on the agent. The approval mode button shows only on a
+        // tool with a known server, and only when the server enables agent approval modes.
+        val mcpRows by viewModel.mcpToolRows.collectAsStateWithLifecycle()
+        if (mcpRows.isNotEmpty()) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                uiState.selectedMcpTools.forEach { toolName ->
-                    // A tool whose server has since gone away still renders, by raw name, so it
-                    // can be removed rather than sitting invisibly on the agent.
-                    val mcpTool = mcpByName[toolName]
+                mcpRows.forEach { row ->
                     SelectedToolRow(
-                        toolName = toolName,
-                        toolDescription = mcpTool?.serverName ?: mcpTool?.description,
-                        onRemove = { viewModel.onMcpToolToggled(toolName) },
+                        toolName = row.name,
+                        toolDescription = row.subtitle,
+                        onRemove = { viewModel.onMcpToolToggled(row.selectionKey) },
+                        trailing = row.approval?.let { approval ->
+                            {
+                                ToolApprovalModeButton(
+                                    approval = approval,
+                                    onModeChange = { mode -> viewModel.onToolApprovalModeChanged(approval.toolId, mode) },
+                                    onReset = { viewModel.resetToolApprovals(approval.toolId) },
+                                )
+                            }
+                        },
                     )
                 }
             }
@@ -361,7 +424,7 @@ internal fun AgentEditorForm(
 
         // Opens the unified picker (capabilities + tools + MCP + skills), not just the plugin
         // tool list — so it is offered even when that list happens to be empty.
-        OutlinedButton(
+        AdaptiveOutlinedButton(
             onClick = onShowToolDialog,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -403,7 +466,7 @@ internal fun AgentEditorForm(
         Spacer(modifier = Modifier.height(8.dp))
 
         uiState.conversationStarters.forEachIndexed { index, starter ->
-            InputChip(
+            AdaptiveInputChip(
                 selected = false,
                 onClick = {},
                 label = { Text(starter) },
@@ -424,10 +487,12 @@ internal fun AgentEditorForm(
         Row(
             modifier = Modifier.fillMaxWidth(),
         ) {
-            OutlinedTextField(
+            AdaptiveOutlinedTextField(
                 value = newStarter,
                 onValueChange = { newStarter = it },
-                placeholder = { Text(stringResource(Res.string.add_starter_hint)) },
+                placeholder = {
+                    Text(stringResource(Res.string.add_starter_hint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
@@ -456,12 +521,15 @@ internal fun AgentEditorForm(
         // a notice instead of the legacy Private/Team/Public toggle — which
         // would silently no-op since v0.8.5+ dropped the projects/isCollaborative
         // model the toggle wrote to.
-        val agentId = uiState.agentId
         when {
-            uiState.isAclAvailable && agentId != null -> {
+            uiState.isAclAvailable && uiState.agentId != null -> {
                 val aclViewModel: AgentAclViewModel = koinViewModel()
-                LaunchedEffect(agentId) {
-                    aclViewModel.load(agentId)
+                // The permissions routes take the agent's database _id, not its agent_… id; until the
+                // agent has loaded there is nothing to ask for, and the section stays hidden.
+                val agentDbId = uiState.loadedAgent?.mongoId
+                val authorId = uiState.loadedAgent?.author
+                LaunchedEffect(agentDbId, authorId) {
+                    if (agentDbId != null) aclViewModel.load(agentDbId, authorId)
                 }
                 AgentAclSharingSection(viewModel = aclViewModel)
             }
@@ -517,18 +585,21 @@ internal fun AgentEditorForm(
             provider = uiState.provider,
             model = uiState.model,
             extendedEffortSupported = uiState.isHandoffsAvailable,
+            thinkingDisplayUpdatesSupported = uiState.isThinkingDisplayUpdatesAvailable,
+            dropParamsMap = uiState.dropParamsMap,
+            parameterProvider = uiState.parameterProvider,
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         // Save button
-        Button(
+        AdaptiveButton(
             onClick = { viewModel.save() },
             enabled = !uiState.isSaving,
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (uiState.isSaving) {
-                CircularProgressIndicator(
+                AdaptiveCircularProgressIndicator(
                     modifier = Modifier
                         .height(20.dp)
                         .width(20.dp),

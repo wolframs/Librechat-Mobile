@@ -10,7 +10,6 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ParameterDefinition(
     val key: String,
-    val readOnly: Boolean = false,
     val label: String,
     val type: ParameterType,
     val min: Double? = null,

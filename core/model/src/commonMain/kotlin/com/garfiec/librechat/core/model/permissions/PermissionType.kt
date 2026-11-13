@@ -15,4 +15,6 @@ enum class PermissionType(val serverKey: String) {
     REMOTE_AGENTS("REMOTE_AGENTS"),
     SKILLS("SKILLS"),
     SHARED_LINKS("SHARED_LINKS"),
+    SCHEDULES("SCHEDULES"),
+    PEOPLE_PICKER("PEOPLE_PICKER"),
 }

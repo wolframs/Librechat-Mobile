@@ -1,9 +1,12 @@
 package com.garfiec.librechat
 
+import android.annotation.SuppressLint
+import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,7 +14,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -24,77 +26,91 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
-import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
-import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import co.touchlab.kermit.Logger
+import com.garfiec.librechat.core.common.identity.ShareLinkMatcher
 import com.garfiec.librechat.core.common.network.ConnectivityObserver
 import com.garfiec.librechat.core.data.datastore.SettingsDataStore
-import com.garfiec.librechat.core.data.datastore.ThemeDataStore
-import com.garfiec.librechat.core.data.datastore.ThemeMode
-import com.garfiec.librechat.core.ui.theme.LibreChatTheme
+import com.garfiec.librechat.core.data.repository.ConfigRepository
+import com.garfiec.librechat.core.model.SHORTCUT_CANDIDATE_FACTOR
+import com.garfiec.librechat.core.model.offeredSpecs
+import com.garfiec.librechat.core.model.reconciledWith
+import com.garfiec.librechat.core.ui.components.clearFocusOnTap
 import com.garfiec.librechat.feature.chat.ShareIntentConsumer
 import com.garfiec.librechat.feature.chat.SharedContent
+import com.garfiec.librechat.feature.chat.components.artifact.artifactAppIntent
+import com.garfiec.librechat.feature.chat.components.artifact.retargetPinnedArtifactShortcuts
 import com.garfiec.librechat.navigation.LibreChatNavHost
 import com.garfiec.librechat.navigation.toDeepLinkUri
+import com.garfiec.librechat.shared.navigation.AppShortcuts
+import com.garfiec.librechat.shared.navigation.DeepLinkInbox
 import com.garfiec.librechat.shared.navigation.DeepLinkResolution
 import com.garfiec.librechat.shared.navigation.DeepLinks
 import com.garfiec.librechat.shortcuts.ModelShortcuts
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 
-private const val KEY_PENDING_DEEP_LINK = "pending_deep_link"
+private const val KEY_PENDING_SHARED_LINK = "pending_shared_link"
+
+private enum class IntentOutcome { Handled, ArtifactApp }
 
 class MainActivity : ComponentActivity() {
 
     private val connectivityObserver: ConnectivityObserver by inject()
-    private val themeDataStore: ThemeDataStore by inject()
     private val settingsDataStore: SettingsDataStore by inject()
+    private val configRepository: ConfigRepository by inject()
+    private val deepLinkInbox: DeepLinkInbox by inject()
 
-    private var deepLinkUri by mutableStateOf<Uri?>(null)
+    /** Shared-in text that is exactly one `/share/` link, waiting for the nav host to route it. */
+    private var sharedLinkText by mutableStateOf<String?>(null)
 
-    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class, ExperimentalComposeUiApi::class)
+    @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Only process the launch intent on a genuinely fresh start. On recreation (rotation,
-        // theme/locale change, restore) it is still sticky; re-processing would re-fire the deep link
-        // and yank the user back to it. Instead restore any not-yet-consumed link (see onSaveInstanceState):
-        // if the nav host hadn't composed to consume it before a recreation — e.g. a config change during
-        // the theme/locale warm-up gate below — it would otherwise be lost, since deepLinkUri isn't saved
-        // state and the back stack has nothing to restore yet. A consumed link was already nulled.
+        // Only process the launch intent on a genuinely fresh start. On recreation (a theme or
+        // locale change, a restore) it is still sticky; re-processing would re-fire the deep link
+        // and yank the user back to it. A link not yet placed survives a recreation in DeepLinkInbox.
+        // Restore a shared-in link the nav host hadn't consumed (see onSaveInstanceState).
         if (savedInstanceState == null) {
-            handleIntent(intent)
+            retargetPinnedArtifactShortcuts(this)
+            // Started only to hand a pinned artifact to its own app: there is no Switchboard to show.
+            if (handleIntent(intent) == IntentOutcome.ArtifactApp) {
+                finishAndRemoveTask()
+                return
+            }
         } else {
-            deepLinkUri = savedInstanceState.getString(KEY_PENDING_DEEP_LINK)?.toUri()
+            sharedLinkText = savedInstanceState.getString(KEY_PENDING_SHARED_LINK)
         }
 
         // Keep home-screen model shortcuts in sync with the account's most-used models. The flow
         // emits an empty list once the account resolves logged-out, which clears the shortcuts.
+        // Spec entries are checked against the server's current specs, so a removed spec loses its
+        // shortcut and a renamed one its old label; extra candidates refill the dropped slots.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                settingsDataStore.topUsedModels(ModelShortcuts.maxCount)
-                    // The backing flow re-emits on every settings write; only republish when the
-                    // ranked list actually changes to avoid redundant main-thread setDynamicShortcuts IPC.
+                combine(
+                    settingsDataStore.topUsedModels(ModelShortcuts.maxCount * SHORTCUT_CANDIDATE_FACTOR),
+                    configRepository.startupConfig,
+                ) { models, config -> models.reconciledWith(config.offeredSpecs).take(ModelShortcuts.maxCount) }
+                    // The backing flows re-emit on every settings write and config refresh; only republish when
+                    // the list actually changes to avoid redundant main-thread setDynamicShortcuts IPC.
                     .distinctUntilChanged()
                     .collect { models ->
                         ModelShortcuts.publish(this@MainActivity, models)
@@ -103,91 +119,49 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val windowSizeClass = calculateWindowSizeClass(this)
             val isConnected by connectivityObserver.isConnected.collectAsStateWithLifecycle(initialValue = true)
-            // Hold off drawing themed content until the persisted theme has resolved, so a
-            // dark-mode user on a light-system device never sees a one-frame flash of the wrong
-            // theme. The system window background covers the sub-frame gap.
-            val themeReady by themeDataStore.isReady.collectAsStateWithLifecycle()
-            val themeMode by themeDataStore.themeMode.collectAsStateWithLifecycle(initialValue = themeDataStore.initialThemeMode)
-            val accentColorArgb by themeDataStore.accentColor.collectAsStateWithLifecycle(
-                initialValue = themeDataStore.initialAccentColor,
-            )
-            val useDynamicColor by themeDataStore.useDynamicColor.collectAsStateWithLifecycle(
-                initialValue = themeDataStore.initialUseDynamicColor,
-            )
-            // Gate on the language warm-up too so a persisted non-system language is applied
-            // before the first frame (no flash of the system locale before switching).
-            val localeReady by settingsDataStore.isReady.collectAsStateWithLifecycle()
-            val selectedLanguage by settingsDataStore.selectedLanguage.collectAsStateWithLifecycle(
-                initialValue = settingsDataStore.initialSelectedLanguage,
-            )
-            // The DEFAULT_LANGUAGE sentinel ("system") maps to no override → keep the device locale.
-            val appLocale = selectedLanguage.takeIf { it != SettingsDataStore.DEFAULT_LANGUAGE }
-            val darkTheme = when (themeMode) {
-                ThemeMode.LIGHT -> false
-                ThemeMode.DARK -> true
-                ThemeMode.SYSTEM -> isSystemInDarkTheme()
-            }
-
-            // Update system bar icon colors to match the app's resolved theme.
-            // When light theme: dark icons on light background (isAppearanceLight = true).
-            // When dark theme: light icons on dark background (isAppearanceLight = false).
-            // This ensures correct visibility even when the user overrides the system theme.
-            SideEffect {
-                val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-                insetsController.isAppearanceLightStatusBars = !darkTheme
-                insetsController.isAppearanceLightNavigationBars = !darkTheme
-            }
-
-            if (themeReady && localeReady) {
-                LibreChatTheme(
-                    darkTheme = darkTheme,
-                    accentColor = Color(accentColorArgb),
-                    useDynamicColor = useDynamicColor,
+            SwitchboardTheme(window) { appLocale ->
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clearFocusOnTap()
+                        .semantics { testTagsAsResourceId = true },
                 ) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .semantics { testTagsAsResourceId = true },
-                    ) {
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            AnimatedVisibility(
-                                visible = !isConnected,
-                                enter = expandVertically(),
-                                exit = shrinkVertically(),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(MaterialTheme.colorScheme.errorContainer)
-                                        .windowInsetsPadding(WindowInsets.statusBars)
-                                        .padding(vertical = 6.dp, horizontal = 16.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.no_connection),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                    )
-                                }
-                            }
-                            LibreChatNavHost(
-                                windowSizeClass = windowSizeClass,
-                                deepLinkUri = deepLinkUri,
-                                onDeepLinkConsume = { deepLinkUri = null },
-                                appLocaleTag = appLocale,
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        AnimatedVisibility(
+                            visible = !isConnected,
+                            enter = expandVertically(),
+                            exit = shrinkVertically(),
+                        ) {
+                            Box(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .then(
-                                        if (!isConnected) {
-                                            Modifier.consumeWindowInsets(WindowInsets.statusBars)
-                                        } else {
-                                            Modifier
-                                        },
-                                    ),
-                            )
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.errorContainer)
+                                    .windowInsetsPadding(WindowInsets.statusBars)
+                                    .padding(vertical = 6.dp, horizontal = 16.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.no_connection),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
                         }
+                        LibreChatNavHost(
+                            sharedLinkText = sharedLinkText,
+                            onSharedLinkConsume = { sharedLinkText = null },
+                            appLocaleTag = appLocale,
+                            modifier = Modifier
+                                .weight(1f)
+                                .then(
+                                    if (!isConnected) {
+                                        Modifier.consumeWindowInsets(WindowInsets.statusBars)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
+                        )
                     }
                 }
             }
@@ -196,9 +170,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        // Preserve a link that hasn't been placed on the back stack yet, so a recreation during the
+        // Preserve a shared-in link the nav host hasn't consumed yet, so a recreation during the
         // warm-up gate doesn't drop it (restored in onCreate). A consumed link is already null.
-        deepLinkUri?.let { outState.putString(KEY_PENDING_DEEP_LINK, it.toString()) }
+        sharedLinkText?.let { outState.putString(KEY_PENDING_SHARED_LINK, it) }
+    }
+
+    // Ctrl/⌘+Shift+F is caught here, before Compose, which misses it while nothing holds focus (see AppShortcuts).
+    // RestrictedApi: overriding dispatchKeyEvent is public Activity API; lint resolves the super call to
+    // androidx.core's ComponentActivity override, which is marked library-group only.
+    @SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val searchShortcut = event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 &&
+            event.keyCode == KeyEvent.KEYCODE_F && event.isShiftPressed && (event.isCtrlPressed || event.isMetaPressed)
+        if (searchShortcut && AppShortcuts.openSearch?.invoke() == true) return true
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -208,27 +193,40 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    private fun handleIntent(intent: Intent?) {
-        if (intent == null) return
+    private fun handleIntent(intent: Intent?): IntentOutcome {
+        if (intent == null) return IntentOutcome.Handled
 
-        when (intent.action) {
-            Intent.ACTION_SEND -> handleShareIntent(intent)
-            Intent.ACTION_SEND_MULTIPLE -> handleShareMultipleIntent(intent)
-            else -> handleDeepLink(intent)
+        when {
+            intent.action == Intent.ACTION_SEND -> handleShareIntent(intent)
+            intent.action == Intent.ACTION_SEND_MULTIPLE -> handleShareMultipleIntent(intent)
+            intent.action == Intent.ACTION_VIEW && intent.data?.scheme == ContentResolver.SCHEME_CONTENT ->
+                handleOpenWithIntent(intent)
+            else -> return handleDeepLink(intent)
         }
+        return IntentOutcome.Handled
     }
 
-    private fun handleDeepLink(intent: Intent) {
-        intent.data?.let { uri ->
-            if (uri.scheme != DeepLinks.SCHEME) return@let
-            // Same resolver the nav host uses — the accept decision and the routing decision can't
-            // drift because they're one source of truth. Anything it doesn't route is dropped here.
-            if (DeepLinks.resolve(uri.toDeepLinkUri()) is DeepLinkResolution.None) {
-                Logger.w { "Ignoring unhandled deep link: $uri" }
-            } else {
-                deepLinkUri = uri
+    private fun handleOpenWithIntent(intent: Intent) {
+        val uri = intent.data ?: return
+        Logger.d { "Open-with intent received" }
+        ShareIntentConsumer.setPendingShare(SharedContent(fileUris = listOf(uri)))
+    }
+
+    private fun handleDeepLink(intent: Intent): IntentOutcome {
+        val uri = intent.data?.takeIf { it.scheme == DeepLinks.SCHEME } ?: return IntentOutcome.Handled
+        // Same resolver the nav host uses — the accept decision and the routing decision can't
+        // drift because they're one source of truth. Anything it doesn't route is dropped here.
+        val link = uri.toDeepLinkUri()
+        when (val resolution = DeepLinks.resolve(link)) {
+            DeepLinkResolution.None -> Logger.w { "Ignoring unhandled deep link: $uri" }
+            // Icons pinned by older builds still target this activity.
+            is DeepLinkResolution.ArtifactApp -> {
+                startActivity(artifactAppIntent(this, resolution.snapshotId))
+                return IntentOutcome.ArtifactApp
             }
+            else -> deepLinkInbox.post(link)
         }
+        return IntentOutcome.Handled
     }
 
     private fun handleShareIntent(intent: Intent) {
@@ -242,6 +240,14 @@ class MainActivity : ComponentActivity() {
         }
 
         val fileUris = if (sharedUri != null) listOf(sharedUri) else emptyList()
+
+        // Text that is exactly one shared-chat link goes to the nav host: only it can tell whether a
+        // signed-in account is on that server, and it sends anything it can't open to the composer.
+        if (sharedText != null && fileUris.isEmpty() && ShareLinkMatcher.parse(sharedText) != null) {
+            Logger.d { "Share intent received: a shared-chat link" }
+            sharedLinkText = sharedText
+            return
+        }
 
         if (sharedText != null || fileUris.isNotEmpty()) {
             Logger.d { "Share intent received: text=${sharedText != null}, uris=${fileUris.size}" }
