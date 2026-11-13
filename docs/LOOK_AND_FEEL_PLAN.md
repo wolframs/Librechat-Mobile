@@ -49,9 +49,9 @@ of tiles, glyph tiles for spacing and size), the thread fades out above the comp
 
 Left for 9, ticked as done and seen on the emulator:
 
-- [ ] Reply headings sized against the body (about 1.4x for h1, semibold, line height 1.2), the
+- [x] Reply headings sized against the body (about 1.4x for h1, semibold, line height 1.2), the
       same gap below at every font scale.
-- [ ] Text sheet: the sample shows a heading and bold/italic and stays in view; the slot choice
+- [x] Text sheet: the sample shows a heading and bold/italic and stays in view; the slot choice
       sits with the typeface row and reads Replies / Yours / App; "Use app font"; spacing glyphs
       are two plain paragraphs with a label under each; thinner selection outline; line spacing in
       three steps; reset.
