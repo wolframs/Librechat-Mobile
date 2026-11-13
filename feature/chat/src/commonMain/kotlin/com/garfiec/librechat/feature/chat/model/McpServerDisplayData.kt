@@ -15,6 +15,7 @@ data class McpServerDisplayData(
     val signInBusy: Boolean = false,
     /** What the user must enter before it connects; the variables sheet's fields. */
     val userVars: List<McpUserVar> = emptyList(),
+    val defaultOn: Boolean = false, // FORK-HOOK(mcp-default-on): picker metadata
 ) {
     val label: String get() = title?.takeIf { it.isNotBlank() } ?: name
 

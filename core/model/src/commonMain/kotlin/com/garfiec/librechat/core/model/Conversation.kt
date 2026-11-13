@@ -152,6 +152,7 @@ data class Conversation(
      */
     @Transient
     val cachedIsCodeConversation: Boolean? = null,
+    val mcpOff: List<String>? = null, // FORK-HOOK(mcp-default-on): wire only, never Room
 )
 
 /**

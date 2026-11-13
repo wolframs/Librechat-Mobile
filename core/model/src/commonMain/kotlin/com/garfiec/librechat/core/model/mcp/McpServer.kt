@@ -37,4 +37,5 @@ data class McpServer(
     val requestScoped: Boolean = false,
     /** What each user must enter before it connects, in the server's declared order. */
     val customUserVars: List<McpUserVar> = emptyList(),
+    val defaultOn: Boolean = false, // FORK-HOOK(mcp-default-on): server default
 )

@@ -84,6 +84,7 @@ actual val chatPlatformModule: Module = module {
             promptInsertionHandoff = get(),
             siteIconPromptSession = get(),
             preferenceStore = get(),
+            connectorStore = get(), // FORK-HOOK(mcp-default-on): offline opt-outs
             resumePinStore = get(),
             replyWatchScheduler = get(),
         )

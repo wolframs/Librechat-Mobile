@@ -62,11 +62,13 @@ class ChatRequestBuilder(
                 ToolConstants.ARTIFACTS in inUse && state.toolGateOpen(ToolConstants.ARTIFACTS)
             }
 
-        val hasAnything = mcpServers != null || enabledTools.isNotEmpty() || skillsOn || artifacts != null
+        val hasAnything = mcpServers != null || enabledTools.isNotEmpty() || skillsOn || artifacts != null ||
+            state.selection.connectors.off != null // FORK-HOOK(mcp-default-on): include known opt-outs
         if (!hasAnything) return null
 
         return EphemeralAgent(
             mcp = mcpServers,
+            mcpOff = com.garfiec.librechat.fork.mcp.requestSwitchOffs(state.selection.connectors.off), // FORK-HOOK(mcp-default-on)
             webSearch = if (webSearchEnabled) true else null,
             fileSearch = if (ToolConstants.FILE_SEARCH in enabledTools) true else null,
             executeCode = if (ToolConstants.CODE_INTERPRETER in enabledTools || ToolConstants.EXECUTE_CODE in enabledTools) true else null,

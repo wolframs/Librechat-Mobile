@@ -1170,6 +1170,8 @@ class ModelSelectionDelegate(
      * selection, which is kept across chats.
      */
     fun toggleMcpServer(serverName: String) {
+        if (com.garfiec.librechat.feature.chat.fork.toggleDefaultConnector(handle, serverName)) return // FORK-HOOK(mcp-default-on)
+        handle.update { selection = selection.copy(connectors = selection.connectors.copy(touched = true)) } // FORK-HOOK(mcp-default-on)
         handle.state.selection.toggledSpecMcpServer(serverName)?.let { tools ->
             handle.update { selection = selection.copy(specTools = tools) }
             return

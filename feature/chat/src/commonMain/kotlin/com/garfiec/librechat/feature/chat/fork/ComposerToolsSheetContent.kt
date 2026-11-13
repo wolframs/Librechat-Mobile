@@ -293,14 +293,14 @@ fun ComposerToolsSheetContent(
             if (!connectors) {
                 Spacer(Modifier.height(12.dp))
                 ConnectorHeader(mcpServers,
-                    mcpServers.count { it.name in gates.lockedMcpServers || it.name in selectedMcpServerNames },
+                    mcpServers.count { it.name in selectedMcpServerNames },
                     { connectors = true }, "")
             } else {
                 Text(stringResource(ForkRes.string.composer_connector_detail), Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ComposerGroup {
                     mcpServers.forEachIndexed { index, server ->
-                        val locked = server.name in gates.lockedMcpServers
+                        val locked = !server.defaultOn && server.name in gates.lockedMcpServers
                         McpServerToggleRow(
                             modifier = focusedRow(focus == ToolsSheetFocus.McpServer(server.name), DragSelectRowShape),
                             server = server,

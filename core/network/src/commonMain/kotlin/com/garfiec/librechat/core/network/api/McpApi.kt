@@ -139,6 +139,7 @@ class McpApi constructor(
             val config = configJson.jsonObject
             McpServer(
                 name = serverName,
+                defaultOn = (config["defaultOn"] as? JsonPrimitive)?.booleanOrNull == true, // FORK-HOOK(mcp-default-on)
                 url = config["url"]?.jsonPrimitive?.contentOrNull ?: "",
                 type = parseServerType(config["type"]?.jsonPrimitive?.contentOrNull),
                 title = config["title"]?.jsonPrimitive?.contentOrNull,

@@ -22,4 +22,5 @@ data class EphemeralAgent(
      * supplies; without it an ephemeral run gets no skill catalog and no manual skills.
      */
     val skills: Boolean? = null,
+    val mcpOff: List<String>? = null, // FORK-HOOK(mcp-default-on): null preserves server state
 )

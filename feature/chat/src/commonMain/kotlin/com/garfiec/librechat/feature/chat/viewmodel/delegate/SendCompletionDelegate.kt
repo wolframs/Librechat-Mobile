@@ -50,6 +50,8 @@ class SendCompletionDelegate(
     /** Reloads the conversation from the server (VM-owned Room observer). */
     private val reloadConversation: (String) -> Unit,
     private val newChatDraftKey: String = NEW_CHAT_DRAFT_KEY,
+    private val onMcpFinal: suspend (com.garfiec.librechat.core.model.Conversation, AccountId?) -> Unit = // FORK-HOOK(mcp-default-on)
+        { _, _ -> }, // FORK-HOOK(mcp-default-on)
     /** `SkillsToggleDelegate.carryToCreatedConversation`: the new chat's Skills toggle moves to its id. */
     private val carrySkillsToggle: (conversationId: String, isTemporary: Boolean) -> Unit = { _, _ -> },
 ) {
@@ -110,6 +112,7 @@ class SendCompletionDelegate(
                 sentWithoutWorkspaceNotice = navigatesNow && sent.error == ChatNotice.CODE_WORKSPACE_SENT_WITHOUT.marker(),
                 modelParameters = sent.modelParameters,
                 specTools = sent.selection.specTools,
+                mcpOff = sent.selection.connectors.off, // FORK-HOOK(mcp-default-on): carry through navigation
             )
             Diag.d(
                 tag = NOTICE_TAG,
@@ -192,6 +195,7 @@ class SendCompletionDelegate(
             }
             handle.scope.launch {
                 conversationRepository.saveConversation(toSave, originAccount)
+                onMcpFinal(toSave, originAccount) // FORK-HOOK(mcp-default-on): authoritative offline hint
             }
         }
         if (conversationId != null) {
