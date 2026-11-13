@@ -507,6 +507,7 @@ private fun ToolGrid(
                 // A second line only where it adds something the name does not say.
                 key == ToolConstants.WEB_SEARCH -> searchName.takeIf { checked }
                 key == ToolConstants.FILE_SEARCH -> stringResource(ForkRes.string.composer_files_detail)
+                key == ToolConstants.SKILLS -> stringResource(ForkRes.string.composer_skills_detail)
                 key == ToolConstants.ARTIFACTS -> artifactsModeName ?: stringResource(ForkRes.string.composer_artifacts_detail)
                 else -> null
             }

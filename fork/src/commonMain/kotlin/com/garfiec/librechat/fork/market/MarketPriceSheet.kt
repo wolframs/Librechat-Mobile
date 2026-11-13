@@ -61,6 +61,7 @@ fun MarketPriceContent(server: String, model: String, onDismiss: () -> Unit, mod
             stringResource(Res.string.composer_prices), onNavigate = onDismiss)
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(model, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(Res.string.market_units), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             when {
                 state.loading -> Text(stringResource(Res.string.market_loading))
                 state.price == null -> {
@@ -82,7 +83,13 @@ fun MarketPriceContent(server: String, model: String, onDismiss: () -> Unit, mod
 private fun MarketQuote(quote: MarketPrice) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val unknown = stringResource(Res.string.market_unknown)
-        Text(stringResource(Res.string.market_units), fontSize = 13.sp, color = muted())
+        // Says whose price leads: what this key's routing allows, or the cheapest offer when that is unknown.
+        Text(
+            stringResource(if (quote.effective != null) Res.string.market_headline_key else Res.string.market_headline_best),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = muted(),
+        )
         PriceLane.entries.forEach { lane ->
             val price = quote.price(lane)
             if (lane != PriceLane.REASONING || price != null) {

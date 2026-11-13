@@ -28,4 +28,6 @@
     <string name="market_col_off">Off</string>
     <string name="market_col_offers">Offers</string>
     <string name="market_against_list">list %1$s · %2$s off</string>
+    <string name="market_headline_key">Best offer your key can get</string>
+    <string name="market_headline_best">Best offer on the market</string>
 </resources>

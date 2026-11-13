@@ -28,4 +28,6 @@
     <string name="market_col_off">Rabatt</string>
     <string name="market_col_offers">Angebote</string>
     <string name="market_against_list">Liste %1$s · %2$s Rabatt</string>
+    <string name="market_headline_key">Bestes Angebot für deinen Key</string>
+    <string name="market_headline_best">Bestes Angebot am Markt</string>
 </resources>
