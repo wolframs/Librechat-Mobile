@@ -5,9 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,10 +39,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garfiec.librechat.core.data.datastore.ChatFontSize
@@ -53,7 +58,10 @@ import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
 import com.garfiec.librechat.fork.composer.ComposerDragHandle
 import com.garfiec.librechat.fork.composer.ComposerSheetHeader
 import com.garfiec.librechat.fork.resources.*
+import com.garfiec.librechat.fork.thread.headingStyle
+import com.garfiec.librechat.fork.thread.withLineSpacing
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 
@@ -75,8 +83,9 @@ fun TextSettingsRow(modifier: Modifier = Modifier) {
 }
 
 /**
- * The sample stays first and everything fits one screen, so a change is seen where it is made. The
- * sheet opens at its full height for the same reason.
+ * The sample stays in view above the controls, which scroll beneath it, so a change is seen where it
+ * is made. The slot choice sits with the faces: it governs the typeface only, size and spacing are
+ * the same for all three.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,37 +102,53 @@ fun TextSheet(onDismiss: () -> Unit) {
         dragHandle = { ComposerDragHandle() },
     ) {
         ComposerSheetHeader(textLabel(), onDismiss)
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-            Sample(prefs.spacing, size, Modifier.padding(horizontal = Inset))
-            Spacer(Modifier.height(20.dp))
+        Sample(prefs, size, Modifier.padding(horizontal = Inset))
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 16.dp)) {
+            SectionTitle(stringResource(Res.string.fonts_typeface))
             AdaptiveSegmentedChoice(
                 listOf(stringResource(Res.string.fonts_model), stringResource(Res.string.fonts_you),
                     stringResource(Res.string.fonts_interface)),
                 SlotOrder.indexOf(slot), { slot = SlotOrder[it] }, Modifier.fillMaxWidth().padding(horizontal = Inset),
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
             FontRow(prefs, slot) { scope.launch { store.setFont(slot, it) } }
-            Spacer(Modifier.height(20.dp))
-            val spacingNames = listOf(Res.string.fonts_compact, Res.string.fonts_comfortable,
-                Res.string.fonts_spacious, Res.string.fonts_wide).map { stringResource(it) }
-            Choices(stringResource(Res.string.fonts_spacing), spacingNames, prefs.spacing.ordinal,
-                { scope.launch { store.setSpacing(ParagraphSpacing.entries[it]) } }) { SpacingGlyph(ParagraphSpacing.entries[it]) }
-            Spacer(Modifier.height(16.dp))
-            val sizeNames = listOf(Res.string.fonts_small, Res.string.fonts_medium, Res.string.fonts_large)
-                .map { stringResource(it) }
-            Choices(stringResource(Res.string.fonts_size), sizeNames, size.ordinal,
+            Spacer(Modifier.height(SectionGap))
+            Choices(Res.string.fonts_size, SizeNames, size.ordinal,
                 { scope.launch { settings.setChatFontSize(ChatFontSize.entries[it]) } }) {
-                Text("A", style = MaterialTheme.typography.titleMedium.copy(fontSize = SizeGlyphSp[it].sp))
+                Text("A", style = MaterialTheme.typography.titleMedium.copy(fontSize = SizeGlyphSp[it].sp, lineHeight = 24.sp))
             }
+            Spacer(Modifier.height(SectionGap))
+            Choices(Res.string.fonts_line, LineNames, prefs.lineSpacing.ordinal,
+                { scope.launch { store.setLineSpacing(LineSpacing.entries[it]) } }) {
+                LinesGlyph(lineGap = 3 + it * 2, paragraphGap = null)
+            }
+            Spacer(Modifier.height(SectionGap))
+            Choices(Res.string.fonts_spacing, SpacingNames, prefs.spacing.ordinal,
+                { scope.launch { store.setSpacing(ParagraphSpacing.entries[it]) } }) {
+                LinesGlyph(lineGap = 3, paragraphGap = 4 + it * 3)
+            }
+            Spacer(Modifier.height(8.dp))
+            AdaptiveTextButton(
+                onClick = {
+                    scope.launch {
+                        store.reset()
+                        settings.setChatFontSize(ChatFontSize.MEDIUM)
+                    }
+                },
+                modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp),
+            ) { Text(stringResource(Res.string.fonts_reset)) }
         }
     }
 }
 
-/** A user bubble and a two-paragraph reply, drawn as the thread draws them. */
+/** A user bubble, then a reply with a heading and two paragraphs, set as the thread sets them. */
 @Composable
-private fun Sample(spacing: ParagraphSpacing, size: ChatFontSize, modifier: Modifier = Modifier) {
+private fun Sample(prefs: ReadingPreferences, size: ChatFontSize, modifier: Modifier = Modifier) {
     val scale = sizeScale(size)
-    val body = MaterialTheme.typography.bodyLarge
+    val line = prefs.lineSpacing.factor
+    val base = MaterialTheme.typography.bodyLarge
+    val yours = slotTextStyle(base, FontSlot.USER).scaled(scale).withLineSpacing(line)
+    val reply = slotTextStyle(base, FontSlot.MODEL).scaled(scale).withLineSpacing(line)
     Column(
         modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)).padding(12.dp),
     ) {
@@ -131,14 +156,41 @@ private fun Sample(spacing: ParagraphSpacing, size: ChatFontSize, modifier: Modi
             stringResource(Res.string.fonts_sample_you),
             Modifier.align(Alignment.End)
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp))
-                .padding(12.dp),
-            style = slotTextStyle(body, FontSlot.USER).scaled(scale),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            style = yours,
         )
         Spacer(Modifier.height(12.dp))
-        Text(stringResource(Res.string.fonts_sample_one), style = slotTextStyle(body, FontSlot.MODEL).scaled(scale))
-        Spacer(Modifier.height(spacing.dp.dp))
-        Text(stringResource(Res.string.fonts_sample_two), style = slotTextStyle(body, FontSlot.MODEL).scaled(scale))
+        Text(stringResource(Res.string.fonts_sample_heading), style = headingStyle(reply, 2))
+        Spacer(Modifier.height(prefs.spacing.dp.dp))
+        Text(emphasized(stringResource(Res.string.fonts_sample_one)), style = reply)
+        Spacer(Modifier.height(prefs.spacing.dp.dp))
+        Text(stringResource(Res.string.fonts_sample_two), style = reply)
     }
+}
+
+/** `**bold**` and `*italic*` in a sample string, so the sample shows both cuts of a face. */
+private fun emphasized(text: String): AnnotatedString = buildAnnotatedString {
+    var bold = false
+    var italic = false
+    var index = 0
+    while (index < text.length) {
+        when {
+            text.startsWith("**", index) -> { bold = !bold; index += 2 }
+            text[index] == '*' -> { italic = !italic; index += 1 }
+            else -> {
+                withStyle(SpanStyle(
+                    fontWeight = if (bold) FontWeight.Bold else null,
+                    fontStyle = if (italic) FontStyle.Italic else null,
+                )) { append(text[index]) }
+                index += 1
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String) {
+    Text(title, Modifier.padding(start = Inset, end = Inset, bottom = 8.dp), style = MaterialTheme.typography.titleSmall)
 }
 
 /** One row of faces, each named in its own face; it scrolls sideways. */
@@ -162,60 +214,75 @@ private fun FontRow(prefs: ReadingPreferences, slot: FontSlot, onPick: (String) 
             }
             val face = families[if (id == "same") prefs.resolved(FontSlot.INTERFACE) else ReadingFont.fromId(id)]
                 ?: FontFamily.Default
-            ChoiceTile(checked == id, name, { onPick(id) }, Modifier.widthIn(min = 88.dp).heightIn(min = 76.dp)) {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Ag", style = MaterialTheme.typography.headlineSmall.copy(fontFamily = face))
-                    Text(name, style = MaterialTheme.typography.labelMedium.copy(fontFamily = face), maxLines = 1)
+            ChoiceTile(checked == id, { onPick(id) }, Modifier.widthIn(min = 84.dp)) {
+                Text("Ag", style = MaterialTheme.typography.titleLarge.copy(fontFamily = face))
+                Text(name, style = MaterialTheme.typography.labelMedium.copy(fontFamily = face), maxLines = 1)
+            }
+        }
+    }
+}
+
+/** A titled row of equal tiles, each a glyph over its name. */
+@Composable
+private fun Choices(
+    title: StringResource, names: List<StringResource>, selected: Int, onSelect: (Int) -> Unit, glyph: @Composable (Int) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        SectionTitle(stringResource(title))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Inset).selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            names.forEachIndexed { index, name ->
+                ChoiceTile(index == selected, { onSelect(index) }, Modifier.weight(1f)) {
+                    Box(Modifier.height(28.dp), contentAlignment = Alignment.Center) { glyph(index) }
+                    Text(
+                        stringResource(name), style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
     }
 }
 
-/** A titled row of equal tiles; the chosen one is named beside the title, so a tile needs no label. */
+/** The chosen tile is told by its outline and tint; glyph and name share the tile, so it reads as one answer. */
 @Composable
-private fun Choices(title: String, names: List<String>, selected: Int, onSelect: (Int) -> Unit, glyph: @Composable (Int) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Inset)) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-            Text(names[selected], style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            names.forEachIndexed { index, name -> WeightedTile(index == selected, name, { onSelect(index) }) { glyph(index) } }
-        }
-    }
-}
-
-@Composable
-private fun RowScope.WeightedTile(selected: Boolean, name: String, onClick: () -> Unit, content: @Composable () -> Unit) {
-    ChoiceTile(selected, name, onClick, Modifier.weight(1f).height(56.dp), content)
-}
-
-@Composable
-private fun ChoiceTile(
-    selected: Boolean, name: String, onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit,
-) {
+private fun ChoiceTile(selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Box(
-        modifier.clip(TileShape)
+    Column(
+        modifier.heightIn(min = 64.dp).clip(TileShape)
             .background(if (selected) colors.secondaryContainer else colors.surfaceContainerHigh)
-            .then(if (selected) Modifier.border(2.dp, colors.primary, TileShape) else Modifier)
+            .then(if (selected) Modifier.border(1.5.dp, colors.primary, TileShape) else Modifier)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .semantics { contentDescription = name },
-        contentAlignment = Alignment.Center,
-    ) { content() }
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+        content = content,
+    )
 }
 
-/** Two short paragraphs of two lines each, set apart by the gap the choice stands for. */
+/**
+ * Lines of text in small: three lines whose gap is the line spacing, or with [paragraphGap] two
+ * paragraphs of two lines each, where only the gap between the paragraphs differs.
+ */
 @Composable
-private fun SpacingGlyph(spacing: ParagraphSpacing) {
+private fun LinesGlyph(lineGap: Int, paragraphGap: Int?) {
     val line = Modifier.height(2.dp).background(MaterialTheme.colorScheme.onSurfaceVariant, RoundedCornerShape(1.dp))
     Column {
-        repeat(2) { paragraph ->
-            if (paragraph > 0) Spacer(Modifier.height((2 + spacing.dp / 2).dp))
-            Box(line.width(24.dp))
-            Spacer(Modifier.height(3.dp))
+        if (paragraphGap == null) {
+            Box(line.width(26.dp))
+            Spacer(Modifier.height(lineGap.dp))
+            Box(line.width(26.dp))
+            Spacer(Modifier.height(lineGap.dp))
             Box(line.width(16.dp))
+        } else {
+            repeat(2) { paragraph ->
+                if (paragraph > 0) Spacer(Modifier.height(paragraphGap.dp))
+                Box(line.width(26.dp))
+                Spacer(Modifier.height(lineGap.dp))
+                Box(line.width(16.dp))
+            }
         }
     }
 }
@@ -229,6 +296,10 @@ private fun sizeScale(size: ChatFontSize): Float = when (size) {
 }
 
 private val SlotOrder = listOf(FontSlot.MODEL, FontSlot.USER, FontSlot.INTERFACE)
-private val SizeGlyphSp = listOf(14, 18, 22)
+private val SizeNames = listOf(Res.string.fonts_small, Res.string.fonts_medium, Res.string.fonts_large)
+private val LineNames = listOf(Res.string.fonts_compact, Res.string.fonts_comfortable, Res.string.fonts_spacious)
+private val SpacingNames = LineNames + Res.string.fonts_wide
+private val SizeGlyphSp = listOf(14, 17, 21)
 private val Inset = 16.dp
+private val SectionGap = 16.dp
 private val TileShape = RoundedCornerShape(14.dp)

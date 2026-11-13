@@ -38,6 +38,12 @@ class ReadingPreferencesTest {
         assertEquals(ParagraphSpacing.COMFORTABLE, ParagraphSpacing.fromId("unknown"))
     }
 
+    @Test fun lineSpacingIsReadAndFallsBackToRegular() {
+        val decoded = ReadingPreferencesStore.decode(preferencesOf(stringPreferencesKey("fork_line_spacing") to "relaxed"))
+        assertEquals(LineSpacing.RELAXED, decoded.lineSpacing)
+        assertEquals(LineSpacing.REGULAR, LineSpacing.fromId("unknown"))
+    }
+
     @Test fun persistedSlotKeysAreRead() {
         val prefs = ReadingPreferencesStore.decode(preferencesOf(
             stringPreferencesKey("fork_font_interface") to "aleo",

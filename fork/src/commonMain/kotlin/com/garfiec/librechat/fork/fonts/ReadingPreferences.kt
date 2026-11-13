@@ -34,11 +34,21 @@ enum class ParagraphSpacing(val dp: Int) {
     }
 }
 
+/** Line height as a multiple of the text size; Regular is the type scale's own. */
+enum class LineSpacing(val factor: Float) {
+    TIGHT(1.35f), REGULAR(1.5f), RELAXED(1.65f);
+    val id: String get() = name.lowercase()
+    companion object {
+        fun fromId(id: String?) = entries.find { it.id == id } ?: REGULAR
+    }
+}
+
 data class ReadingPreferences(
     val interfaceFont: String = "system",
     val userFont: String = "same",
     val modelFont: String = "same",
     val spacing: ParagraphSpacing = ParagraphSpacing.COMFORTABLE,
+    val lineSpacing: LineSpacing = LineSpacing.REGULAR,
 ) {
     fun stored(slot: FontSlot): String = when (slot) {
         FontSlot.INTERFACE -> interfaceFont
@@ -71,12 +81,24 @@ class ReadingPreferencesStore(dataStore: DataStore<Preferences>, scope: Coroutin
     suspend fun setSpacing(spacing: ParagraphSpacing) {
         store.edit { it[stringPreferencesKey("chat_paragraph_spacing")] = spacing.id }
     }
+    suspend fun setLineSpacing(spacing: LineSpacing) {
+        store.edit { it[stringPreferencesKey(LINE_SPACING_KEY)] = spacing.id }
+    }
+    suspend fun reset() {
+        store.edit { prefs ->
+            FontSlot.entries.forEach { prefs.remove(stringPreferencesKey(it.key)) }
+            prefs.remove(stringPreferencesKey("chat_paragraph_spacing"))
+            prefs.remove(stringPreferencesKey(LINE_SPACING_KEY))
+        }
+    }
     companion object {
+        private const val LINE_SPACING_KEY = "fork_line_spacing"
         fun decode(prefs: Preferences) = ReadingPreferences(
             interfaceFont = prefs[stringPreferencesKey(FontSlot.INTERFACE.key)] ?: "system",
             userFont = prefs[stringPreferencesKey(FontSlot.USER.key)] ?: "same",
             modelFont = prefs[stringPreferencesKey(FontSlot.MODEL.key)] ?: "same",
             spacing = ParagraphSpacing.fromId(prefs[stringPreferencesKey("chat_paragraph_spacing")]),
+            lineSpacing = LineSpacing.fromId(prefs[stringPreferencesKey(LINE_SPACING_KEY)]),
         )
     }
 }
