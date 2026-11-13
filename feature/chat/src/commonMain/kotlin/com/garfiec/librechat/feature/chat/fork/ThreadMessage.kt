@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -140,7 +141,9 @@ internal fun ThreadMessage(
         Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             contentAlignment = if (isUser) Alignment.TopEnd else Alignment.TopStart) {
             Column(
+                // A user bubble hugs its text, up to four fifths of the row.
                 modifier = Modifier.fillMaxWidth(if (isUser) .8f else 1f)
+                    .then(if (isUser) Modifier.wrapContentWidth(Alignment.End) else Modifier)
                     .clickable(interactionSource = null, indication = null) {
                         focusManager.clearFocus()
                         showActions = !showActions
