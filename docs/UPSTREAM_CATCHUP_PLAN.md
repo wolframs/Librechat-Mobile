@@ -54,7 +54,7 @@ built itself are dropped.
       Tests not run here; the code is identical to upstream's.
 - [ ] 6. Re-land, each in `:fork` with marked hooks, each checked on the
       emulator signed in as the test account:
-  - [ ] 6a. Scaffold: `:fork` module, hook check, the guard that drops a cache
+  - [x] 6a. Scaffold: `:fork` module, hook check, the guard that drops a cache
         database with the fork's old schema, the old debug app id switch.
   - [ ] 6b. Saved login and server address (system password manager; servers
         remembered without an account).
@@ -62,7 +62,9 @@ built itself are dropped.
         (Claude on OpenRouter rows, `extendedCacheTTL` from the server, the
         marketplace caveat, arm cycle 1h, 5m, off).
   - [ ] 6d. Prices and costs panel, if the new chat header takes it cleanly.
-  - [ ] 6e. Upgrade test: old fork build with data, then the new build over it.
+  - [x] 6e. Upgrade test on the emulator (2026-11-13): old fork build signed in,
+        new build over it, opens signed in, database on upstream's v15. Still
+        to do on the Pixel, with the build under the old debug app id.
 - [ ] 7. Mobile gaps against the deployed backend fork (OptMem switches,
       routing and cost data, PDFs as text, web fetch, Markdown import): compare
       with the app code, then decide per item.
