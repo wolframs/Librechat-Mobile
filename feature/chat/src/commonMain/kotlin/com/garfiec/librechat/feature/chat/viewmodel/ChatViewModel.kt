@@ -2135,7 +2135,7 @@ class ChatViewModel(
     fun sendQueuedNow() = queueOrchestrationDelegate.sendQueuedNow()
 
     // Presets and prompts
-    fun savePreset(name: String) = presetPromptDelegate.savePreset(name)
+    fun savePreset(name: String, replacing: String? = null) = presetPromptDelegate.savePreset(name, replacing) // FORK-HOOK(presets)
     fun loadPreset(displayData: PresetDisplayData) = presetPromptDelegate.loadPreset(displayData)
     fun reloadPresetsIfFailed() = presetPromptDelegate.reloadPresetsIfFailed()
     fun deletePreset(presetId: String) = presetPromptDelegate.deletePreset(presetId)

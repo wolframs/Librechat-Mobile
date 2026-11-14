@@ -253,9 +253,15 @@ The agreed mock is `fork/design/composer-regroup.html`.
 - **Model sheet** (from the capsule): "Current model" when it is not starred, "Starred" (or "Most
   used"), then All models and Presets, then Effort and Advanced settings, then "More options"
   (Prices, Compare models, Cache window). Presets and the parameters sit on the first page because
-  the operator uses them daily (2026-11-14). The Presets page lists the presets themselves: a tap
-  applies one, its model included; saving is a row there, renaming and deleting stay in upstream's
-  picker ("Manage presets"). No leading icons. Short names come from one function: a spec's label, a
+  the operator uses them daily (2026-11-14). The Presets page (`fork/ComposerPresets.kt`) lists
+  the presets themselves: a tap applies one, its model included; the header's + saves the chat's
+  current model and settings; a sideways swipe uncovers Edit and Delete on the side it leaves
+  (Delete at the outer edge, confirmed; both also as accessibility actions). Edit renames, or with
+  "Use this chat's settings" replaces the preset: a new one is saved and the old one deleted once
+  the new one exists (one hook in upstream's `savePreset`), because the server's update only sets
+  the fields a request names and would keep a parameter the chat has reset. The replaced preset
+  moves to the top of the list. The sheet stays open through all of it; the list is the view
+  model's, reloaded after each server success. No leading icons. Short names come from one function: a spec's label, a
   `claude-…` id as family and version, a vendor prefix dropped, anything else unchanged.
 - **Add to chat** (from the plus): attach tiles with Lucide icons, the built-in tools as switch rows
   (a second line only where it adds something), Connectors as a page of its own, Prompt library.

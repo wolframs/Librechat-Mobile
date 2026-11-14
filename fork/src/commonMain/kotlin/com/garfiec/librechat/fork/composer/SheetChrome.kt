@@ -30,12 +30,19 @@ fun ComposerDragHandle(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ComposerSheetHeader(title: String, onNavigate: () -> Unit, modifier: Modifier = Modifier, subPage: Boolean = false) {
+fun ComposerSheetHeader(
+    title: String,
+    onNavigate: () -> Unit,
+    modifier: Modifier = Modifier,
+    subPage: Boolean = false,
+    action: (@Composable () -> Unit)? = null,
+) {
     Box(modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
         Text(title, Modifier.padding(horizontal = 48.dp), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         IconButton(onClick = onNavigate, modifier = Modifier.size(48.dp).align(Alignment.CenterStart)) {
             Icon(if (subPage) ForkIcons.ArrowLeft else ForkIcons.X,
                 stringResource(if (subPage) Res.string.composer_back else Res.string.composer_close), Modifier.size(24.dp))
         }
+        if (action != null) Box(Modifier.align(Alignment.CenterEnd)) { action() }
     }
 }

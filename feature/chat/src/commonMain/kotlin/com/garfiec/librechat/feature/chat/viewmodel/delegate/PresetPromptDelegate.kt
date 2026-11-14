@@ -114,7 +114,7 @@ class PresetPromptDelegate(
         }
     }
 
-    fun savePreset(name: String) {
+    fun savePreset(name: String, replacing: String? = null) { // FORK-HOOK(presets): replacing = the preset this one supersedes
         val state = handle.state
         // What the chat shows: under a spec its tools, not the user's hidden toggles.
         val params = state.selection.sendParameters
@@ -193,7 +193,10 @@ class PresetPromptDelegate(
         )
         handle.scope.launch {
             when (val result = presetRepository.create(preset)) {
-                is Result.Success -> loadPresets()
+                is Result.Success -> {
+                    replacing?.let { presetRepository.delete(it) } // FORK-HOOK(presets): only once the new one is saved
+                    loadPresets()
+                } // FORK-HOOK(presets)
                 is Result.Error -> {
                     Logger.e(result.exception) { "Could not save preset" }
                     handle.setError(ChatNotice.PRESET_SAVE_FAILED.marker())

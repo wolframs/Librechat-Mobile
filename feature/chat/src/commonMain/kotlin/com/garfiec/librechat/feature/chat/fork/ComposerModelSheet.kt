@@ -215,6 +215,7 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
     val parentPage = if (page in setOf("cache", "prices")) "options" else "model"
     val priceEndpoint = state.selectedAgentProvider.takeIf { state.selectedEndpoint == "agents" } ?: state.selectedEndpoint
     val priceModel = state.selection.selectedAgentModel.takeIf { state.selectedEndpoint == "agents" } ?: state.selectedModel
+    var savingPreset by remember { mutableStateOf(false) }
     val hasPrices = priceEndpoint in markets && !priceModel.isNullOrBlank()
     val canCompare = state.multiConvoEnabled && state.modelPickerShown
     val canExtendCache = cacheRoute.shown && cacheRoute.canExtend
@@ -240,7 +241,12 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                 "presets" -> Res.string.composer_presets
                 "parameters" -> Res.string.composer_parameters
                 else -> Res.string.composer_model
-            }), onNavigate = { if (page == "model") dismiss() else page = parentPage }, subPage = page != "model")
+            }), onNavigate = { if (page == "model") dismiss() else page = parentPage }, subPage = page != "model",
+                action = if (page == "presets" && state.presetsEnabled) {
+                    { AddPresetButton { savingPreset = true } }
+                } else {
+                    null
+                })
             when (page) {
                 "cache" -> ComposerGroup {
                     listOf(null, "1h", "5m").forEachIndexed { index, value ->
@@ -278,29 +284,7 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                "presets" -> {
-                    // A tap applies the preset, its model included; renaming and deleting stay in upstream's picker.
-                    if (state.presets.isNotEmpty()) {
-                        ComposerGroup {
-                            state.presets.forEachIndexed { index, preset ->
-                                val source = listOfNotNull(preset.model?.let { shortModelName(it) }, preset.endpointLabel)
-                                    .joinToString(" · ")
-                                ChoiceRow(preset.title, source, checked = false, model = true) {
-                                    vm.loadPreset(preset)
-                                    dismiss()
-                                }
-                                if (index < state.presets.lastIndex) ComposerDivider()
-                            }
-                        }
-                    }
-                    ComposerGroup {
-                        ComposerAction(stringResource(Res.string.composer_save)) { dismiss(); context.save() }
-                        if (state.presets.isNotEmpty() || state.presetsLoadFailed) {
-                            ComposerDivider()
-                            ComposerAction(stringResource(Res.string.composer_load)) { dismiss(); context.load() }
-                        }
-                    }
-                }
+                "presets" -> ComposerPresets(context, savingPreset, { savingPreset = it }, onApply = dismiss)
                 "model" -> {
                     val unstarredCurrent = current.takeIf { !it.starred }
                     val groups = listOfNotNull(
@@ -439,7 +423,7 @@ internal fun ComposerAction(
 }
 
 @Composable
-private fun ChoiceRow(label: String, source: String?, checked: Boolean, enabled: Boolean = true, model: Boolean = false,
+internal fun ChoiceRow(label: String, source: String?, checked: Boolean, enabled: Boolean = true, model: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().heightIn(min = if (source.isNullOrBlank()) 56.dp else 64.dp).clickable(enabled = enabled,

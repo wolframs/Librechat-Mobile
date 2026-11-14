@@ -5,8 +5,6 @@
     <string name="composer_effort">Effort</string>
     <string name="composer_presets">Presets</string>
     <string name="composer_parameters">Advanced settings</string>
-    <string name="composer_load">Manage presets</string>
-    <string name="composer_save">Save current settings as preset</string>
     <string name="composer_more">All models</string>
     <string name="composer_compare">Compare models</string>
     <string name="composer_prompts">Prompt library</string>
@@ -51,4 +49,15 @@
     <string name="market_uptime_label">Uptime</string>
     <string name="market_hits_label">Cache hits</string>
     <string name="market_requests_label">Requests in 24 h</string>
+    <string name="composer_preset_add">Save current settings as preset</string>
+    <string name="composer_preset_edit">Edit</string>
+    <string name="composer_preset_edit_title">Edit preset</string>
+    <string name="composer_preset_name">Name</string>
+    <string name="composer_preset_replace">Use this chat's settings</string>
+    <string name="composer_preset_replace_detail">Model and parameters of this chat: %1$s</string>
+    <string name="composer_preset_delete_title">Delete preset?</string>
+    <string name="composer_preset_delete_text">"%1$s" is removed from your presets.</string>
+    <string name="composer_preset_none">No presets yet. Save the current model and settings with +.</string>
+    <string name="composer_preset_failed">Presets could not be loaded.</string>
+    <string name="composer_preset_hint">Swipe a preset sideways to edit or delete it.</string>
 </resources>
