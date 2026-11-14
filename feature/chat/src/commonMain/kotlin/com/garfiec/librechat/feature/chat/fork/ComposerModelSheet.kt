@@ -212,9 +212,12 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
     val api = koinInject<com.garfiec.librechat.fork.market.MarketApi>()
     var markets by remember(state.serverUrl) { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(state.serverUrl) { markets = api.endpoints() }
-    val parentPage = if (page in setOf("cache", "prices", "presets", "parameters")) "options" else "model"
+    val parentPage = if (page in setOf("cache", "prices")) "options" else "model"
     val priceEndpoint = state.selectedAgentProvider.takeIf { state.selectedEndpoint == "agents" } ?: state.selectedEndpoint
     val priceModel = state.selection.selectedAgentModel.takeIf { state.selectedEndpoint == "agents" } ?: state.selectedModel
+    val hasPrices = priceEndpoint in markets && !priceModel.isNullOrBlank()
+    val canCompare = state.multiConvoEnabled && state.modelPickerShown
+    val canExtendCache = cacheRoute.shown && cacheRoute.canExtend
     AdaptiveModalBottomSheet(onDismissRequest = dismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         dragHandle = { ComposerDragHandle() },
@@ -275,10 +278,28 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                "presets" -> ComposerGroup {
-                    ComposerAction(stringResource(Res.string.composer_load)) { dismiss(); context.load() }
-                    ComposerDivider()
-                    ComposerAction(stringResource(Res.string.composer_save)) { dismiss(); context.save() }
+                "presets" -> {
+                    // A tap applies the preset, its model included; renaming and deleting stay in upstream's picker.
+                    if (state.presets.isNotEmpty()) {
+                        ComposerGroup {
+                            state.presets.forEachIndexed { index, preset ->
+                                val source = listOfNotNull(preset.model?.let { shortModelName(it) }, preset.endpointLabel)
+                                    .joinToString(" · ")
+                                ChoiceRow(preset.title, source, checked = false, model = true) {
+                                    vm.loadPreset(preset)
+                                    dismiss()
+                                }
+                                if (index < state.presets.lastIndex) ComposerDivider()
+                            }
+                        }
+                    }
+                    ComposerGroup {
+                        ComposerAction(stringResource(Res.string.composer_save)) { dismiss(); context.save() }
+                        if (state.presets.isNotEmpty() || state.presetsLoadFailed) {
+                            ComposerDivider()
+                            ComposerAction(stringResource(Res.string.composer_load)) { dismiss(); context.load() }
+                        }
+                    }
                 }
                 "model" -> {
                     val unstarredCurrent = current.takeIf { !it.starred }
@@ -318,38 +339,37 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                             }
                         }
                     }
+                    // Choosing first (a preset also picks its model), then tuning; presets and the
+                    // parameters are used daily, so they sit here and not behind "More options".
                     ComposerGroup {
                         ComposerAction(stringResource(Res.string.composer_more)) { page = "all" }
-                        if (definition != null) {
+                        if (state.presetsEnabled) {
                             ComposerDivider()
-                            ComposerAction(stringResource(Res.string.composer_effort), supporting =
-                                effortLabel(state.selection.sendParameters.getValueForKey(definition.key)), trailingValue = true,
-                            ) { page = "effort" }
+                            ComposerAction(stringResource(Res.string.composer_presets)) { page = "presets" }
                         }
                     }
-                    ComposerGroup { ComposerAction(stringResource(Res.string.composer_options)) { page = "options" } }
+                    if (definition != null || state.parametersEnabled) {
+                        ComposerGroup {
+                            if (definition != null) {
+                                ComposerAction(stringResource(Res.string.composer_effort), supporting =
+                                    effortLabel(state.selection.sendParameters.getValueForKey(definition.key)), trailingValue = true,
+                                ) { page = "effort" }
+                            }
+                            if (state.parametersEnabled) {
+                                if (definition != null) ComposerDivider()
+                                ComposerAction(stringResource(Res.string.composer_parameters)) { page = "parameters" }
+                            }
+                        }
+                    }
+                    if (hasPrices || canCompare || canExtendCache) {
+                        ComposerGroup { ComposerAction(stringResource(Res.string.composer_options)) { page = "options" } }
+                    }
                 }
                 "options" -> {
-                    if (state.parametersEnabled || state.presetsEnabled || priceEndpoint in markets) {
-                        ComposerGroup {
-                            if (state.parametersEnabled) {
-                                ComposerAction(stringResource(Res.string.composer_parameters)) {
-                                    page = "parameters"
-                                }
-                            }
-                            if (state.presetsEnabled) {
-                                if (state.parametersEnabled) ComposerDivider()
-                                ComposerAction(stringResource(Res.string.composer_presets)) {
-                                    page = "presets"
-                                }
-                            }
-                            if (priceEndpoint in markets && !priceModel.isNullOrBlank()) {
-                                if (state.parametersEnabled || state.presetsEnabled) ComposerDivider()
-                                ComposerAction(stringResource(Res.string.composer_prices)) { page = "prices" }
-                            }
-                        }
+                    if (hasPrices) {
+                        ComposerGroup { ComposerAction(stringResource(Res.string.composer_prices)) { page = "prices" } }
                     }
-                    if (state.multiConvoEnabled && state.modelPickerShown) {
+                    if (canCompare) {
                         ComposerGroup {
                             ComposerAction(stringResource(Res.string.composer_compare)) {
                                 dismiss()
@@ -359,7 +379,7 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                             }
                         }
                     }
-                    if (cacheRoute.shown && cacheRoute.canExtend) {
+                    if (canExtendCache) {
                         ComposerGroup {
                             ComposerAction(stringResource(Res.string.composer_cache_window)) { page = "cache" }
                         }

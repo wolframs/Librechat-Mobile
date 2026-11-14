@@ -3,10 +3,10 @@
     <string name="composer_message">Message</string>
     <string name="composer_model">Model</string>
     <string name="composer_effort">Effort</string>
-    <string name="composer_presets">Model presets</string>
+    <string name="composer_presets">Presets</string>
     <string name="composer_parameters">Advanced settings</string>
-    <string name="composer_load">Load preset</string>
-    <string name="composer_save">Save as preset</string>
+    <string name="composer_load">Manage presets</string>
+    <string name="composer_save">Save current settings as preset</string>
     <string name="composer_more">All models</string>
     <string name="composer_compare">Compare models</string>
     <string name="composer_prompts">Prompt library</string>

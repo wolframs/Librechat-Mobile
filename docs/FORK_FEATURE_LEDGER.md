@@ -251,8 +251,11 @@ The agreed mock is `fork/design/composer-regroup.html`.
   armed, mic, send. Upstream's settings chips get a row only when one needs the user (a sign-in, a
   pending thinking choice). The placeholder says "Message"; the header's model chip is gone.
 - **Model sheet** (from the capsule): "Current model" when it is not starred, "Starred" (or "Most
-  used"), All models, Effort, and "More options" (Advanced settings, Model presets, Prices, Compare
-  models, Cache window). No leading icons. Short names come from one function: a spec's label, a
+  used"), then All models and Presets, then Effort and Advanced settings, then "More options"
+  (Prices, Compare models, Cache window). Presets and the parameters sit on the first page because
+  the operator uses them daily (2026-11-14). The Presets page lists the presets themselves: a tap
+  applies one, its model included; saving is a row there, renaming and deleting stay in upstream's
+  picker ("Manage presets"). No leading icons. Short names come from one function: a spec's label, a
   `claude-…` id as family and version, a vendor prefix dropped, anything else unchanged.
 - **Add to chat** (from the plus): attach tiles with Lucide icons, the built-in tools as switch rows
   (a second line only where it adds something), Connectors as a page of its own, Prompt library.

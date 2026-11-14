@@ -3,10 +3,10 @@
     <string name="composer_message">Nachricht</string>
     <string name="composer_model">Modell</string>
     <string name="composer_effort">Aufwand</string>
-    <string name="composer_presets">Modellvorlagen</string>
+    <string name="composer_presets">Vorlagen</string>
     <string name="composer_parameters">Erweiterte Einstellungen</string>
-    <string name="composer_load">Vorlage laden</string>
-    <string name="composer_save">Als Vorlage speichern</string>
+    <string name="composer_load">Vorlagen verwalten</string>
+    <string name="composer_save">Aktuelle Einstellungen als Vorlage speichern</string>
     <string name="composer_more">Alle Modelle</string>
     <string name="composer_compare">Modelle vergleichen</string>
     <string name="composer_prompts">Prompt-Bibliothek</string>
