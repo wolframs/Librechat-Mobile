@@ -212,10 +212,15 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
     val api = koinInject<com.garfiec.librechat.fork.market.MarketApi>()
     var markets by remember(state.serverUrl) { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(state.serverUrl) { markets = api.endpoints() }
-    val parentPage = if (page in setOf("cache", "prices")) "options" else "model"
+    val parentPage = when (page) {
+        "cache", "prices" -> "options"
+        "presetEdit" -> "presets"
+        else -> "model"
+    }
     val priceEndpoint = state.selectedAgentProvider.takeIf { state.selectedEndpoint == "agents" } ?: state.selectedEndpoint
     val priceModel = state.selection.selectedAgentModel.takeIf { state.selectedEndpoint == "agents" } ?: state.selectedModel
     var savingPreset by remember { mutableStateOf(false) }
+    var editingPreset by remember { mutableStateOf<String?>(null) }
     val hasPrices = priceEndpoint in markets && !priceModel.isNullOrBlank()
     val canCompare = state.multiConvoEnabled && state.modelPickerShown
     val canExtendCache = cacheRoute.shown && cacheRoute.canExtend
@@ -239,6 +244,7 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                 "cache" -> Res.string.composer_cache_window
                 "effort" -> Res.string.composer_effort
                 "presets" -> Res.string.composer_presets
+                "presetEdit" -> Res.string.composer_preset_edit_title
                 "parameters" -> Res.string.composer_parameters
                 else -> Res.string.composer_model
             }), onNavigate = { if (page == "model") dismiss() else page = parentPage }, subPage = page != "model",
@@ -284,7 +290,9 @@ private fun ComposerModelSheet(context: ComposerContext, definition: ParameterDe
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                "presets" -> ComposerPresets(context, savingPreset, { savingPreset = it }, onApply = dismiss)
+                "presets" -> ComposerPresets(context, savingPreset, { savingPreset = it }, onApply = dismiss,
+                    onEdit = { editingPreset = it; page = "presetEdit" })
+                "presetEdit" -> editingPreset?.let { id -> ComposerPresetEditor(context, id) { page = "presets" } }
                 "model" -> {
                     val unstarredCurrent = current.takeIf { !it.starred }
                     val groups = listOfNotNull(

@@ -256,11 +256,14 @@ The agreed mock is `fork/design/composer-regroup.html`.
   the operator uses them daily (2026-11-14). The Presets page (`fork/ComposerPresets.kt`) lists
   the presets themselves: a tap applies one, its model included; the header's + saves the chat's
   current model and settings; a sideways swipe uncovers Edit and Delete on the side it leaves
-  (Delete at the outer edge, confirmed; both also as accessibility actions). Edit renames, or with
-  "Use this chat's settings" replaces the preset: a new one is saved and the old one deleted once
-  the new one exists (one hook in upstream's `savePreset`), because the server's update only sets
-  the fields a request names and would keep a parameter the chat has reset. The replaced preset
-  moves to the top of the list. The sheet stays open through all of it; the list is the view
+  (Delete at the outer edge, confirmed; both also as accessibility actions). Edit opens the
+  preset editor (`fork/ComposerPresetEditor.kt`): name, endpoint, model (typing filters the list),
+  "Take this chat's model and settings", and upstream's parameter controls for that parameter set.
+  Save stores the edited copy (`fork/PresetEditing.kt`, mirroring `savePreset`'s mapping; fields it
+  does not map stay as stored) and deletes the old preset once the copy exists, because the
+  server's update only sets the fields a request names and would keep a value the editor reset.
+  An edited preset moves to the top of the list. Sliders store the decimal they show (upstream's
+  own save stores the float, 0.9 as 0.8999999761581421). The sheet stays open through all of it; the list is the view
   model's, reloaded after each server success. No leading icons. Short names come from one function: a spec's label, a
   `claude-…` id as family and version, a vendor prefix dropped, anything else unchanged.
 - **Add to chat** (from the plus): attach tiles with Lucide icons, the built-in tools as switch rows

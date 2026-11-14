@@ -31,7 +31,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,26 +44,19 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.garfiec.librechat.core.common.result.Result
-import com.garfiec.librechat.core.data.repository.PresetRepository
 import com.garfiec.librechat.core.ui.components.AdaptiveAlertDialog
-import com.garfiec.librechat.core.ui.components.AdaptiveOutlinedTextField
-import com.garfiec.librechat.core.ui.components.AdaptiveSwitch
 import com.garfiec.librechat.core.ui.components.AdaptiveTextButton
 import com.garfiec.librechat.feature.chat.components.SavePresetDialog
 import com.garfiec.librechat.feature.chat.model.PresetDisplayData
 import com.garfiec.librechat.fork.icons.ForkIcons
 import com.garfiec.librechat.fork.resources.*
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
-import org.koin.compose.koinInject
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.garfiec.librechat.feature.chat.resources.Res as ChatRes
 import com.garfiec.librechat.feature.chat.resources.cancel as chatCancel
 import com.garfiec.librechat.feature.chat.resources.delete as chatDelete
 import com.garfiec.librechat.feature.chat.resources.retry as chatRetry
-import com.garfiec.librechat.feature.chat.resources.save as chatSave
 
 /** The header's add button: saves the chat's current model and settings as a new preset. */
 @Composable
@@ -76,27 +68,23 @@ internal fun AddPresetButton(onClick: () -> Unit) {
 
 /**
  * The model sheet's Presets page. A tap applies a preset, its model included; a sideways swipe
- * opens Edit and Delete on the side it uncovers. Every change goes through the view model, whose
+ * opens Edit (the editor page) and Delete on the side it uncovers. Every change goes through the view model, whose
  * reload after a server success is what this list and every other preset surface read, so the
  * sheet stays open and shows the result.
  */
 @Composable
-internal fun ComposerPresets(context: ComposerContext, saving: Boolean, onSavingChange: (Boolean) -> Unit, onApply: () -> Unit) {
+internal fun ComposerPresets(
+    context: ComposerContext,
+    saving: Boolean,
+    onSavingChange: (Boolean) -> Unit,
+    onApply: () -> Unit,
+    onEdit: (String) -> Unit,
+) {
     val state = context.state
     val vm = context.viewModel
     val presets = state.presets
     var open by remember { mutableStateOf<Pair<String, Int>?>(null) }
-    var editing by remember { mutableStateOf<PresetDisplayData?>(null) }
     var deleting by remember { mutableStateOf<PresetDisplayData?>(null) }
-    val repository = koinInject<PresetRepository>()
-    val scope = rememberCoroutineScope()
-    // A rename keeps every stored field: the whole preset comes from the repository, only its title changes.
-    val rename: (PresetDisplayData, String) -> Unit = { preset, name ->
-        scope.launch {
-            val stored = (repository.getAll() as? Result.Success)?.data?.firstOrNull { it.presetId == preset.presetId }
-            stored?.let { vm.editPreset(it.copy(title = name)) }
-        }
-    }
     when {
         presets.isEmpty() && state.presetsLoadFailed -> ComposerGroup {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
@@ -111,15 +99,20 @@ internal fun ComposerPresets(context: ComposerContext, saving: Boolean, onSaving
                 presets.forEachIndexed { index, preset ->
                     val key = preset.presetId ?: "index:$index"
                     val side = open?.takeIf { it.first == key }?.second ?: 0
-                    val edit = { open = null; editing = preset }
+                    val edit: () -> Unit = {
+                        open = null
+                        preset.presetId?.let { onEdit(it) }
+                    }
                     val delete = { open = null; deleting = preset }
                     SwipeRevealRow(
                         side = side,
                         onSide = { open = if (it == 0) null else key to it },
                         actions = { atStart ->
                             val editAction: @Composable () -> Unit = {
-                                RevealAction(ForkIcons.Pencil, stringResource(Res.string.composer_preset_edit),
-                                    MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, edit)
+                                if (preset.presetId != null) {
+                                    RevealAction(ForkIcons.Pencil, stringResource(Res.string.composer_preset_edit),
+                                        MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, edit)
+                                }
                             }
                             val deleteAction: @Composable () -> Unit = {
                                 if (preset.presetId != null) {
@@ -136,12 +129,14 @@ internal fun ComposerPresets(context: ComposerContext, saving: Boolean, onSaving
                                 deleteAction()
                             }
                         },
-                        accessibilityActions = listOfNotNull(
-                            CustomAccessibilityAction(stringResource(Res.string.composer_preset_edit)) { edit(); true },
-                            preset.presetId?.let {
-                                CustomAccessibilityAction(stringResource(ChatRes.string.chatDelete)) { delete(); true }
-                            },
-                        ),
+                        accessibilityActions = if (preset.presetId == null) {
+                            emptyList()
+                        } else {
+                            listOf(
+                                CustomAccessibilityAction(stringResource(Res.string.composer_preset_edit)) { edit(); true },
+                                CustomAccessibilityAction(stringResource(ChatRes.string.chatDelete)) { delete(); true },
+                            )
+                        },
                     ) {
                         val source = listOfNotNull(preset.model?.let { shortModelName(it) }, preset.endpointLabel).joinToString(" · ")
                         ChoiceRow(preset.title, source, checked = false, model = true) {
@@ -170,12 +165,6 @@ internal fun ComposerPresets(context: ComposerContext, saving: Boolean, onSaving
             onDismiss = { onSavingChange(false) },
         )
     }
-    editing?.let { preset ->
-        EditPresetDialog(preset, currentSettings(context), onDismiss = { editing = null }) { name, replace ->
-            editing = null
-            if (replace) vm.savePreset(name, replacing = preset.presetId) else rename(preset, name)
-        }
-    }
     deleting?.let { preset ->
         AdaptiveAlertDialog(
             onDismissRequest = { deleting = null },
@@ -196,55 +185,6 @@ internal fun ComposerPresets(context: ComposerContext, saving: Boolean, onSaving
 private fun Hint(text: String) {
     Text(text, Modifier.padding(horizontal = 32.dp), style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
-
-private fun currentSettings(context: ComposerContext): String {
-    val state = context.state
-    val spec = state.modelSpecs?.list?.firstOrNull { it.name == state.selectedSpec }?.label
-    return listOfNotNull(
-        state.selectedModel?.let { shortModelName(it, spec) },
-        state.endpointConfigs[state.selectedEndpoint]?.name ?: state.selectedEndpoint.takeIf { it.isNotBlank() },
-    ).joinToString(" · ")
-}
-
-@Composable
-private fun EditPresetDialog(
-    preset: PresetDisplayData,
-    current: String,
-    onDismiss: () -> Unit,
-    onSave: (name: String, replaceSettings: Boolean) -> Unit,
-) {
-    var name by remember(preset.presetId) { mutableStateOf(preset.title) }
-    var replace by remember(preset.presetId) { mutableStateOf(false) }
-    AdaptiveAlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.composer_preset_edit_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                AdaptiveOutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(stringResource(Res.string.composer_preset_name)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(stringResource(Res.string.composer_preset_replace), style = MaterialTheme.typography.bodyLarge)
-                        Text(stringResource(Res.string.composer_preset_replace_detail, current),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    AdaptiveSwitch(checked = replace, onCheckedChange = { replace = it })
-                }
-            }
-        },
-        confirmButton = {
-            AdaptiveTextButton(onClick = { onSave(name.trim(), replace) }, enabled = name.isNotBlank()) {
-                Text(stringResource(ChatRes.string.chatSave))
-            }
-        },
-        dismissButton = { AdaptiveTextButton(onClick = onDismiss) { Text(stringResource(ChatRes.string.chatCancel)) } },
-    )
 }
 
 /**

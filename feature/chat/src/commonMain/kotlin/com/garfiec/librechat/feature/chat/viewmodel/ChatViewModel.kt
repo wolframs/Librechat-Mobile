@@ -2138,6 +2138,7 @@ class ChatViewModel(
     fun savePreset(name: String, replacing: String? = null) = presetPromptDelegate.savePreset(name, replacing) // FORK-HOOK(presets)
     fun loadPreset(displayData: PresetDisplayData) = presetPromptDelegate.loadPreset(displayData)
     fun reloadPresetsIfFailed() = presetPromptDelegate.reloadPresetsIfFailed()
+    fun reloadPresets() = presetPromptDelegate.loadPresets() // FORK-HOOK(presets): after the preset editor saved
     fun deletePreset(presetId: String) = presetPromptDelegate.deletePreset(presetId)
     fun editPreset(preset: Preset) = presetPromptDelegate.editPreset(preset)
     fun handleSlashCommand(displayData: PromptMentionDisplayData) = presetPromptDelegate.handleSlashCommand(displayData)

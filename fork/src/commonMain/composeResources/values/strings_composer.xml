@@ -53,11 +53,14 @@
     <string name="composer_preset_edit">Edit</string>
     <string name="composer_preset_edit_title">Edit preset</string>
     <string name="composer_preset_name">Name</string>
-    <string name="composer_preset_replace">Use this chat's settings</string>
-    <string name="composer_preset_replace_detail">Model and parameters of this chat: %1$s</string>
     <string name="composer_preset_delete_title">Delete preset?</string>
     <string name="composer_preset_delete_text">"%1$s" is removed from your presets.</string>
     <string name="composer_preset_none">No presets yet. Save the current model and settings with +.</string>
     <string name="composer_preset_failed">Presets could not be loaded.</string>
     <string name="composer_preset_hint">Swipe a preset sideways to edit or delete it.</string>
+    <string name="composer_preset_endpoint">Endpoint</string>
+    <string name="composer_preset_model">Model</string>
+    <string name="composer_preset_from_chat">Take this chat's model and settings</string>
+    <string name="composer_preset_save">Save preset</string>
+    <string name="composer_preset_save_failed">The preset could not be saved.</string>
 </resources>
