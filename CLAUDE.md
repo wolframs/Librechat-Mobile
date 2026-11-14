@@ -5,7 +5,10 @@ Native mobile client for LibreChat (Android & iOS). Connects to existing LibreCh
 ## This fork
 
 This checkout is a fork of the community app (`upstream` = garfiec/Librechat-Mobile); everything
-below this section is upstream's text. Fork code lives in the `:fork` module, and upstream's files
+below this section is upstream's text. The fork's product is **Mercuric**, app id
+`dev.wsiener.mercuric`; where upstream's text below says Switchboard or `com.garfiec.librechat` as an
+app id, read those, while the Kotlin package stays `com.garfiec.librechat` (see "Brand" in
+`docs/FORK_FEATURE_LEDGER.md`). Fork code lives in the `:fork` module, and upstream's files
 carry only hook lines marked `FORK-HOOK(<feature>)`: read `fork/README.md` before adding or changing
 a fork feature, and before merging from upstream. Which features exist and where each hooks in is in
 `docs/FORK_FEATURE_LEDGER.md`; update it in the same commit as a feature. While

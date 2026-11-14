@@ -92,7 +92,7 @@
     <string name="cd_starter_send">Отправить</string>
     <string name="cd_starter_edit">Изменить перед отправкой</string>
     <string name="starters_try_asking">Попробуйте спросить</string>
-    <string name="cd_librechat">Switchboard</string>
+    <string name="cd_librechat">Mercuric</string> <!-- FORK-HOOK(brand) -->
     <string name="cd_comparison_enabled">Сравнение включено</string>
 
     <!-- Content descriptions - Messages -->
@@ -769,7 +769,7 @@
     <string name="background_tasks_cancellation_requested">Отмена запрошена. Задача может ещё выполняться; проверьте её итоговый статус позже.</string>
 
     <!-- App update banner -->
-    <string name="update_banner_title">Доступен Switchboard %1$s</string>
+    <string name="update_banner_title">Доступен Mercuric %1$s</string> <!-- FORK-HOOK(brand) -->
     <string name="update_banner_action">Что нового</string>
     <string name="cd_dismiss_update">Скрыть уведомление об обновлении</string>
     <string name="site_icons_prompt_title">Показывать значки сайтов?</string>

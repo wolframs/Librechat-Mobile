@@ -142,7 +142,7 @@
     <string name="colors_from_server">Von deinem Server</string>
     <string name="colors_switchboard_detail">Deine Farben</string>
     <string name="accent_set_by_server">Vom Server festgelegt (%1$s)</string>
-    <string name="accent_set_by_server_note">Wähle unter „Farben“ Switchboard, um deinen eigenen Akzent zu verwenden.</string>
+    <string name="accent_set_by_server_note">Wähle unter „Farben“ Mercuric, um deinen eigenen Akzent zu verwenden.</string> <!-- FORK-HOOK(brand) -->
 
     <!-- Settings rows -->
     <string name="language">Sprache</string>

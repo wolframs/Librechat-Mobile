@@ -92,7 +92,7 @@
     <string name="cd_starter_send">送信</string>
     <string name="cd_starter_edit">送信前に編集</string>
     <string name="starters_try_asking">質問の例</string>
-    <string name="cd_librechat">Switchboard</string>
+    <string name="cd_librechat">Mercuric</string> <!-- FORK-HOOK(brand) -->
     <string name="cd_comparison_enabled">比較が有効</string>
 
     <!-- Content descriptions - Messages -->
@@ -751,7 +751,7 @@
     <string name="background_tasks_cancellation_requested">キャンセルを要求しました。タスクはまだ実行中の可能性があります。最終状態をもう一度確認してください。</string>
 
     <!-- App update banner -->
-    <string name="update_banner_title">Switchboard %1$s が利用可能です</string>
+    <string name="update_banner_title">Mercuric %1$s が利用可能です</string> <!-- FORK-HOOK(brand) -->
     <string name="update_banner_action">新機能を見る</string>
     <string name="cd_dismiss_update">アップデートのお知らせを閉じる</string>
     <string name="site_icons_prompt_title">サイトのアイコンを表示しますか？</string>

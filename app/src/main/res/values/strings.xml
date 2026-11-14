@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Switchboard</string>
+    <string name="app_name">Mercuric</string> <!-- FORK-HOOK(brand) -->
 
     <!-- Label for the "Open with" entry. Shown in place of the app name, so it carries the name. -->
-    <string name="open_with_add_to_chat">Add to Switchboard chat</string>
+    <string name="open_with_add_to_chat">Add to Mercuric chat</string> <!-- FORK-HOOK(brand) -->
 
     <!-- Connectivity -->
     <string name="no_connection">No internet connection</string>

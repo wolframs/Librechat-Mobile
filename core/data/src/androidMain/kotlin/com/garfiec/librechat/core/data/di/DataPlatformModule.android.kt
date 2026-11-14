@@ -63,8 +63,6 @@ actual val dataPlatformModule: Module = module {
     single {
         // The bundled driver, not the framework's: a framework cursor can't read back a row over 2 MB,
         // and a reply with large tool outputs is one.
-        // FORK-HOOK(legacy-db): drop a cache file that still has the fork's old schema.
-        com.garfiec.librechat.core.data.fork.discardForkLegacyDatabase(androidContext(), "librechat.db")
         Room.databaseBuilder(androidContext(), LibreChatDatabase::class.java, "librechat.db")
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(get<CoroutineDispatcher>(KoinQualifiers.IO))

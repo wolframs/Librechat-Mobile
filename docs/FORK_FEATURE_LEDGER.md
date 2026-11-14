@@ -103,8 +103,8 @@ module, `fork/README.md` wins.
 | Feature | State | Hooks (`fork/scripts/fork-hooks.py --list`) |
 |---|---|---|
 | `:fork` module | in | `module` |
-| Guard for a cache database with the fork's old schema (Android) | in; run on the emulator 2026-11-13: old fork build signed in, new build installed over it, the app opened signed in on upstream's schema v15 | `legacy-db` |
-| Build under the old debug app id | in, not yet built that way | `legacy-debug-id` |
+| Brand: the app is **Mercuric**, app id `dev.wsiener.mercuric` (debug builds `.debug`, "Mercuric Dev") | in. On the emulator 2026-11-14: fresh install under the new id, sign-in, a chat, the name in the launcher entry, system app info and About, Ember-alchemy as the default icon. The Kotlin package, `namespace` and class names stay upstream's. Not changed: iOS names and bundle id, fastlane and store metadata, release and Play workflows, the repositories' names, the text of `docs/PRIVACY.md` (still upstream's). | `brand` |
+| Guard for the old fork's cache database, and the build switch for the old debug app id | removed 2026-11-14: both only served installs under `com.garfiec.librechat`, which the new id never updates. | none |
 | Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. On the Pixel (operator, 2026-11-13): the password manager offered the saved login and filled it; the build then only filled the fields and he had to tap Sign in. Since then a picked login signs in directly; that step is not yet tried on the Pixel. iOS has no-op actuals. | `saved-login` |
 | Cache window control | in. Run on the emulator on native Anthropic and on `Surplus (Claude)` (2026-11-13): countdown from the server's marker, the cycle 1h, 5m, off, an armed send stored as `1h`, arming from the model sheet's Cache window page. Since the composer regrouping it is a quiet "Cache 4:47" in the composer, shown only while a window runs or is armed. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
 | Prices sheet | in. Run on the emulator on `Surplus (Claude)` and the plain `Surplus` row with live data. Opened from the model sheet (More options, Prices) since the composer regrouping. Not run: the dashboard button, Retry, a saved agent, a server without the sidecar, iOS. | none of its own |
@@ -181,10 +181,35 @@ Font work: `userMessageTextStyle` and `modelReplyTextStyle` in `fork/thread/Thre
 the You and Model reading slots. Both platform markdown renderers route their body style through them;
 existing 16/24 sp typography and the user's size multiplier remain in force.
 
+### Brand: how it is built
+
+The operator made the fork his own product on 2026-11-14 and kept the code coupled to upstream
+("i'm fine with the code staying coupled, i'm with you on the link to upstream being useful"); the
+name comes from his naming log of that day. `fork/brand/Brand.kt` holds the name and the two
+repository addresses. Everything else is hook lines:
+
+- `applicationId` in `app/build.gradle.kts`. Chosen as the reverse of his domain `wsiener.dev`.
+- The name: `app_name` (main and debug), five more strings in all ten locales (43 lines, each
+  marked), and four places in code (the theme preview's title, the MCP App host name, the copied
+  diagnostics, the pictures folder). A core module repeats the name as a literal.
+- `ChannelPolicy.selfUpdateCheck` and `.releaseNotes` are off: they read upstream's GitHub
+  releases, and the fork publishes none.
+- "Report a problem" is hidden in About (`Brand.REPORTS_TO_MAINTAINER`): upstream's screen mails
+  upstream's maintainer. Copy and export of diagnostics stay.
+- About has a row "Based on Switchboard" that opens upstream's repository; the privacy policy row
+  opens the fork's copy of the file.
+- `NOTICE` starts with the fork's lines, then upstream's notice unchanged (no hook marker in that
+  file; a merge conflict there keeps both). The README starts with a marked note.
+- Four upstream tests assert the identity (package names, the diagnostics text, the open-source
+  channel's update check) and carry the fork's values on marked lines.
+
+A release build signed with the operator's own key does not exist yet; what runs on his phone is a
+debug build.
+
 ### Launcher icon: how it is built
 
-The operator's sigil (two woven rings, an arc and an arrow) in three palettes: Cold-lab (the
-default), Night-glass, Ember-alchemy. `fork/scripts/gen-launcher-icon.py` holds the geometry and
+The operator's sigil (two woven rings, an arc and an arrow) in three palettes: Ember-alchemy (the
+default, `LauncherAlloy.DEFAULT`), Cold-lab, Night-glass. `fork/scripts/gen-launcher-icon.py` holds the geometry and
 the palettes and writes `fork/icons/launcher/<alloy>.svg` (to look at), fork-only files in the
 app's resources (`fork_launcher_<alloy>`: a bitmap foreground in five densities, because the weave
 uses SVG masks that a VectorDrawable cannot express, a vector gradient background, a shared
@@ -194,7 +219,7 @@ The launcher entries are three `activity-alias` elements in the app's manifest (
 after `MainActivity`; in `:fork`'s own manifest they broke resource linking for every module's
 unit tests, since their icons are the app's resources),
 one enabled at a time; `MainActivity` lost its LAUNCHER category (one hook line) and the
-application's own `icon` names Cold-lab. Which alias is enabled is the stored choice
+application's own `icon` names the default. Which alias is enabled is the stored choice
 (`fork/icon/LauncherIcon.android.kt`). A pick is not applied under the user's hands: the system
 treats the swap as one app entry leaving and another arriving and may end the task started through
 the old one, so it waits until the app's activity stops, or the confirm's "Close now" applies it

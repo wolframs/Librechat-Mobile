@@ -90,7 +90,7 @@ class ReportProblemViewModelTest {
         val viewModel = createViewModel()
         advanceUntilIdle()
         val state = viewModel.uiState.value
-        assertThat(state.details).contains("Switchboard version: 0.1.0")
+        assertThat(state.details).contains("Mercuric version: 0.1.0") // FORK-HOOK(brand)
         assertThat(state.details).contains("LibreChat version: 0.8.7")
         assertThat(state.details).contains("Device: Android 17 · Google Pixel 9 Pro Fold")
         assertThat(state.logBytes).isEqualTo(42L)

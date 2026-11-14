@@ -209,8 +209,8 @@ class GeneralSettingsViewModelTest {
         advanceUntilIdle()
         assertThat(viewModel.uiState.value.diagnostics).isEqualTo(
             listOf(
-                "Switchboard version: 0.1.0",
-                "Switchboard build: testsha0",
+                "Mercuric version: 0.1.0", // FORK-HOOK(brand)
+                "Mercuric build: testsha0", // FORK-HOOK(brand)
                 "Install source: oss · F-Droid",
                 "LibreChat version: —",
                 "Commit: —",

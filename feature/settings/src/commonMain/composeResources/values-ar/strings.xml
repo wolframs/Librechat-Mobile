@@ -142,7 +142,7 @@
     <string name="colors_from_server">من خادمك</string>
     <string name="colors_switchboard_detail">ألوانك</string>
     <string name="accent_set_by_server">محدد من خادمك (%1$s)</string>
-    <string name="accent_set_by_server_note">اختر Switchboard ضمن «الألوان» لاستخدام لونك المميز الخاص.</string>
+    <string name="accent_set_by_server_note">اختر Mercuric ضمن «الألوان» لاستخدام لونك المميز الخاص.</string> <!-- FORK-HOOK(brand) -->
 
     <!-- Settings rows -->
     <string name="language">اللغة</string>

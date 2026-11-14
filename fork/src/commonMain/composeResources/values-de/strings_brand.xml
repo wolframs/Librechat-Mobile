@@ -1,0 +1,4 @@
+<resources>
+    <string name="brand_based_on">Basiert auf %1$s</string>
+    <string name="brand_based_on_detail">von garfiec, unter der Apache License 2.0. Dies ist eine veränderte Fassung; garfiec prüft und betreut sie nicht.</string>
+</resources>

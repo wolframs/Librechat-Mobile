@@ -92,7 +92,7 @@
     <string name="cd_starter_send">发送</string>
     <string name="cd_starter_edit">发送前编辑</string>
     <string name="starters_try_asking">试着问问</string>
-    <string name="cd_librechat">Switchboard</string>
+    <string name="cd_librechat">Mercuric</string> <!-- FORK-HOOK(brand) -->
     <string name="cd_comparison_enabled">已启用对比</string>
 
     <!-- Content descriptions - Messages -->
@@ -751,7 +751,7 @@
     <string name="background_tasks_cancellation_requested">已请求取消。任务可能仍在运行；请再次查看其最终状态。</string>
 
     <!-- App update banner -->
-    <string name="update_banner_title">Switchboard %1$s 可用</string>
+    <string name="update_banner_title">Mercuric %1$s 可用</string> <!-- FORK-HOOK(brand) -->
     <string name="update_banner_action">查看新功能</string>
     <string name="cd_dismiss_update">关闭更新提示</string>
     <string name="site_icons_prompt_title">显示网站图标？</string>

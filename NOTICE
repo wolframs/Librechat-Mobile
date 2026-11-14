@@ -1,3 +1,14 @@
+Mercuric
+Copyright 2026 Wolfram Siener
+
+Mercuric is a modified version of Switchboard
+(https://github.com/garfiec/Librechat-Mobile), used under the Apache License,
+Version 2.0. It is not published, reviewed or supported by garfiec. What it
+changes is listed in docs/FORK_FEATURE_LEDGER.md. Switchboard's own notice
+follows unchanged.
+
+--------------------------------------------------------------------------------
+
 Switchboard
 Copyright 2026 garfiec
 

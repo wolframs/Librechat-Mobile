@@ -11,8 +11,8 @@ class ChannelPolicyTest {
     @Test
     fun openSourceChecksForUpdates() {
         val policy = ChannelPolicy(DistributionChannel.OPEN_SOURCE)
-        assertTrue(policy.selfUpdateCheck)
-        assertTrue(policy.releaseNotes)
+        assertTrue(!policy.selfUpdateCheck) // FORK-HOOK(brand): the fork publishes no releases
+        assertTrue(!policy.releaseNotes) // FORK-HOOK(brand)
     }
 
     @Test

@@ -189,7 +189,7 @@ private fun writeImageToGallery(context: Context, image: EncodedImage) {
         put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
         put(MediaStore.Images.Media.MIME_TYPE, image.mimeType)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Switchboard")
+            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Mercuric") // FORK-HOOK(brand)
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
     }

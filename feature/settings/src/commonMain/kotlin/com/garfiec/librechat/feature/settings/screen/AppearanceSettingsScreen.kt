@@ -456,7 +456,7 @@ private fun UiStyleSampleScreen() {
 }
 
 // A brand name: the same in every language.
-private const val APP_NAME = "Switchboard"
+private const val APP_NAME = com.garfiec.librechat.fork.brand.Brand.NAME // FORK-HOOK(brand)
 
 private val SampleBubbleShape = RoundedCornerShape(20.dp)
 private const val SAMPLE_BUBBLE_WIDTH = 0.7f

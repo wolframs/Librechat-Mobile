@@ -113,6 +113,15 @@ fun AboutSettingsPage(
                     showChevron = false,
                 )
             }
+            row(key = "fork_based_on") { // FORK-HOOK(brand): what this app is a modified version of
+                val upstream = LocalUriHandler.current // FORK-HOOK(brand)
+                SettingsRow( // FORK-HOOK(brand)
+                    icon = com.garfiec.librechat.fork.icons.ForkIcons.GitCompare, // FORK-HOOK(brand)
+                    title = com.garfiec.librechat.fork.brand.basedOnTitle(), // FORK-HOOK(brand)
+                    summary = com.garfiec.librechat.fork.brand.basedOnSummary(), // FORK-HOOK(brand)
+                    onClick = { runCatching { upstream.openUri(com.garfiec.librechat.fork.brand.Brand.UPSTREAM_URL) } }, // FORK-HOOK(brand)
+                ) // FORK-HOOK(brand)
+            } // FORK-HOOK(brand)
             row(key = "privacy_policy") {
                 val uriHandler = LocalUriHandler.current
                 SettingsRow(
@@ -129,6 +138,7 @@ fun AboutSettingsPage(
             AdaptiveSectionHeader(stringResource(Res.string.section_troubleshooting))
         }
         adaptiveSection {
+            if (com.garfiec.librechat.fork.brand.Brand.REPORTS_TO_MAINTAINER) { // FORK-HOOK(brand): it mails upstream
             row(key = "report_problem") {
                 SettingsRow(
                     icon = Icons.Default.BugReport,
@@ -138,6 +148,7 @@ fun AboutSettingsPage(
                     onClick = onNavigateToReportProblem,
                 )
             }
+            } // FORK-HOOK(brand)
             row(key = "export_logs") {
                 SettingsRow(
                     title = stringResource(Res.string.export_diagnostic_logs),
@@ -324,4 +335,4 @@ private fun AboutRow(label: String, value: String) {
  * it is shown on every channel. Installed builds keep this URL for good, so moving the file needs a
  * stub left at this path, plus the Play Console entry and PRIVACY.md section 16.
  */
-private const val PRIVACY_POLICY_URL = "https://github.com/garfiec/Librechat-Mobile/blob/develop/docs/PRIVACY.md"
+private const val PRIVACY_POLICY_URL = com.garfiec.librechat.fork.brand.Brand.PRIVACY_POLICY_URL // FORK-HOOK(brand)

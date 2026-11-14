@@ -633,7 +633,7 @@ class McpAppHost(
     companion object {
         /** Upstream `useMCPAppFrame`'s reveal budget. */
         const val REVEAL_BUDGET_MS = 20_000L
-        const val HOST_NAME = "Switchboard"
+        const val HOST_NAME = com.garfiec.librechat.fork.brand.Brand.NAME // FORK-HOOK(brand)
         const val DISPLAY_MODE_INLINE = "inline"
         const val DISPLAY_MODE_FULLSCREEN = "fullscreen"
 

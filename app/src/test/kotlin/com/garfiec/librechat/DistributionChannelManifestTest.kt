@@ -39,8 +39,8 @@ class DistributionChannelManifestTest {
     @Test
     fun onlyTheOpenSourceChannelOwnsTheBarePackage() {
         val expected = when (BuildConfig.FLAVOR) {
-            "foss" -> "com.garfiec.librechat"
-            "play" -> "com.garfiec.librechat.play"
+            "foss" -> "dev.wsiener.mercuric" // FORK-HOOK(brand)
+            "play" -> "dev.wsiener.mercuric.play" // FORK-HOOK(brand)
             else -> error("No expected package for flavor ${BuildConfig.FLAVOR}; add it here.")
         }
         assertEquals(expected, BuildConfig.APPLICATION_ID.removeSuffix(".debug"))

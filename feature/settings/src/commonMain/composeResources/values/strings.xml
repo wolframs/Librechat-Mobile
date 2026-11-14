@@ -145,7 +145,7 @@
     <string name="colors_from_server">From your server</string>
     <string name="colors_switchboard_detail">Your colors</string>
     <string name="accent_set_by_server">Set by your server (%1$s)</string>
-    <string name="accent_set_by_server_note">Pick Switchboard under Colors to use your own accent.</string>
+    <string name="accent_set_by_server_note">Pick Mercuric under Colors to use your own accent.</string> <!-- FORK-HOOK(brand) -->
     <string name="ui_style_material">Material</string>
     <string name="ui_style_liquid_glass">Liquid Glass</string>
     <string name="ui_style_note_simulated">Liquid Glass is simulated on this iOS version. iOS 26 or later draws it natively.</string>

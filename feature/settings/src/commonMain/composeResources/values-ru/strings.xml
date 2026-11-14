@@ -142,7 +142,7 @@
     <string name="colors_from_server">С вашего сервера</string>
     <string name="colors_switchboard_detail">Ваши цвета</string>
     <string name="accent_set_by_server">Задан сервером (%1$s)</string>
-    <string name="accent_set_by_server_note">Выберите Switchboard в разделе «Цвета», чтобы использовать свой акцент.</string>
+    <string name="accent_set_by_server_note">Выберите Mercuric в разделе «Цвета», чтобы использовать свой акцент.</string> <!-- FORK-HOOK(brand) -->
 
     <!-- Settings rows -->
     <string name="language">Язык</string>

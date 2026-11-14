@@ -9,7 +9,7 @@ android {
     namespace = "com.garfiec.librechat"
 
     defaultConfig {
-        applicationId = "com.garfiec.librechat"
+        applicationId = "dev.wsiener.mercuric" // FORK-HOOK(brand): the fork's own app; the namespace stays upstream's
     }
 
     // `play` must keep its own applicationId: both channels are signed with the same key, so on one
@@ -37,11 +37,7 @@ android {
     buildTypes {
         debug {
             // Release must keep the bare id — Obtainium tracks updates by package name.
-            // FORK-HOOK(legacy-debug-id): -PlegacyDebugApplicationId=true builds under the bare id, to
-            // update a debug install from before the suffix existed without losing its data.
-            if (providers.gradleProperty("legacyDebugApplicationId").orNull != "true") {
-                applicationIdSuffix = ".debug"
-            }
+            applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
     }

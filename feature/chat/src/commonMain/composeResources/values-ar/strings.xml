@@ -92,7 +92,7 @@
     <string name="cd_starter_send">إرسال</string>
     <string name="cd_starter_edit">تعديل قبل الإرسال</string>
     <string name="starters_try_asking">جرّب أن تسأل</string>
-    <string name="cd_librechat">Switchboard</string>
+    <string name="cd_librechat">Mercuric</string> <!-- FORK-HOOK(brand) -->
     <string name="cd_comparison_enabled">المقارنة مُفعّلة</string>
 
     <!-- Content descriptions - Messages -->
@@ -781,7 +781,7 @@
     <string name="background_tasks_cancellation_requested">تم طلب الإلغاء. قد تظل المهمة قيد التشغيل؛ تحقّق مرة أخرى من حالتها النهائية.</string>
 
     <!-- App update banner -->
-    <string name="update_banner_title">Switchboard %1$s متاح</string>
+    <string name="update_banner_title">Mercuric %1$s متاح</string> <!-- FORK-HOOK(brand) -->
     <string name="update_banner_action">عرض الجديد</string>
     <string name="cd_dismiss_update">إغلاق إشعار التحديث</string>
     <string name="site_icons_prompt_title">إظهار أيقونات المواقع؟</string>

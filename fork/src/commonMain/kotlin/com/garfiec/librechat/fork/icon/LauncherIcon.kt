@@ -4,9 +4,15 @@ import androidx.compose.runtime.Composable
 
 /** The sigil's palettes. [alias] is the class part of the launcher alias in `:fork`'s Android manifest. */
 enum class LauncherAlloy(val alias: String, val displayName: String) {
+    EMBER_ALCHEMY("EmberAlchemy", "Ember-alchemy"),
     COLD_LAB("ColdLab", "Cold-lab"),
     NIGHT_GLASS("NightGlass", "Night-glass"),
-    EMBER_ALCHEMY("EmberAlchemy", "Ember-alchemy"),
+    ;
+
+    companion object {
+        /** The brand's icon: the alias the manifest enables, and the application's own icon. */
+        val DEFAULT = EMBER_ALCHEMY
+    }
 }
 
 /**

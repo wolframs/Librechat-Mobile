@@ -12,10 +12,10 @@ class ChannelPolicy(private val channel: DistributionChannel) {
      * channel: a store updates its own installs, and Play policy forbids an app updating itself
      * outside Play. iOS has no self-update path on any channel, so its binding forces this off.
      */
-    val selfUpdateCheck: Boolean = pick(openSource = true, playStore = false, appStore = false)
+    val selfUpdateCheck: Boolean = false // FORK-HOOK(brand): the releases it reads are upstream's; the fork publishes none
 
     /** Whether Settings offers the GitHub release notes. A store's listing carries its own. */
-    val releaseNotes: Boolean = pick(openSource = true, playStore = false, appStore = false)
+    val releaseNotes: Boolean = false // FORK-HOOK(brand): as selfUpdateCheck
 
     /**
      * The value for this build's channel. Every channel is named, so adding one fails to compile

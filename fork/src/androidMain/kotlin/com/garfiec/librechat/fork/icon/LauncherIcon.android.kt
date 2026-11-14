@@ -22,7 +22,7 @@ actual fun rememberLauncherIconSwitcher(): LauncherIconSwitcher? {
 /** The alloy whose launcher alias is enabled: the icon the launcher shows. Null if none is. */
 fun enabledLauncherAlloyOrNull(context: Context): LauncherAlloy? = LauncherAlloy.entries.firstOrNull { isEnabled(context, it) }
 
-private fun enabledLauncherAlloy(context: Context): LauncherAlloy = enabledLauncherAlloyOrNull(context) ?: LauncherAlloy.COLD_LAB
+private fun enabledLauncherAlloy(context: Context): LauncherAlloy = enabledLauncherAlloyOrNull(context) ?: LauncherAlloy.DEFAULT
 
 private const val ALIAS_PACKAGE = "com.garfiec.librechat.fork.icon."
 
@@ -31,8 +31,8 @@ private fun component(context: Context, alloy: LauncherAlloy) = ComponentName(co
 private fun isEnabled(context: Context, alloy: LauncherAlloy): Boolean =
     when (context.packageManager.getComponentEnabledSetting(component(context, alloy))) {
         PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
-        // Untouched since install: the manifest decides, and it enables Cold-lab alone.
-        PackageManager.COMPONENT_ENABLED_STATE_DEFAULT -> alloy == LauncherAlloy.COLD_LAB
+        // Untouched since install: the manifest decides, and it enables the default alone.
+        PackageManager.COMPONENT_ENABLED_STATE_DEFAULT -> alloy == LauncherAlloy.DEFAULT
         else -> false
     }
 

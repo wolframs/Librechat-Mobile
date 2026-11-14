@@ -32,7 +32,7 @@
     <string name="server_headers_error_reserved">This header is set by the app and can't be overridden.</string>
     <!-- Password prompt for a PDF that needs one before upload (decrypted on-device) -->
     <string name="pdf_password_title">Password-protected PDF</string>
-    <string name="pdf_password_explanation">“%1$s” needs a password to open. To send it to the AI model, Switchboard decrypts it on this device and uploads the decrypted copy. The password never leaves your device.</string>
+    <string name="pdf_password_explanation">“%1$s” needs a password to open. To send it to the AI model, Mercuric decrypts it on this device and uploads the decrypted copy. The password never leaves your device.</string> <!-- FORK-HOOK(brand) -->
     <string name="pdf_password_sensitive_warning">Password-protected files often contain sensitive information. The decrypted copy is stored on your LibreChat server and shared with the AI provider. Only continue if you're comfortable sharing its contents.</string>
     <string name="pdf_password_field">PDF password</string>
     <string name="pdf_password_incorrect">Incorrect password. Try again.</string>

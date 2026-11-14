@@ -72,8 +72,8 @@ internal fun aboutDiagnostics(
     device: String,
     installSource: String,
 ): String = listOf(
-    "Switchboard version: $appVersion",
-    "Switchboard build: ${gitSha.ifBlank { DIAGNOSTICS_MISSING }}",
+    "${com.garfiec.librechat.fork.brand.Brand.NAME} version: $appVersion", // FORK-HOOK(brand)
+    "${com.garfiec.librechat.fork.brand.Brand.NAME} build: ${gitSha.ifBlank { DIAGNOSTICS_MISSING }}", // FORK-HOOK(brand)
     "Install source: $installSource",
     "LibreChat version: ${serverVersion ?: DIAGNOSTICS_MISSING}",
     "Commit: ${buildInfo?.commit?.takeIf { it.isNotBlank() } ?: DIAGNOSTICS_MISSING}",

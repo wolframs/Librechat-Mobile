@@ -1,3 +1,6 @@
+<!-- FORK-HOOK(brand): the fork's note; everything below it is upstream's -->
+> **This repository is Mercuric**, a personal, modified version of [Switchboard](https://github.com/garfiec/Librechat-Mobile) by garfiec (Apache License 2.0). It is not published, reviewed or supported by garfiec. It installs as its own app (`dev.wsiener.mercuric`), and what it changes is listed in [`docs/FORK_FEATURE_LEDGER.md`](docs/FORK_FEATURE_LEDGER.md). Everything below is Switchboard's own README; its download links lead to Switchboard, not to this fork.
+
 # Switchboard: LibreChat Mobile Client
 
 [![LibreChat](https://img.shields.io/badge/LibreChat-v0.8.4_–_v0.8.9--rc1-blue)](https://github.com/LibreChat-AI/LibreChat/releases/tag/v0.8.9-rc1)
