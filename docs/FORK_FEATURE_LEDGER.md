@@ -112,6 +112,7 @@ module, `fork/README.md` wins.
 | Composer regrouping (model capsule, model sheet, Add to chat, conversation-only menu, Lucide icons) | in. Five rounds against a design critic (GPT-6 Astra) from device screenshots, 5.5 to 9 out of 10, light, dark and font scale 1.3. Not seen: the composer with the keyboard open (the emulator's test keyboard is invisible), the Liquid Glass style, iOS. | `composer` |
 | Reading settings: fonts in three slots, text size, line and paragraph spacing | in. Three rounds against the design critic (GPT-6 Astra) from emulator screenshots, 8 to 9 out of 10, light, dark and font scale 1.3. Not seen: Liquid Glass, iOS (never compiled here), the faces on the Pixel's screen. | `fonts` |
 | Thread, header, landing and full model list restyle | in. Same three critic rounds, 8 to 9. Not seen: a streaming reply and tool cards under the critic, comparison panes (they keep upstream's look), Liquid Glass, iOS. | `thread` |
+| Launcher icon: the dyad sigil, Cold-lab palette | in. Seen on the emulator (app drawer, app info) 2026-11-14. Debug builds no longer differ by background colour. Not done: an in-app choice between the three palettes, iOS, the F-Droid metadata icon. | `icon` |
 
 ### Reading settings: how it is built
 
@@ -178,6 +179,18 @@ would open behind the composer; with a branch navigator on that side it goes bel
 Font work: `userMessageTextStyle` and `modelReplyTextStyle` in `fork/thread/ThreadRules.kt` resolve
 the You and Model reading slots. Both platform markdown renderers route their body style through them;
 existing 16/24 sp typography and the user's size multiplier remain in force.
+
+### Launcher icon: how it is built
+
+The operator's sigil (two woven rings, an arc and an arrow) in three palettes: Night-glass,
+Ember-alchemy, Cold-lab. `fork/scripts/gen-launcher-icon.py` holds the geometry and the palettes
+and writes `fork/icons/launcher/<alloy>.svg` (to look at) and, as fork-only files in the app's
+resources, `fork_launcher_<alloy>` with a bitmap foreground in five densities (the weave uses SVG
+masks, which a VectorDrawable cannot express), a vector gradient background and a shared
+monochrome layer. The manifest's `icon` and `roundIcon` and the model shortcuts name
+`fork_launcher_cold_lab`; upstream's `ic_launcher` files are untouched and unused. Only Cold-lab
+is generated into the tree. A choice inside the app would need launcher aliases in the manifest
+(the launcher entry moves off `MainActivity`), and launchers drop the home-screen icon on a switch.
 
 ### Default-on connectors: how it is built
 

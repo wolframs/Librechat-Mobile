@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+<defs><radialGradient id="bg" cx="0.38" cy="0.3" r="0.8">
+<stop offset="0" stop-color="#1b1b22"/><stop offset="1" stop-color="#050507"/></radialGradient></defs>
+<rect width="108" height="108" fill="url(#bg)"/>
+<defs>
+<linearGradient id="ga" gradientUnits="userSpaceOnUse" x1="28" y1="26" x2="80" y2="84">
+<stop offset="0" stop-color="#f4f4f7"/><stop offset="1" stop-color="#b4b4c0"/></linearGradient>
+<linearGradient id="gb" gradientUnits="userSpaceOnUse" x1="28" y1="26" x2="80" y2="84">
+<stop offset="0" stop-color="#7ff7ff"/><stop offset="1" stop-color="#17b3d4"/></linearGradient>
+<clipPath id="cTop"><circle cx="54" cy="43" r="6.5"/></clipPath>
+<clipPath id="cBot"><circle cx="54" cy="67" r="6.5"/></clipPath>
+<mask id="mB" maskUnits="userSpaceOnUse" x="0" y="0" width="108" height="108">
+<rect width="108" height="108" fill="#ffffff"/>
+<g clip-path="url(#cTop)"><circle cx="45" cy="55" r="15" fill="none" stroke="#000000" stroke-width="7.1"/></g>
+<rect x="44" y="52.1" width="8" height="5.8" fill="#000000"/>
+</mask>
+<mask id="mA" maskUnits="userSpaceOnUse" x="0" y="0" width="108" height="108">
+<rect width="108" height="108" fill="#ffffff"/>
+<g clip-path="url(#cBot)"><circle cx="63" cy="55" r="15" fill="none" stroke="#000000" stroke-width="7.1"/></g>
+<rect x="56" y="52.1" width="8" height="5.8" fill="#000000"/>
+</mask>
+</defs>
+<g fill="none" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"
+   transform="translate(54 54) scale(0.98) translate(-54 -49.5)">
+<g mask="url(#mA)" stroke="url(#ga)"><circle cx="45" cy="55" r="15"/></g>
+<g mask="url(#mB)" stroke="url(#gb)"><circle cx="63" cy="55" r="15"/></g>
+<path d="M47 29 A7 7 0 0 0 61 29" stroke="url(#gb)"/>
+<path d="M35 55 L42 51 V59 Z" stroke="url(#ga)" stroke-width="2.6"/>
+<path d="M42 55 H72 M68 51 V59" stroke="url(#ga)" stroke-width="3.1"/>
+</g>
+</svg>

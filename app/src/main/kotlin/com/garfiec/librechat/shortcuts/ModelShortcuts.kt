@@ -35,7 +35,7 @@ object ModelShortcuts {
                 .setShortLabel(label)
                 .setLongLabel(label)
                 .setRank(index)
-                .setIcon(IconCompat.createWithResource(context, R.mipmap.ic_launcher))
+                .setIcon(IconCompat.createWithResource(context, R.mipmap.fork_launcher_cold_lab)) // FORK-HOOK(icon)
                 .setIntent(intent)
                 .build()
         }
