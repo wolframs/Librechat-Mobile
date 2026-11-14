@@ -1,0 +1,8 @@
+<resources>
+    <string name="icon_title">App-Symbol</string>
+    <string name="icon_note">Das Symbol wechselt, sobald die App geschlossen ist.</string>
+    <string name="icon_close_title">App jetzt schließen?</string>
+    <string name="icon_close_text">Das neue Symbol erscheint, sobald die App geschlossen ist. Dein Launcher nimmt das alte möglicherweise vom Startbildschirm; du kannst es aus der App-Liste wieder hinzufügen.</string>
+    <string name="icon_close_now">Jetzt schließen</string>
+    <string name="icon_later">Später</string>
+</resources>

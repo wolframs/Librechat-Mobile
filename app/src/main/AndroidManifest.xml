@@ -52,7 +52,7 @@
             android:theme="@style/Theme.LibreChat">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- FORK-HOOK(icon): the LAUNCHER category sits on the icon aliases in :fork's manifest -->
             </intent-filter>
 
             <!-- Deep links -->

@@ -183,6 +183,16 @@ fun AppearanceSettingsPage(
                     onClick = com.garfiec.librechat.fork.fonts.rememberTextSheet(), // FORK-HOOK(fonts)
                 ) // FORK-HOOK(fonts)
             } // FORK-HOOK(fonts)
+            if (com.garfiec.librechat.fork.icon.launcherIconChoice) { // FORK-HOOK(icon): Android's launcher icon
+                row(key = "fork_icon") { // FORK-HOOK(icon)
+                    SettingsRow( // FORK-HOOK(icon)
+                        icon = com.garfiec.librechat.fork.icons.ForkIcons.Smartphone, // FORK-HOOK(icon)
+                        title = com.garfiec.librechat.fork.icon.launcherIconLabel(), // FORK-HOOK(icon)
+                        summary = com.garfiec.librechat.fork.icon.launcherIconSummary(), // FORK-HOOK(icon)
+                        onClick = com.garfiec.librechat.fork.icon.rememberLauncherIconSheet(), // FORK-HOOK(icon)
+                    ) // FORK-HOOK(icon)
+                } // FORK-HOOK(icon)
+            } // FORK-HOOK(icon)
         }
         if (usesSidebar) {
             item(key = "tablet_header") {

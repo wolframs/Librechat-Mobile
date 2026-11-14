@@ -35,7 +35,8 @@ object ModelShortcuts {
                 .setShortLabel(label)
                 .setLongLabel(label)
                 .setRank(index)
-                .setIcon(IconCompat.createWithResource(context, R.mipmap.fork_launcher_cold_lab)) // FORK-HOOK(icon)
+                // FORK-HOOK(icon): the chosen launcher icon
+                .setIcon(IconCompat.createWithResource(context, com.garfiec.librechat.fork.launcherIconRes(context, R.mipmap.ic_launcher)))
                 .setIntent(intent)
                 .build()
         }

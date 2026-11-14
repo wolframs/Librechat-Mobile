@@ -11,7 +11,8 @@ Per alloy it writes, under app/src/main/res: the foreground layer as PNG in five
 (mipmap-*/fork_launcher_<alloy>_foreground.png), the background as a vector gradient
 (drawable/fork_launcher_<alloy>_background.xml) and the adaptive icon
 (mipmap-anydpi-v26/fork_launcher_<alloy>.xml). The monochrome layer is shared
-(mipmap-*/fork_launcher_monochrome.png). Needs rsvg-convert. The foreground is a bitmap because the
+(mipmap-*/fork_launcher_monochrome.png). For the in-app choice it also writes a round preview of
+each alloy into :fork's Compose resources (drawable/launcher_<alloy>.png). Needs rsvg-convert. The foreground is a bitmap because the
 rings are woven with SVG masks, which a VectorDrawable cannot express.
 """
 import subprocess
@@ -21,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SVG_DIR = ROOT / "fork" / "icons" / "launcher"
 RES = ROOT / "app" / "src" / "main" / "res"
+PREVIEWS = ROOT / "fork" / "src" / "commonMain" / "composeResources" / "drawable"
+PREVIEW_PX = 288
 
 # background centre and edge; ring A (and the arrow) from light to dark; ring B (and the arc) likewise
 ALLOYS = {
@@ -99,6 +102,15 @@ def svg(body: str) -> str:
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">\n{body}\n</svg>\n'
 
 
+def preview(body: str) -> str:
+    """What a launcher shows: the middle 72 of the 108 canvas, under a round mask."""
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72" width="72" height="72">\n'
+        '<defs><clipPath id="round"><circle cx="54" cy="54" r="36"/></clipPath></defs>\n'
+        f'<g clip-path="url(#round)">\n{body}\n</g>\n</svg>\n'
+    )
+
+
 def glyph(a0: str, a1: str, b0: str, b1: str) -> str:
     return GLYPH.format(a0=a0, a1=a1, b0=b0, b1=b1, sw=STROKE, gap=GAP)
 
@@ -130,7 +142,9 @@ def main() -> int:
         bg0, bg1, a0, a1, b0, b1 = ALLOYS[name]
         res_name = name.replace("-", "_")
         foreground = svg(glyph(a0, a1, b0, b1))
-        (SVG_DIR / f"{name}.svg").write_text(svg(BACKGROUND.format(bg0=bg0, bg1=bg1) + "\n" + glyph(a0, a1, b0, b1)))
+        whole = BACKGROUND.format(bg0=bg0, bg1=bg1) + "\n" + glyph(a0, a1, b0, b1)
+        (SVG_DIR / f"{name}.svg").write_text(svg(whole))
+        render(preview(whole), PREVIEWS / f"launcher_{res_name}.png", PREVIEW_PX)
         for density, size in DENSITIES.items():
             render(foreground, RES / f"mipmap-{density}" / f"fork_launcher_{res_name}_foreground.png", size)
         write(RES / "drawable" / f"fork_launcher_{res_name}_background.xml", BACKGROUND_XML.format(bg0=bg0, bg1=bg1))

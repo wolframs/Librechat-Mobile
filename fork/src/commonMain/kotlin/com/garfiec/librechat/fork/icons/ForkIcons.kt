@@ -305,6 +305,14 @@ object ForkIcons {
         )
     }
 
+    val Smartphone: ImageVector by lazy {
+        lucide(
+            "Smartphone",
+            "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-16a2 2 0 0 1 2 -2z",
+            "M12 18h.01",
+        )
+    }
+
     val Sparkles: ImageVector by lazy {
         lucide(
             "Sparkles",

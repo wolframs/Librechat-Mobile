@@ -1,0 +1,8 @@
+<resources>
+    <string name="icon_title">App icon</string>
+    <string name="icon_note">The icon changes once the app is closed.</string>
+    <string name="icon_close_title">Close the app now?</string>
+    <string name="icon_close_text">The new icon appears once the app is closed. Your launcher may take the old one off the home screen; you can add it again from the app list.</string>
+    <string name="icon_close_now">Close now</string>
+    <string name="icon_later">Later</string>
+</resources>
