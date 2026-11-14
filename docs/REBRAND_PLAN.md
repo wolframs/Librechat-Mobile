@@ -12,14 +12,13 @@ as they are done and seen on a device; delete this file when all are ticked.
   `applicationId` unchanged" is older than his message above, which overrules it.
 - The log places the lore in the icon and names the Ember-alchemy variant.
 
-## Open, his to decide (asked 2026-11-14, not yet answered)
+## Decided (operator, 2026-11-14)
 
-1. **How deep the decoupling goes.** Either the product is decoupled and the code stays mergeable
-   (name, app id, icon, links, About and NOTICE change; the Kotlin package `com.garfiec.librechat`
-   and the hook architecture stay, so merges from upstream keep working), or the code is cut loose
-   too (packages renamed, no more merges). 3,134 files carry the package; renaming it ends merging
-   in practice.
-2. **The app id.** A reverse domain he controls, or `io.github.wolframs.mercuric`.
+1. The product is decoupled, the code stays coupled: "i'm fine with the code staying coupled, i'm
+   with you on the link to upstream being useful". The Kotlin package and the hook architecture stay.
+2. App id: he is fine with `io.github.wolframs.mercuric` and offered his own domain `wsiener.dev`
+   "in case you might consider it referenceable". My working choice: **`dev.wsiener.mercuric`**, the
+   reverse of a domain he owns, independent of where the code is hosted.
 
 ## What names upstream today (inventory, 2026-11-14)
 
@@ -42,6 +41,23 @@ as they are done and seen on a device; delete this file when all are ticked.
 - Repositories: GitHub `wolframs/Librechat-Mobile` (a GitHub fork of garfiec's), Forgejo likewise.
   Renaming them is separate from the app.
 
-## Steps (filled in once decision 1 is made)
+## Steps
 
-- [ ] 0. Decisions 1 and 2.
+- [ ] 1. `:fork` `brand/Brand.kt`: the name, the fork's and upstream's repository addresses.
+- [ ] 2. Build: `applicationId = "dev.wsiener.mercuric"`; the `-PlegacyDebugApplicationId` switch and
+      the guard for the old fork's cache database go (both only served the old id).
+- [ ] 3. Name: `app_name` (Mercuric / Mercuric Dev), the five other strings in all ten locales, and
+      the code that shows the name (theme preview, MCP host name, diagnostics, the pictures folder).
+- [ ] 4. Links: update check and release notes off (the fork publishes no releases); "Report a
+      problem" hidden (it mails upstream's maintainer); privacy policy link to the fork's copy.
+- [ ] 5. Attribution: a row in About ("Based on Switchboard"), the fork's lines in `NOTICE`, a
+      note at the top of the README.
+- [ ] 6. Icon default: Ember-alchemy (his naming log names it as the brand's icon).
+- [ ] 7. Emulator: fresh install under the new id, sign in, the name in launcher, About and
+      settings, icon choice, a chat. Then the old test install is removed from the emulator.
+- [ ] 8. Full checks, ledger, root CLAUDE.md pointer, push, the Pixel (beside his old app, which
+      he removes himself when ready).
+
+Not part of this: iOS names and bundle id (iOS is not built here), fastlane and store metadata,
+release and Play workflows (the fork publishes nothing), renaming the repositories, a signed
+release build (asked 2026-11-14, see the ledger once answered).
