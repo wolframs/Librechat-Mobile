@@ -52,7 +52,7 @@
             android:theme="@style/Theme.LibreChat">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <!-- FORK-HOOK(icon): the LAUNCHER category sits on the icon aliases in :fork's manifest -->
+                <!-- FORK-HOOK(icon): the LAUNCHER category sits on the icon aliases below -->
             </intent-filter>
 
             <!-- Deep links -->
@@ -140,6 +140,47 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <!-- FORK-HOOK(icon): the app's launcher entries, one per icon. Exactly one is enabled at a
+             time (fork/icon/LauncherIcon.android.kt). The names are what a launcher stores for a
+             home-screen icon: renaming one drops that icon. They sit here, not in :fork's manifest,
+             because their icons are this module's resources. -->
+        <activity-alias
+            android:name="com.garfiec.librechat.fork.icon.ColdLab"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/fork_launcher_cold_lab"
+            android:roundIcon="@mipmap/fork_launcher_cold_lab"
+            android:targetActivity="com.garfiec.librechat.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name="com.garfiec.librechat.fork.icon.NightGlass"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/fork_launcher_night_glass"
+            android:roundIcon="@mipmap/fork_launcher_night_glass"
+            android:targetActivity="com.garfiec.librechat.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name="com.garfiec.librechat.fork.icon.EmberAlchemy"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/fork_launcher_ember_alchemy"
+            android:roundIcon="@mipmap/fork_launcher_ember_alchemy"
+            android:targetActivity="com.garfiec.librechat.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
         <!-- intoExisting keys the task on the intent's data URI, so each artifact keeps one task and
              one Recents card. Rotating or folding would otherwise
              reload the page and lose its state. Launched only by our own shortcuts. -->

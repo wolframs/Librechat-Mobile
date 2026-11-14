@@ -35,7 +35,7 @@ fonts	feature/chat/src/iosMain/kotlin/com/garfiec/librechat/feature/chat/compone
 fonts	feature/chat/src/iosMain/kotlin/com/garfiec/librechat/feature/chat/components/PlatformChatComponents.ios.kt	1
 fonts	feature/settings/src/commonMain/kotlin/com/garfiec/librechat/feature/settings/screen/AppearanceSettingsScreen.kt	8
 fonts	shared/src/commonMain/kotlin/com/garfiec/librechat/shared/app/LibreChatApp.kt	2
-icon	app/src/main/AndroidManifest.xml	2
+icon	app/src/main/AndroidManifest.xml	3
 icon	app/src/main/kotlin/com/garfiec/librechat/shortcuts/ModelShortcuts.kt	1
 icon	feature/settings/src/commonMain/kotlin/com/garfiec/librechat/feature/settings/screen/AppearanceSettingsScreen.kt	10
 legacy-db	core/data/src/androidMain/kotlin/com/garfiec/librechat/core/data/di/DataPlatformModule.android.kt	1
@@ -61,6 +61,9 @@ module	build-logic/convention/src/main/kotlin/KmpFeatureConventionPlugin.kt	1
 module	settings.gradle.kts	1
 module	shared/build.gradle.kts	1
 module	shared/src/commonMain/kotlin/com/garfiec/librechat/shared/di/SharedKoinModules.kt	1
+resend-files	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/EndpointParameterRegistry.kt	5
+resend-files	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/ModelParameterContent.kt	1
+resend-files	feature/chat/src/androidUnitTest/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ModelParamPayloadTest.kt	1
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/LoginScreen.kt	8
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/ServerUrlScreen.kt	3
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/TwoFactorScreen.kt	3

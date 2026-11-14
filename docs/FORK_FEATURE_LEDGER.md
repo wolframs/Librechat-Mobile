@@ -113,6 +113,7 @@ module, `fork/README.md` wins.
 | Reading settings: fonts in three slots, text size, line and paragraph spacing | in. Three rounds against the design critic (GPT-6 Astra) from emulator screenshots, 8 to 9 out of 10, light, dark and font scale 1.3. Not seen: Liquid Glass, iOS (never compiled here), the faces on the Pixel's screen. | `fonts` |
 | Thread, header, landing and full model list restyle | in. Same three critic rounds, 8 to 9. Not seen: a streaming reply and tool cards under the critic, comparison panes (they keep upstream's look), Liquid Glass, iOS. | `thread` |
 | Launcher icon: the dyad sigil in three palettes, chosen in Settings > Appearance > App icon | in. On the emulator 2026-11-14: update over the build without aliases, each palette picked, with "Close now" and with "Later" (applied when the app went to the background, the process survived), the drawer showed the new icon, the app opened from the new entry. Not seen: what a launcher does with an icon pinned to the home screen, the Pixel, iOS (no choice there), the F-Droid metadata icon. Debug builds no longer differ by background colour. | `icon` |
+| Resend Files switch tells the truth | in. Upstream's app shows the switch off by default and sends nothing at its default, while the server resends unless a request says `resendFiles: false`; so "off" resent every earlier file. The default is now on, as on web, and off is sent. On the emulator against the live server 2026-11-14: switched off on `Surplus (Claude)`, the server stored `resendFiles=false`. Worth offering upstream. | `resend-files` |
 
 ### Reading settings: how it is built
 
@@ -189,7 +190,9 @@ app's resources (`fork_launcher_<alloy>`: a bitmap foreground in five densities,
 uses SVG masks that a VectorDrawable cannot express, a vector gradient background, a shared
 monochrome layer) and a round preview of each in `:fork`'s Compose resources.
 
-The launcher entries are three `activity-alias` elements in `fork/src/androidMain/AndroidManifest.xml`,
+The launcher entries are three `activity-alias` elements in the app's manifest (a marked block
+after `MainActivity`; in `:fork`'s own manifest they broke resource linking for every module's
+unit tests, since their icons are the app's resources),
 one enabled at a time; `MainActivity` lost its LAUNCHER category (one hook line) and the
 application's own `icon` names Cold-lab. Which alias is enabled is the stored choice
 (`fork/icon/LauncherIcon.android.kt`). A pick is not applied under the user's hands: the system

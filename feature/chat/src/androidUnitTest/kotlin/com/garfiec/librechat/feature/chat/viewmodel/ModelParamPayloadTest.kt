@@ -49,6 +49,23 @@ class ModelParamPayloadTest {
         assertNull(bedrock["web_search"])
     }
 
+    // FORK-HOOK(resend-files): the server resends unless a request says not to
+    @Test
+    fun `resend files switched off is sent as false, on every parameter set`() {
+        listOf("anthropic", "openAI", "google", "bedrock", "Some custom endpoint").forEach { endpoint ->
+            val off = ModelParamPayload.build(
+                endpoint = endpoint,
+                provider = null,
+                model = null,
+                extendedEffortSupported = false,
+                params = ModelParameters.DEFAULT.copy(resendFiles = false),
+            )
+            assertEquals(false, off["resendFiles"]?.jsonPrimitive?.boolean, endpoint)
+        }
+        assertTrue(ModelParameters.DEFAULT.resendFiles)
+        assertNull(build(ModelParameters.DEFAULT)["resendFiles"])
+    }
+
     @Test
     fun `changed temperature is sent as a number`() {
         val result = build(ModelParameters.DEFAULT.copy(temperature = 0.7f))
