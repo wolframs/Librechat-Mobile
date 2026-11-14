@@ -103,7 +103,7 @@ module, `fork/README.md` wins.
 | Feature | State | Hooks (`fork/scripts/fork-hooks.py --list`) |
 |---|---|---|
 | `:fork` module | in | `module` |
-| Brand: the app is **Mercuric**, app id `dev.wsiener.mercuric` (debug builds `.debug`, "Mercuric Dev") | in. On the emulator 2026-11-14: fresh install under the new id, sign-in, a chat, the name in the launcher entry, system app info and About, Ember-alchemy as the default icon. The Kotlin package, `namespace` and class names stay upstream's. Not changed: iOS names and bundle id, fastlane and store metadata, release and Play workflows, the repositories' names, the text of `docs/PRIVACY.md` (still upstream's). | `brand` |
+| Brand: the app is **Mercuric**, app id `dev.wsiener.mercuric` (debug builds `.debug`, "Mercuric Dev"); the operator runs the signed release build | in. On the emulator 2026-11-14: fresh install under the new id, sign-in, a chat, the name in the launcher entry, system app info and About, Ember-alchemy as the default icon. The Kotlin package, `namespace` and class names stay upstream's. Not changed: iOS names and bundle id, fastlane and store metadata, release and Play workflows, the repositories' names, the text of `docs/PRIVACY.md` (still upstream's). | `brand` |
 | Guard for the old fork's cache database, and the build switch for the old debug app id | removed 2026-11-14: both only served installs under `com.garfiec.librechat`, which the new id never updates. | none |
 | Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. On the Pixel (operator, 2026-11-13): the password manager offered the saved login and filled it; the build then only filled the fields and he had to tap Sign in. Since then a picked login signs in directly; that step is not yet tried on the Pixel. iOS has no-op actuals. | `saved-login` |
 | Cache window control | in. Run on the emulator on native Anthropic and on `Surplus (Claude)` (2026-11-13): countdown from the server's marker, the cycle 1h, 5m, off, an armed send stored as `1h`, arming from the model sheet's Cache window page. Since the composer regrouping it is a quiet "Cache 4:47" in the composer, shown only while a window runs or is armed. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
@@ -203,8 +203,25 @@ repository addresses. Everything else is hook lines:
 - Four upstream tests assert the identity (package names, the diagnostics text, the open-source
   channel's update check) and carry the fork's values on marked lines.
 
-A release build signed with the operator's own key does not exist yet; what runs on his phone is a
-debug build.
+**The release build.** The operator's daily app is the release build, signed with his own key
+(asked whether he wants one that needs a key he keeps, 2026-11-14: "that's okay, i can keep keys
+safe, after all, that's the #2 job of humans these days"). `./gradlew :app:assembleFossRelease`
+writes `app/build/outputs/apk/foss/release/app-foss-release.apk`, minified, app id
+`dev.wsiener.mercuric`, name "Mercuric". Upstream's build reads the key from `keystore.properties`
+at the repository root (ignored by git) and falls back to the debug key when that file is missing,
+so a build on a machine without it is not installable over his app.
+
+The key was made on kubuntu on 2026-11-14 and lives there only: `~/.config/mercuric/` holds the
+keystore (`mercuric-release.p12`, alias `mercuric`) and its password file, both readable by him
+alone. Certificate: `CN=Mercuric, O=wsiener.dev`, SHA-256
+`52a8d8515cbecd4e03161718b3d914e6fc997b2a296e2e0bc241430570fdea71`, valid until 2054. It is the
+one permanent key: without it no later build can update the installed app. Backing it up is his.
+Check a build with `apksigner verify --print-certs` against that fingerprint.
+
+Run on the emulator 2026-11-14 as the minified release build: sign-in, a chat, the model sheet,
+presets (save, edit, delete), the Text sheet with a font change, connectors, prices, the icon
+choice there and back. Debug builds (`dev.wsiener.mercuric.debug`, "Mercuric Dev") install beside
+it and stay the builds for testing.
 
 ### Launcher icon: how it is built
 
