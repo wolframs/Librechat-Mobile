@@ -62,7 +62,7 @@ composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/c
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ToolsButtonDots.kt	1
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatPullUpSheet.kt	3
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatScreen.kt	3
-composer	feature/chat/src/commonTest/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowSectionsTest.kt	2
+composer	feature/chat/src/commonTest/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowSectionsTest.kt	3
 fonts	app/build.gradle.kts	1
 fonts	app/src/main/kotlin/com/garfiec/librechat/SwitchboardTheme.kt	2
 fonts	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/theme/Theme.kt	2
@@ -105,6 +105,15 @@ module	shared/build.gradle.kts	1
 module	shared/src/commonMain/kotlin/com/garfiec/librechat/shared/di/SharedKoinModules.kt	1
 presets	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ChatViewModel.kt	2
 presets	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/PresetPromptDelegate.kt	3
+resend-files	core/model/src/commonMain/kotlin/com/garfiec/librechat/core/model/Conversation.kt	1
+resend-files	core/model/src/commonMain/kotlin/com/garfiec/librechat/core/model/Preset.kt	1
+resend-files	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/EndpointParameterRegistry.kt	1
+resend-files	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/ModelParameterContent.kt	3
+resend-files	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/ParameterDescriptions.kt	2
+resend-files	feature/agents/src/commonMain/kotlin/com/garfiec/librechat/feature/agents/components/AgentModelParametersBridge.kt	1
+resend-files	feature/chat/src/androidUnitTest/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ModelParamPayloadTest.kt	1
+resend-files	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ModelParamPayload.kt	1
+resend-files	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/PresetPromptDelegate.kt	2
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/LoginScreen.kt	8
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/ServerUrlScreen.kt	3
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/TwoFactorScreen.kt	3

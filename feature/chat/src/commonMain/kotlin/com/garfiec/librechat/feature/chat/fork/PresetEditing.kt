@@ -3,6 +3,7 @@ package com.garfiec.librechat.feature.chat.fork
 import com.garfiec.librechat.core.model.Preset
 import com.garfiec.librechat.core.ui.components.EndpointParameterRegistry
 import com.garfiec.librechat.core.ui.components.ModelParameters
+import com.garfiec.librechat.core.ui.fork.resendfiles.resendFilesOf
 import com.garfiec.librechat.feature.chat.util.ParameterTarget
 import com.garfiec.librechat.feature.chat.viewmodel.delegate.mergedFromPreset
 
@@ -67,7 +68,7 @@ internal fun Preset.edited(name: String, endpoint: String, model: String?, param
         fileTokenLimit = params.fileTokenLimit,
         tags = dyn["tags"]?.takeIf { it.isNotBlank() }?.split("\n")?.filter { it.isNotBlank() },
         region = dyn["region"],
-        resendFiles = params.resendFiles,
+        resendFiles = resendFilesOf(params),
     )
 }
 

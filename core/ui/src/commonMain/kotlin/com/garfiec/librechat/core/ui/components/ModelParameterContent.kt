@@ -44,6 +44,7 @@ data class ModelParameters(
     val maxContextTokens: Int? = null,
     val topK: Int? = null,
     val resendFiles: Boolean = true,
+    val resendFilesCount: Int? = null, // FORK-HOOK(resend-files): only the most recent N; null with resendFiles on is every file
     /**
      * Null until set: the providers that offer thinking default it to on (Anthropic, Bedrock), so a
      * `false` default would show the switch off over a run that thinks, and an explicit off would
@@ -77,7 +78,8 @@ data class ModelParameters(
         // null means "unset" — return "" so valueDiffersFromDefault doesn't
         // light up the per-field reset icon on a fresh, untouched state.
         "topK" -> topK?.toString() ?: ""
-        "resendFiles" -> resendFiles.toString()
+        // FORK-HOOK(resend-files): the count field's text
+        "resendFiles" -> com.garfiec.librechat.core.ui.fork.resendfiles.resendFilesText(this)
         "thinking" -> thinking?.toString().orEmpty()
         "thinkingBudget" -> thinkingBudget
         "web_search" -> webSearch.toString()
@@ -106,7 +108,8 @@ data class ModelParameters(
             val intVal = value.toIntOrNull()
             copy(topK = if (intVal == 0) null else intVal)
         }
-        "resendFiles" -> copy(resendFiles = value.toBooleanStrictOrNull() ?: resendFiles)
+        // FORK-HOOK(resend-files): the count field's text
+        "resendFiles" -> com.garfiec.librechat.core.ui.fork.resendfiles.withResendFilesText(this, value)
         "thinking" -> copy(thinking = value.toBooleanStrictOrNull())
         "thinkingBudget" -> copy(thinkingBudget = value)
         "web_search" -> copy(webSearch = value.toBooleanStrictOrNull() ?: webSearch)

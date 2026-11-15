@@ -189,7 +189,8 @@ class PresetPromptDelegate(
             fileTokenLimit = params.fileTokenLimit,
             tags = dyn["tags"]?.takeIf { it.isNotBlank() }?.split("\n")?.filter { it.isNotBlank() },
             region = dyn["region"],
-            resendFiles = params.resendFiles,
+            // FORK-HOOK(resend-files): a boolean or a count
+            resendFiles = com.garfiec.librechat.core.ui.fork.resendfiles.resendFilesOf(params),
         )
         handle.scope.launch {
             when (val result = presetRepository.create(preset)) {
@@ -412,9 +413,9 @@ internal fun ModelParameters.mergedFromPreset(preset: Preset): ModelParameters {
         webSearch = preset.webSearch ?: webSearch,
         urlContext = preset.urlContext ?: urlContext,
         fileTokenLimit = preset.fileTokenLimit ?: fileTokenLimit,
-        resendFiles = preset.resendFiles ?: resendFiles,
         dynamicValues = dyn,
-    )
+    // FORK-HOOK(resend-files): a boolean or a count
+    ).let { com.garfiec.librechat.core.ui.fork.resendfiles.withResendFiles(it, preset.resendFiles) }
 }
 
 internal fun Preset.toDisplayData() = PresetDisplayData(

@@ -90,7 +90,8 @@ object ModelParamPayload {
             val atDefault = raw == ModelParameters.DEFAULT.getValueForKey(key) || raw == definition.default
             if (raw.isBlank() || (atDefault && key !in alwaysSent)) continue
             if (raw in modelRemoved[key].orEmpty()) continue
-            out[key] = encode(definition.type, raw)
+            // FORK-HOOK(resend-files): false or a count
+            out[key] = com.garfiec.librechat.core.model.fork.resendFilesWire(key, raw) ?: encode(definition.type, raw)
         }
         return JsonObject(out)
     }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fork_param_desc_resend_files">Wie viele der neuesten früheren Dateien mit jeder Nachricht erneut gesendet werden. Leer lassen für alle, 0 für keine. Dateien an der neuen Nachricht werden immer gesendet, und das Modell erfährt, welche früheren Dateien es nicht sehen kann.</string>
+    <string name="fork_param_placeholder_resend_files_all">Alle</string>
+</resources>

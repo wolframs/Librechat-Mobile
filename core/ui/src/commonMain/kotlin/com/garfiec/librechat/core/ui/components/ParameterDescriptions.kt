@@ -48,6 +48,8 @@ private val LABELS: Map<String, StringResource> = mapOf(
 )
 
 private val DESCRIPTIONS: Map<String, StringResource> = mapOf(
+    // FORK-HOOK(resend-files)
+    com.garfiec.librechat.core.ui.fork.resendfiles.RESEND_FILES_DESCRIPTION to Res.string.fork_param_desc_resend_files,
     EndpointParameterRegistry.BETWEEN_TOOLS_THINKING_DESCRIPTION to Res.string.param_thinking_between_tools_description,
     "Set a custom name for the AI." to Res.string.param_desc_custom_name,
     "Set custom instructions to include in System Message." to Res.string.param_desc_custom_instructions,
@@ -115,6 +117,8 @@ private val OPTIONS: Map<String, StringResource> = mapOf(
 )
 
 private val PLACEHOLDERS: Map<String, StringResource> = mapOf(
+    // FORK-HOOK(resend-files)
+    com.garfiec.librechat.core.ui.fork.resendfiles.RESEND_FILES_PLACEHOLDER to Res.string.fork_param_placeholder_resend_files_all,
     "Add a custom instruction to include in every message..." to Res.string.param_custom_instructions_placeholder,
     "Assistant" to Res.string.param_placeholder_assistant,
 )

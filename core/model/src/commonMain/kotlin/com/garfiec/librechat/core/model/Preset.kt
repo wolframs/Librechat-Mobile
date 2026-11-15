@@ -62,7 +62,7 @@ data class Preset(
     val tags: List<String>? = null,
     val region: String? = null,
     val spec: String? = null,
-    val resendFiles: Boolean? = null,
+    val resendFiles: com.garfiec.librechat.core.model.fork.ResendFiles? = null, // FORK-HOOK(resend-files): a boolean or a count
     @SerialName("file_ids") val fileIds: List<String>? = null,
     val instructions: String? = null,
     @SerialName("additional_instructions") val additionalInstructions: String? = null,

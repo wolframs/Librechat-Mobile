@@ -589,7 +589,7 @@ object EndpointParameterRegistry {
         type = ParameterType.SWITCH,
         default = "true",
         description = "Resend previously attached files with every message.",
-    )
+    ).let { com.garfiec.librechat.core.ui.fork.resendfiles.asCount(it) } // FORK-HOOK(resend-files): a count field, not a switch
 
     private fun bedrockPromptCache(default: String) = ParameterDefinition(
         key = "promptCache",

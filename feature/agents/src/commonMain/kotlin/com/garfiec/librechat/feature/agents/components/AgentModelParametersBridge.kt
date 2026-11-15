@@ -86,7 +86,8 @@ internal fun ModelParameters.toAgentAdvancedSettings(
             // value: one merely absent from the options (version-gated, or newer than this app)
             // is kept. See EndpointParameterRegistry.modelRemovedOptions.
             value in modelRemoved[def.key].orEmpty() -> newExtras.remove(def.key)
-            wasInExtras || !isDefault -> newExtras[def.key] = encodeAsJsonElement(value, def.type)
+            wasInExtras || !isDefault -> newExtras[def.key] = // FORK-HOOK(resend-files): false or a count
+                com.garfiec.librechat.core.model.fork.resendFilesWire(def.key, value) ?: encodeAsJsonElement(value, def.type)
             // else: untouched default value, not previously in extras — skip.
         }
         // Drop legacy alias keys that share the same UX slot as `def.key`.

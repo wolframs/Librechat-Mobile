@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -71,6 +72,13 @@ class ModelParamPayloadTest {
             assertEquals(false, off["resendFiles"]?.jsonPrimitive?.boolean, endpoint)
             assertNull(payload(ModelParameters.DEFAULT)["resendFiles"], endpoint)
         }
+    }
+
+    // FORK-HOOK(resend-files): the operator's server takes a count
+    @Test
+    fun `a resend files count is sent as a number`() {
+        val sent = build(ModelParameters.DEFAULT.withUpdatedKey("resendFiles", "3"))
+        assertEquals(3, sent["resendFiles"]?.jsonPrimitive?.int)
     }
 
     @Test

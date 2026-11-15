@@ -88,7 +88,7 @@ data class Conversation(
     val imageDetail: String? = null,
     val fileTokenLimit: Int? = null,
     val region: String? = null,
-    val resendFiles: Boolean? = null,
+    val resendFiles: com.garfiec.librechat.core.model.fork.ResendFiles? = null, // FORK-HOOK(resend-files): a boolean or a count
     /** Whether the conversation is pinned to the top of the list (v0.8.7). */
     val pinned: Boolean? = null,
     /** Chat Project (folder) this conversation is assigned to, or null if unassigned (v0.8.7). */

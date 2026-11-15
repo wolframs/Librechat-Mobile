@@ -1,6 +1,7 @@
 package com.garfiec.librechat.feature.chat.fork
 
 import com.garfiec.librechat.core.model.Preset
+import com.garfiec.librechat.core.model.fork.ResendFiles
 import com.garfiec.librechat.core.ui.components.ModelParameters
 import com.garfiec.librechat.feature.chat.util.ParameterTarget
 import kotlin.test.Test
@@ -12,7 +13,7 @@ class PresetEditingTest {
 
     private val stored = Preset(
         presetId = "p1", title = "Old", endpoint = "anthropic", model = "claude-x", spec = "s",
-        temperature = 0.7, topPCamel = 0.9, system = "Be brief.", modelLabel = "Brief", resendFiles = false,
+        temperature = 0.7, topPCamel = 0.9, system = "Be brief.", modelLabel = "Brief", resendFiles = ResendFiles(3),
         promptCache = true, promptCacheTtl = "1h", imageDetail = "high",
     )
 
