@@ -11,8 +11,10 @@ mapped `settingChips`, plus top-level `error` (shared transient banner) and `med
 - **Single emissions:** completion-flash finalize, begin-stream, reset-with-carryover,
   `applyComposer` and `switchBranch` each stay ONE `StateFlow` emission; don't split them across
   `update`/`copy` calls (why tree and streaming fields share `MessagesState`).
-- **Chrome/hot split (`ChatScreen`):** the thread collects at full rate; everything else collects
-  `map { it.neutralizeStreamingChurn() }.distinctUntilChanged()` (`ChatChromeEquivalence.kt`).
+- **Chrome/hot split (`ChatScreen`):** everything but the thread collects
+  `map { it.neutralizeStreamingChurn() }.distinctUntilChanged()` (`ChatChromeEquivalence.kt`). The
+  thread (`ChatContent`) reads `withoutStreamingText()`; the live text reaches only the streaming
+  items, as a `() -> String` they call, so a flush recomposes nothing above them.
   Chrome must not read a neutralized field (they are always empty there). A new high-frequency
   streaming field goes in both `neutralizeStreamingChurn` and `ChatChromeEquivalenceTest`. Known
   exception: `subagentProgress` (chrome-visible, unthrottled; open follow-up).
@@ -211,9 +213,8 @@ the picker lists that endpoint (`showsRawEndpoint` with the live `modelSelect`),
 the pair, else nothing; under `enforce` the one spec on its pair, else the raw pair for the preflight.
 One applied before the config loads is resolved when it arrives.
 
-**Spec rows** (`visibleSpecs`) sort by `order` (web ignores it) and hide an agent spec only once the
-agents list loaded without its agent and is not a full page (`AGENTS_LIST_PAGE_SIZE`; web loads every
-page, mobile one), so a full page hides nothing; until then, and after a failed fetch, every spec
+**Spec rows** (`visibleSpecs`) sort by `order` (web ignores it) and hide an agent spec once the
+agents list loaded without its agent (web parity); until then, and after a failed fetch, every spec
 shows. Groups follow web's `ModelSelector` (`util/SpecGroups.kt`), with one deliberate divergence: a
 spec grouped under an endpoint with no models gets a group of its own (web hides it), which takes that
 endpoint's label and icon except under `modelSelect: false`. An endpoint that needs the user's key keeps its
@@ -765,6 +766,9 @@ neither `codeEnvironmentMode` nor `codeWorkspaces` is sealed "No workspace" for 
   workspaces to pick and none picked, the send is held; with nothing to pick it sends "No workspace"
   and says so (`CODE_WORKSPACE_SENT_WITHOUT`). A failed status read is not "nothing to pick": only a
   machine that answered (offline, not ready, no workspaces) or a 404 is.
+- **Run-starting paths refuse while `codeWorkspace.holdsSend`** (send, edit rerun, regenerate,
+  continue, compact, retry without files), since a no-field turn on an undecided chat seals it; a queue
+  drain refuses only a turn queued while held (null snapshot) whose decision is still held.
 - The saved decision is read live (no Room), only when a coding agent is in the chat, and again when
   a run ends. Read the live value before re-fetching (`combine` can hand a superseded `Pending`).
 - Poll every 10 s only while visible and foregrounded; 30 s after a 429/503/504; never after a 404; read
@@ -919,8 +923,8 @@ boundary and put the user's words inside a tool block.
   streaming bubble**, named by the VM (`MessagesState.justSettledMessageId`), written by
   `finalizeChatDisplay` in the same atomic update. Don't derive it in the UI. **Never clear it at the
   turn boundary** (an inline queue drain would clear it before Compose sees it); the next finalize
-  overwrites it. `ActivityGroup` latches the suppressed decision too. A live comparison calls
-  `markSettled` from `SendCompletionDelegate`.
+  overwrites it. `ActivityGroup` latches the suppressed decision too. A live comparison finalizes in
+  memory too, then reloads for the attributed parts.
 - "Preparing {tool}" (`on_tool_preparation`) shows on the generic card only; MCP and action tools keep
   their name.
 - **Steers** render as a user turn where they entered. A handoff AT the resume point keeps the
@@ -970,7 +974,8 @@ Never let a preview pass for the whole call.
   destroy. `host.pageAttached()` runs once per **new** view, never on a reattach (it drops the queue
   and grants), and `host.send` stays wired while detached. A view is destroyed only when its session closes or the pool leaves composition. Build
   views with the Activity context, never the dialog's.
-- **Android views are software-rendered, panel included** (a detach on scroll SIGSEGVs the GL path).
+- **Android views are software-rendered except in the panel** (a detach on scroll SIGSEGVs the GL
+  path; a panel-sized software layer squashes the App).
   `onRenderProcessGone` returns true and fails that App with Retry.
 - The inline height is **frozen** after the first report (`McpAppsState.inlineHeights`, not
   `remember`), so the list doesn't jump. While its App is in the panel the card shows "Return to app"

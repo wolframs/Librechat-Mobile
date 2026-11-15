@@ -9,6 +9,7 @@ import com.garfiec.librechat.core.common.identity.currentAccountId
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.common.result.apiCallCatching
+import com.garfiec.librechat.core.common.result.message
 import com.garfiec.librechat.core.common.result.safeApiCall
 import com.garfiec.librechat.core.data.datastore.AccountRegistry
 import com.garfiec.librechat.core.data.util.SessionTaskRunner
@@ -38,6 +39,13 @@ import kotlinx.coroutines.withContext
 private const val HTTP_FORBIDDEN = 403
 
 internal const val INCOMPLETE_AUTH_MESSAGE = "The server's sign-in response was incomplete. Please try again."
+
+/**
+ * A sign-in answered 2xx without its `refreshToken` cookie, typically because a proxy in front of
+ * the server strips `Set-Cookie`. Without it the session can't be renewed, so it isn't kept.
+ */
+class MissingRefreshCookieException :
+    IllegalStateException("The server's session cookie never reached the app. A proxy in front of the server may be removing it.")
 
 @Suppress("LongParameterList") // debt: constructor dependencies
 class AuthRepositoryImpl(
@@ -128,22 +136,9 @@ class AuthRepositoryImpl(
         ) { userApi.getUser() }
     }
 
-    private suspend fun stageAuthenticatedSession(result: LoginResult): User {
-        val user = result.response.user ?: throw incompleteAuthResponse("user")
-        val token = result.response.token ?: throw incompleteAuthResponse("token")
-        if (result.refreshToken == null) {
-            Logger.w { "Auth response carried no refresh token; this session cannot be renewed" }
-        }
-        tokenManager.setTokens(accessToken = token, refreshToken = result.refreshToken ?: "")
-        return user
-    }
-
-    // A missing user/token on a 2xx is caught by phase 2's `catch (e: Exception)` (verify) or by
-    // safeApiCall (login/OAuth) exactly as any other Exception — no caller ever discriminates the
-    // type, so a plain IllegalStateException carries the same behaviour with no bespoke class to trace.
-    private fun incompleteAuthResponse(missingField: String): IllegalStateException {
-        Logger.w { "Auth response was missing '$missingField'" }
-        return IllegalStateException(INCOMPLETE_AUTH_MESSAGE)
+    private suspend fun stageAuthenticatedSession(session: AcceptedSession): User {
+        tokenManager.setTokens(accessToken = session.accessToken, refreshToken = session.refreshToken)
+        return session.user
     }
 
     override suspend fun login(email: String, password: String): Result<LoginOutcome> {
@@ -165,7 +160,8 @@ class AuthRepositoryImpl(
                             ?: throw IllegalStateException("Server indicated 2FA required but tempToken was null"),
                     )
                 } else {
-                    LoginOutcome.Success(commitSession(pending) { stageAuthenticatedSession(result) })
+                    val session = acceptedSession(result)
+                    LoginOutcome.Success(commitSession(pending) { stageAuthenticatedSession(session) })
                 }
             }
         }.fireSessionTasksIfLoggedIn(previousAccountId) { outcome ->
@@ -216,7 +212,7 @@ class AuthRepositoryImpl(
         }
         val loginResult = when (wire) {
             is Result.Success -> wire.data
-            is Result.Error -> return classifyVerifyFailure(wire.exception)
+            is Result.Error -> return classifyVerifyFailure(wire)
             is Result.Loading -> error("safeApiCall never returns Loading")
         }
 
@@ -227,7 +223,10 @@ class AuthRepositoryImpl(
         // retry of a consumed code.
         return when (val committed = commitAcceptedSession(pending, previousAccountId, loginResult)) {
             is Result.Success -> VerifyTwoFactorOutcome.Success(committed.data)
-            else -> VerifyTwoFactorOutcome.SessionIncomplete(INCOMPLETE_AUTH_MESSAGE)
+            else -> VerifyTwoFactorOutcome.SessionIncomplete(
+                INCOMPLETE_AUTH_MESSAGE,
+                cookieMissing = (committed as? Result.Error)?.exception is MissingRefreshCookieException,
+            )
         }
     }
 
@@ -243,13 +242,15 @@ class AuthRepositoryImpl(
         loginResult: LoginResult,
     ): Result<User> =
         try {
-            val user = commitSession(pending) { stageAuthenticatedSession(loginResult) }
+            val session = acceptedSession(loginResult)
+            val user = commitSession(pending) { stageAuthenticatedSession(session) }
             Result.Success(user).fireSessionTasksIfLoggedIn(previousAccountId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Logger.w(e) { "2FA accepted but session commit failed" }
-            Result.Error(IllegalStateException(INCOMPLETE_AUTH_MESSAGE), INCOMPLETE_AUTH_MESSAGE)
+            val cause = e as? MissingRefreshCookieException ?: IllegalStateException(INCOMPLETE_AUTH_MESSAGE)
+            Result.Error(cause, INCOMPLETE_AUTH_MESSAGE)
         }
 
     /**
@@ -510,28 +511,51 @@ class AuthRepositoryImpl(
  * - A 2xx whose body couldn't be decoded means the server accepted (consumed) the single-use code
  *   without yielding a usable session.
  *
- * Only wire exceptions reach here (the session commit is classified separately, in phase 2 of
- * [verifyTwoFactor]). Top-level and internal so unit tests exercise the mapping directly.
+ * Only wire failures reach here (the session commit is classified separately, in phase 2 of
+ * [verifyTwoFactor]). Top-level and internal so unit tests exercise the mapping directly. The
+ * outcome carries [Result.Error.message], which `toSafeError` has screened, never the raw
+ * exception text: a responder in front of the server can put markup or a URL there.
  */
-internal fun classifyVerifyFailure(e: Throwable?): VerifyTwoFactorOutcome = when {
-    // A 2xx the client couldn't decode into a session. Ktor's ContentNegotiation wraps every
-    // response-body decode failure in ContentConvertException (JsonConvertException) — which does
-    // NOT extend kotlinx SerializationException, so we key on the Ktor type. The single-use code was
-    // consumed server-side, so the entry must clear, not invite a doomed retry.
-    //
-    // Deliberate boundary: this treats EVERY undecodable JSON-typed 2xx as "code consumed", including
-    // the rarer case where a proxy/gateway truncates a response that never reached the 2FA controller
-    // (so the code was NOT actually consumed). Clearing is still safe there because the temp token is a
-    // reusable JWT — only the TOTP/backup code is single-use — so the user just enters a fresh code and
-    // the same tempToken re-verifies within seconds. Keeping the entry instead would reintroduce the
-    // spent-code retry this PR set out to remove for the (more likely) genuine backend-consumed case.
-    // A `200 text/html` from a proxy throws NoTransformationFoundException, not a ContentConvertException,
-    // and falls to ConnectionFailure — an HTML 200 usually means the request never reached the backend.
-    e is ContentConvertException -> VerifyTwoFactorOutcome.SessionIncomplete(INCOMPLETE_AUTH_MESSAGE)
-    e is ApiException && e.statusCode == 401 -> VerifyTwoFactorOutcome.CodeRejected(e.message)
-    e is ApiException -> VerifyTwoFactorOutcome.NotEvaluated(
-        e.message,
-        code = if (e.statusCode == HTTP_FORBIDDEN) ServerErrorCode.from(e.body) else null,
-    )
-    else -> VerifyTwoFactorOutcome.ConnectionFailure
+internal fun classifyVerifyFailure(error: Result.Error): VerifyTwoFactorOutcome {
+    val e = error.exception
+    val message = error.message ?: error.kind.message()
+    return when {
+        // An undecodable 2xx means the single-use code was consumed, so the entry clears. Ktor wraps
+        // body decode failures in ContentConvertException, which is not a kotlinx SerializationException.
+        // A proxy-truncated 2xx lands here too; clearing is still safe, as only the code is single-use
+        // and the tempToken re-verifies a fresh one. A `200 text/html` throws
+        // NoTransformationFoundException instead and reads as ConnectionFailure.
+        e is ContentConvertException -> VerifyTwoFactorOutcome.SessionIncomplete(INCOMPLETE_AUTH_MESSAGE)
+        e is ApiException && e.statusCode == 401 -> VerifyTwoFactorOutcome.CodeRejected(message)
+        e is ApiException -> VerifyTwoFactorOutcome.NotEvaluated(
+            message,
+            code = if (e.statusCode == HTTP_FORBIDDEN) ServerErrorCode.from(e.body) else null,
+        )
+        else -> VerifyTwoFactorOutcome.ConnectionFailure(message)
+    }
 }
+
+/**
+ * The session a 2xx sign-in carries. Checked before `commitSession`: a refusal there would roll
+ * back through `TokenManager.clearTokens` and unbind the account a re-auth is signing back in to.
+ */
+private fun acceptedSession(result: LoginResult): AcceptedSession {
+    val user = result.response.user ?: throw incompleteAuthResponse("user")
+    val token = result.response.token ?: throw incompleteAuthResponse("token")
+    val refreshToken = result.refreshToken
+    if (refreshToken.isNullOrBlank()) {
+        Logger.w { "Auth response carried no refresh token; not keeping a session that cannot be renewed" }
+        throw MissingRefreshCookieException()
+    }
+    return AcceptedSession(user, token, refreshToken)
+}
+
+// A missing user/token on a 2xx is caught by phase 2's `catch (e: Exception)` (verify) or by
+// safeApiCall (login/OAuth) exactly as any other Exception — no caller ever discriminates the
+// type, so a plain IllegalStateException carries the same behaviour with no bespoke class to trace.
+private fun incompleteAuthResponse(missingField: String): IllegalStateException {
+    Logger.w { "Auth response was missing '$missingField'" }
+    return IllegalStateException(INCOMPLETE_AUTH_MESSAGE)
+}
+
+private class AcceptedSession(val user: User, val accessToken: String, val refreshToken: String)

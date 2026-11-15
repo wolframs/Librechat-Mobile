@@ -105,9 +105,6 @@ module	shared/build.gradle.kts	1
 module	shared/src/commonMain/kotlin/com/garfiec/librechat/shared/di/SharedKoinModules.kt	1
 presets	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ChatViewModel.kt	2
 presets	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/PresetPromptDelegate.kt	3
-resend-files	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/EndpointParameterRegistry.kt	5
-resend-files	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/components/ModelParameterContent.kt	1
-resend-files	feature/chat/src/androidUnitTest/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ModelParamPayloadTest.kt	1
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/LoginScreen.kt	8
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/ServerUrlScreen.kt	3
 saved-login	feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/screen/TwoFactorScreen.kt	3

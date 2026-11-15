@@ -28,6 +28,7 @@ val authModule = module {
             configRepository = get(),
             accountSwitcher = get(),
             accountRoster = get(),
+            savedStateHandle = get(),
             addAccount = params.getOrNull() ?: false,
         )
     }
@@ -41,7 +42,9 @@ val authModule = module {
     viewModel { params ->
         VerifyEmailViewModel(
             userRepository = get(),
-            initialEmail = params.getOrNull(),
+            accountSwitcher = get(),
+            initialEmail = params.getOrNull<String>(),
+            sendNow = params.getOrNull<Boolean>() ?: false,
         )
     }
     viewModelOf(::ForgotPasswordViewModel)
@@ -51,6 +54,7 @@ val authModule = module {
             configRepository = get(),
             accountSwitcher = get(),
             serverDataStore = get(),
+            bannerRepository = get(),
             initialUserId = params.getOrNull(),
             initialToken = params.getOrNull(),
         )

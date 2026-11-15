@@ -2,10 +2,13 @@ package com.garfiec.librechat.feature.auth.viewmodel
 
 import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
+import com.garfiec.librechat.core.common.result.toSafeError
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.AuthRepository
+import com.garfiec.librechat.core.data.repository.BannerRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
+import com.garfiec.librechat.core.data.repository.MissingRefreshCookieException
 import com.google.common.truth.Truth.assertThat
 import io.mockk.coEvery
 import io.mockk.every
@@ -33,18 +36,24 @@ class AuthRefusalTest {
     private val testDispatcher = StandardTestDispatcher()
     private val authRepository = mockk<AuthRepository>(relaxed = true)
     private val configRepository = mockk<ConfigRepository> { every { startupConfig } returns MutableStateFlow(null) }
-    private val accountSwitcher = mockk<AccountSwitcher> { every { pendingAdd } returns null }
+    private val accountSwitcher = mockk<AccountSwitcher> {
+        every { pendingAdd } returns null
+        coEvery { withPendingIdentity<Any?>(any()) } coAnswers { firstArg<suspend () -> Any?>().invoke() }
+    }
+    private val bannerRepository = mockk<BannerRepository> { coEvery { getBanner() } returns Result.Success(null) }
     private val serverDataStore = mockk<ServerDataStore> {
         every { currentUrlFlow } returns flowOf("https://chat.example.com")
     }
 
-    private fun forgotPassword() = ForgotPasswordViewModel(authRepository, configRepository, accountSwitcher, serverDataStore)
+    private fun forgotPassword() =
+        ForgotPasswordViewModel(authRepository, configRepository, accountSwitcher, serverDataStore, bannerRepository)
 
     private fun resetPassword() = ResetPasswordViewModel(
         authRepository,
         configRepository,
         accountSwitcher,
         serverDataStore,
+        bannerRepository,
         initialUserId = "u1",
         initialToken = "t1",
     )
@@ -63,6 +72,15 @@ class AuthRefusalTest {
     }
 
     @Test
+    fun `the server's sign-in codes name their refusals`() {
+        assertThat(authRefusalOf(403, """{"message":"Cross-site request rejected","code":"auth_cross_origin"}"""))
+            .isEqualTo(AuthRefusal.CrossOrigin)
+        assertThat(authRefusalOfCode("auth_banned")).isEqualTo(AuthRefusal.Banned)
+        assertThat(authRefusalOfCode("auth_rate_limited")).isEqualTo(AuthRefusal.RateLimited)
+        assertThat(authRefusalOfCode("auth_failed")).isNull()
+    }
+
+    @Test
     fun `the soft-ban, ban, terms and proxy 403s are not refusals`() {
         // The ua-parser-js soft-ban and the ban response are a bare message.
         assertThat(authRefusalOf(403, """{"message":"Illegal request"}""")).isNull()
@@ -70,6 +88,12 @@ class AuthRefusalTest {
         assertThat(authRefusalOf(403, """{"code":"terms_not_accepted"}""")).isNull()
         assertThat(authRefusalOf(403, "<html><body>Forbidden</body></html>")).isNull()
         assertThat(authRefusalOf(403, null)).isNull()
+    }
+
+    @Test
+    fun `a sign-in kept from its refresh cookie is the cookie refusal`() {
+        assertThat(MissingRefreshCookieException().toSafeError().loginRefusalOrNull())
+            .isEqualTo(AuthRefusal.SessionCookieMissing)
     }
 
     @Test

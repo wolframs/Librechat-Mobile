@@ -333,4 +333,5 @@ internal fun McpServer.toDisplayData(
     requiresOAuth = requiresOAuth,
     signInBusy = signInBusy,
     userVars = customUserVars,
+    chatSelectable = chatMenu && !consumeOnly,
 )

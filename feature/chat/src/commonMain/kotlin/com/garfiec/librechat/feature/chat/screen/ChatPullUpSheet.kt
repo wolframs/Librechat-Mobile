@@ -496,7 +496,7 @@ internal fun BoxScope.ChatPullUpSheetOverlay(
             com.garfiec.librechat.feature.chat.fork.ComposerToolsSheetContent( // FORK-HOOK(composer): attachment and tools surface
                 enabledTools = uiState.effectiveEnabledTools,
                 onToggleTool = viewModel::toggleTool,
-                mcpServers = uiState.mcpServers,
+                mcpServers = uiState.offeredMcpServers,
                 selectedMcpServerNames = uiState.effectiveMcpServerNames,
                 onToggleMcpServer = viewModel::toggleMcpServer,
                 onAttachFiles = onAttachFiles,

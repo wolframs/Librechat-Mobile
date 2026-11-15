@@ -58,9 +58,12 @@ fun effectiveConnectors(selection: ModelSelectionState): Set<String> {
         val added = selection.specTools?.takeIf { it.spec == selection.selectedSpec && !selection.toolsHiddenBySpec }
         selection.lockedMcpServers + added?.addedMcp.orEmpty()
     }
-    return com.garfiec.librechat.fork.mcp.selectedConnectors(
+    val effective = com.garfiec.librechat.fork.mcp.selectedConnectors(
         selected, selection.mcpServers.filter { it.defaultOn }.map { it.name }.toSet(), selection.connectors.off,
     )
+    // Upstream's rule: outside a spec, a server the chat does not offer is never in use.
+    if (selection.selectedSpec != null) return effective
+    return effective - selection.mcpServers.filterNot { it.chatSelectable }.map { it.name }.toSet()
 }
 
 fun seedConnectorHandoff(state: ChatUiState, off: Set<String>?): ChatUiState = state.copy(

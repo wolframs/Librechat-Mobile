@@ -2,9 +2,11 @@
 
 ## Screens and navigation
 - `AuthRoute : NavKey` routes: `ServerUrl`, `Login`, `Register`, `ForgotPassword`, `TwoFactor(tempToken)`,
-  `TwoFactorSetup(tempToken)`, `VerifyEmail(email)`, `ResetPassword(userId, token)`, `Terms`,
-  `SsoLogin(provider)`; entries via `authEntries()`. Flow: `ServerUrl` → `Login` → (2FA if `tempToken`) →
-  `onAuthComplete`. One ViewModel per screen, all on `AuthRepository`.
+  `TwoFactorSetup(tempToken)`, `VerifyEmail(email, sendNow)`, `ResetPassword(userId, token)`, `Terms`,
+  `SsoLogin(provider)`; entries via `authEntries()`, and `signUpEntries()` for `Register` and `VerifyEmail`. Flow:
+  `ServerUrl` → `Login` → (2FA if `tempToken`) → `onAuthComplete`. One ViewModel per screen, all on `AuthRepository`.
+- **Sign-up** ends by `startupConfig.emailEnabled`: on, `VerifyEmail` replaces `Register`; off, Register signs in
+  with the same credentials.
 - A stored server URL skips `ServerUrl` on launch.
 - Login shows only what `GET /api/config` turns on, mapped once in `LoginViewModel` from `authServerConfig`.
 
@@ -63,12 +65,14 @@
   (the refresh token can't recreate it).
 
 ## Coded refusals (rc1)
-- `AuthRefusal` (`viewmodel/AuthRefusal.kt`) maps the pre-auth coded 403s (`TENANT_CONTEXT_REQUIRED`,
-  `TWO_FACTOR_FEDERATED_LOGIN_BLOCKED`). Key on the body's code, never the status, so the UA soft-ban, bans,
-  `terms_not_accepted` and proxy 403s keep their own handling.
+- `AuthRefusal` (`viewmodel/AuthRefusal.kt`) maps the pre-auth coded refusals. Key a 403 on the body's code,
+  never the status alone, so the UA soft-ban, `terms_not_accepted` and proxy 403s keep their own handling.
+  Login's `loginRefusalOrNull` is the one mapping that also reads status.
 - Login, Register, ForgotPassword, ResetPassword, TwoFactor (via `VerifyTwoFactorOutcome.NotEvaluated.code`) set
   `refusal`; screens show `authErrorText(refusal, error)`. SSO words the callback `code` with the same string.
   Required 2FA setup doesn't: a 403 there ends the setup credential and sends the user to sign-in.
+- `SessionCookieMissing` is the one client-side refusal (`MissingRefreshCookieException`, `:core:data`): TwoFactor
+  reads it from `SessionIncomplete.cookieMissing`, setup as `TwoFactorSetupError.SessionCookieMissing`.
 
 ## Policy links
 - `PolicyLinksFooter` on Login, Register, ForgotPassword, ResetPassword (upstream `Auth/Footer.tsx`), from
@@ -125,7 +129,8 @@
 ## Password managers
 - **Android** (autofill framework): Login email `Username + EmailAddress` (`Username` alone in LDAP username mode); Register/Reset `NewUsername`/
   `NewPassword`; password fields recognised from `PasswordVisualTransformation`. Register calls
-  `LocalAutofillManager.commit()` itself because it returns to Login, whose fields keep the session open.
+  `LocalAutofillManager.commit()` itself before handing over, since the next screen's fields can keep the
+  session open.
 - **iOS** (`KeyboardOptions.withIosTextContentType()`, `:core:ui`): `.username` on email fields, `.newPassword`
   on Register/Reset, `.oneTimeCode` on 2FA. The Login password field sets no iOS role.
 - Fields holding other secrets (API keys, gateway tokens, PDF passwords) use `Modifier.excludeFromAutofill()`.

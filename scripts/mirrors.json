@@ -1565,20 +1565,6 @@
       "failure_mode": "Upstream changes which specs it hides and the mobile picker lists an agent spec web hides (a send then fails on an agent the user cannot use) or hides one web offers."
     },
     {
-      "id": "agents-list-default-limit",
-      "upstream": {
-        "file": "api/server/controllers/agents/v1.js",
-        "symbol": "getListAgentsHandler",
-        "mode": "block"
-      },
-      "kotlin": {
-        "file": "feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/util/SpecSeed.kt",
-        "symbol": "AGENTS_LIST_PAGE_SIZE"
-      },
-      "why": "`GET /api/agents` with no `limit` returns a page of 100, which is all mobile fetches. `visibleSpecs` treats a shorter list as complete and hides agent specs whose agent is missing from it; a full page proves nothing, so every spec stays.",
-      "failure_mode": "Upstream lowers the default page and a full page reads as complete: agent specs whose agent sits past it vanish from the picker. Raising it only keeps specs visible a little longer than needed."
-    },
-    {
       "id": "model-spec-enforce",
       "upstream": {
         "file": "api/server/middleware/buildEndpointOption.js",
@@ -2193,6 +2179,20 @@
       },
       "why": "Which MCP servers offer Edit and Delete: none without a dbId (YAML-defined) or with consumeOnly, otherwise the effective permission bits keyed by dbId. Deliberately looser than upstream where the bits are unknown.",
       "failure_mode": "Upstream adds a new read-only marker or changes which id the permissions map is keyed by, and the app offers Edit/Delete on servers the user can't change (each save refused) or hides them on servers they can. Nothing errors until a write is attempted."
+    },
+    {
+      "id": "mcp-chat-selectable",
+      "upstream": {
+        "file": "client/src/hooks/MCP/useMCPServerManager.ts",
+        "symbol": "selectableServers (chatMenu / consumeOnly)",
+        "mode": "file"
+      },
+      "kotlin": {
+        "file": "feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/ModelSelectionState.kt",
+        "symbol": "offeredMcpServers (+ McpServersDelegate toDisplayData chatSelectable)"
+      },
+      "why": "Which MCP servers the chat's picker, sheets and chips offer: those with chatMenu !== false and not consumeOnly, plus any the active model spec pins. The server applies the same rule to a chat's MCP selection (packages/api/src/mcp/utils.ts filterChatSelectableMCPServers) but never says it dropped one.",
+      "failure_mode": "Upstream adds another chat-visibility flag or changes these two, and the app offers servers the server silently drops (shown on, tools never reach the model) or hides ones the chat could use. Nothing errors."
     },
     {
       "id": "image-gen-faux-progress",
@@ -4972,6 +4972,34 @@
       },
       "why": "The 403 code (and the OAuth callback error= value) a pre-auth route answers under strict tenant isolation when the request names no tenant. The sign-in and SSO screens give it their own explanation instead of 'email login disabled' or a generic failure.",
       "failure_mode": "Upstream renames it and a tenant refusal reads as email login being disabled, which hides the sign-in form."
+    },
+    {
+      "id": "ldap-auth-failed-message",
+      "upstream": {
+        "file": "packages/data-provider/src/config.ts",
+        "symbol": "ErrorTypes",
+        "mode": "block"
+      },
+      "kotlin": {
+        "file": "feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/viewmodel/AuthRefusal.kt",
+        "symbol": "AUTH_FAILED_CODE"
+      },
+      "why": "ErrorTypes.AUTH_FAILED ('auth_failed') is what the LDAP strategy puts in the login 404's message when the account was created with another provider, and the SSO callback's generic ?error= value. Login words it as 'signs in a different way' and the SSO error pane hides it as uninformative.",
+      "failure_mode": "Upstream renames it: an LDAP account made with another provider reads as a wrong password, and the SSO pane shows the raw code."
+    },
+    {
+      "id": "login-schema-bounds",
+      "upstream": {
+        "file": "api/strategies/validators.js",
+        "symbol": "loginSchema",
+        "mode": "block"
+      },
+      "kotlin": {
+        "file": "feature/auth/src/commonMain/kotlin/com/garfiec/librechat/feature/auth/viewmodel/LoginViewModel.kt",
+        "symbol": "inputErrorOrNull"
+      },
+      "why": "The local strategy validates the raw login body with loginSchema before trimming it: z.string().email(), a password of MIN_PASSWORD_LENGTH (default 8, served as minPasswordLength) to 128. The sign-in form checks the same bounds before sending, so the user sees a field message instead of a generic wrong-credentials line. EMAIL_PATTERN is zod 4's email regex, which loginSchema reaches through z.string().email(); LDAP skips loginSchema, so the password bounds are skipped there.",
+      "failure_mode": "Upstream loosens a bound and the form refuses a sign-in the server would accept, with no way past it; it tightens one and the user gets the generic wrong-credentials line instead of the field message."
     },
     {
       "id": "safe-link-url",

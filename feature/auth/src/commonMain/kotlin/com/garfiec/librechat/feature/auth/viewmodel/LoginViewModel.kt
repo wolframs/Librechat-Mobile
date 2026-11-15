@@ -1,17 +1,19 @@
 package com.garfiec.librechat.feature.auth.viewmodel
 
 import androidx.compose.runtime.Immutable
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.garfiec.librechat.core.common.identity.cleanServerUrl
-import com.garfiec.librechat.core.common.result.ApiException
 import com.garfiec.librechat.core.common.result.Result
 import com.garfiec.librechat.core.common.result.suspendRunCatching
 import com.garfiec.librechat.core.data.datastore.ServerDataStore
 import com.garfiec.librechat.core.data.datastore.SsoRiskDataStore
 import com.garfiec.librechat.core.data.repository.AccountSwitcher
 import com.garfiec.librechat.core.data.repository.AuthRepository
+import com.garfiec.librechat.core.data.repository.BannerRepository
 import com.garfiec.librechat.core.data.repository.ConfigRepository
+import com.garfiec.librechat.core.model.Banner
 import com.garfiec.librechat.core.model.LoginOutcome
 import com.garfiec.librechat.core.model.config.StartupConfig
 import com.garfiec.librechat.core.model.config.absoluteLinkUrl
@@ -44,6 +46,10 @@ data class LoginUiState(
     val twoFactorSetupTempToken: String? = null,
     /** A coded sign-in refusal the screen words itself; shown instead of [error] when set. */
     val refusal: AuthRefusal? = null,
+    val inputError: LoginInputError? = null,
+    val minPasswordLength: Int = DEFAULT_MIN_PASSWORD_LENGTH,
+    /** LDAP signs in without the local strategy's password bounds, so they aren't checked. */
+    val ldapLogin: Boolean = false,
     val registrationEnabled: Boolean = false,
     /** The sign-in buttons to show, in the server's order. */
     val socialProviders: List<SocialProvider> = emptyList(),
@@ -65,7 +71,33 @@ data class LoginUiState(
      * for the notice; null when there are none. Signing in to one runs the setup flow.
      */
     val twoFactorSetupAccounts: String? = null,
+    /** The server's `appTitle`, for the heading; null until its config is known. */
+    val appTitle: String? = null,
+    /** The address being signed in to, always shown under the heading: [appTitle] is the operator's to set. */
+    val serverLabel: String? = null,
+    val banner: Banner? = null,
 )
+
+/** A problem with the form that the server would reject the same way, caught before sending. */
+enum class LoginInputError { MissingFields, InvalidEmail, PasswordTooShort, PasswordTooLong }
+
+/** Upstream `MIN_PASSWORD_LENGTH` default and `loginSchema`'s maximum (`api/strategies/validators.js`). */
+internal const val DEFAULT_MIN_PASSWORD_LENGTH = 8
+internal const val MAX_PASSWORD_LENGTH = 128
+
+/** zod 4's `z.string().email()` pattern, which the server's `loginSchema` applies to the raw email. */
+private val EMAIL_PATTERN = Regex(
+    "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+)
+
+internal fun LoginUiState.inputErrorOrNull(email: String): LoginInputError? = when {
+    email.isBlank() || password.isBlank() -> LoginInputError.MissingFields
+    !usernameLogin && !EMAIL_PATTERN.matches(email) -> LoginInputError.InvalidEmail
+    ldapLogin -> null
+    password.length < minPasswordLength -> LoginInputError.PasswordTooShort
+    password.length > MAX_PASSWORD_LENGTH -> LoginInputError.PasswordTooLong
+    else -> null
+}
 
 /**
  * The privacy policy and terms of service a deployment publishes (`interface.privacyPolicy` /
@@ -127,9 +159,12 @@ class LoginViewModel(
     private val ssoRiskDataStore: SsoRiskDataStore,
     serverDataStore: ServerDataStore,
     certificateTrust: CertificateTrustRegistry,
+    bannerRepository: BannerRepository,
+    private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(LoginUiState())
+    /** The typed email is restored after process death; the password is never saved. */
+    private val _uiState = MutableStateFlow(LoginUiState(email = savedStateHandle[KEY_EMAIL] ?: ""))
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
     /**
@@ -159,7 +194,11 @@ class LoginViewModel(
                     emailLoginEnabled = config.emailLoginEnabled,
                     passwordResetEnabled = config.emailLoginEnabled && config.passwordResetEnabled,
                     usernameLogin = config.ldap?.username == true,
+                    ldapLogin = config.ldap?.enabled == true,
+                    minPasswordLength = config.minPasswordLength ?: DEFAULT_MIN_PASSWORD_LENGTH,
                     policyLinks = PolicyLinks.from(config, url),
+                    appTitle = appTitleOf(config),
+                    serverLabel = url?.takeIf { it.isNotBlank() }?.let(::serverLabel),
                 )
                 if (config.openidLoginEnabled && config.openidAutoRedirect && !autoRedirected) {
                     autoRedirected = true
@@ -174,6 +213,10 @@ class LoginViewModel(
         }
         observeCertificateTrust(serverDataStore, certificateTrust)
         observeTwoFactorSetupMarkers(serverDataStore)
+        viewModelScope.launch {
+            val banner = publicBanner(bannerRepository, accountSwitcher)
+            _uiState.update { it.copy(banner = banner) }
+        }
     }
 
     /**
@@ -249,25 +292,34 @@ class LoginViewModel(
     }
 
     fun onEmailChanged(email: String) {
-        _uiState.value = _uiState.value.copy(email = email, error = null, refusal = null)
+        savedStateHandle[KEY_EMAIL] = email
+        _uiState.value = _uiState.value.copy(email = email, error = null, refusal = null, inputError = null)
     }
 
     fun onPasswordChanged(password: String) {
-        _uiState.value = _uiState.value.copy(password = password, error = null, refusal = null)
+        _uiState.value = _uiState.value.copy(password = password, error = null, refusal = null, inputError = null)
     }
 
     fun login() {
         val state = _uiState.value.copy(offerDiagnosticLog = false)
-        if (state.email.isBlank() || state.password.isBlank()) {
-            val field = if (state.usernameLogin) "username" else "email"
-            _uiState.value = state.copy(error = "Please enter $field and password")
+        // The server validates the raw email before trimming it, so a trailing space from a keyboard
+        // suggestion would fail sign-in.
+        val email = state.email.trim()
+        state.inputErrorOrNull(email)?.let { problem ->
+            _uiState.value = state.copy(inputError = problem, error = null, refusal = null)
             return
         }
 
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null, refusal = null, offerDiagnosticLog = false)
+            _uiState.value = _uiState.value.copy(
+                isLoading = true,
+                error = null,
+                refusal = null,
+                inputError = null,
+                offerDiagnosticLog = false,
+            )
 
-            when (val result = authRepository.login(state.email, state.password)) {
+            when (val result = authRepository.login(email, state.password)) {
                 is Result.Success -> {
                     when (val outcome = result.data) {
                         is LoginOutcome.Success -> {
@@ -291,36 +343,13 @@ class LoginViewModel(
                     }
                 }
                 is Result.Error -> {
-                    // A 403 from /api/auth/login means the server enforces ALLOW_EMAIL_LOGIN=false
-                    // (#14180). Surface a clear reason and hide the form so the user reaches for a
-                    // provider instead of retrying credentials that will never be accepted.
-                    // checkBan runs BEFORE validateEmailLogin on this route and also answers 403,
-                    // so a banned account (or the non-browser-UA soft ban) must keep the server's
-                    // own message and leave the form visible — isBanned is that discriminator.
-                    //
-                    // [ApiException.serverAuthored] is a second, independent one, and it is required:
-                    // a bouncer or WAF in front of the deployment answers this route with a 403 HTML
-                    // interstitial too, and asserting "this server has email login disabled" over a
-                    // transient network block would hide the form for a condition the user can simply
-                    // wait out. Only LibreChat's own JSON envelope sets that flag.
-                    val apiException = result.exception as? ApiException
-                    // Two more server-authored 403s on this route (v0.8.9-rc1) say nothing about
-                    // email login, and hiding the form over them would strand the user.
-                    val refusal = result.authRefusalOrNull()
-                    val isEmailLoginDisabled = refusal == null &&
-                        apiException?.statusCode == 403 &&
-                        apiException.serverAuthored &&
-                        !apiException.isBanned
+                    val refusal = result.loginRefusalOrNull()
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = if (isEmailLoginDisabled) {
-                            "Email and password sign-in is disabled on this server."
-                        } else {
-                            result.message ?: "Login failed"
-                        },
+                        error = result.message,
                         refusal = refusal,
                         offerDiagnosticLog = result.offersDiagnosticLog(),
-                        emailLoginEnabled = if (isEmailLoginDisabled) false else _uiState.value.emailLoginEnabled,
+                        emailLoginEnabled = _uiState.value.emailLoginEnabled && refusal != AuthRefusal.EmailLoginDisabled,
                     )
                 }
                 is Result.Loading -> { /* no-op */ }
@@ -334,5 +363,9 @@ class LoginViewModel(
 
     fun consumeTwoFactorSetupNavigation() {
         _uiState.value = _uiState.value.copy(twoFactorSetupTempToken = null)
+    }
+
+    private companion object {
+        const val KEY_EMAIL = "login_email"
     }
 }

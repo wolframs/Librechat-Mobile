@@ -17,6 +17,7 @@ import com.garfiec.librechat.core.model.StreamEvent
 import com.garfiec.librechat.core.model.error.StreamErrorType
 import com.garfiec.librechat.core.model.error.parseUserKeyError
 import com.garfiec.librechat.core.model.response.ChatStatusResponse
+import com.garfiec.librechat.core.model.response.StatusResumeUserMessage
 import com.garfiec.librechat.core.network.api.chatRefusalText
 import com.garfiec.librechat.feature.chat.util.AttachedRun
 import com.garfiec.librechat.feature.chat.util.applyAbortContract
@@ -31,6 +32,7 @@ import com.garfiec.librechat.feature.chat.viewmodel.MessagesState
 import com.garfiec.librechat.feature.chat.viewmodel.QueuedMessage
 import com.garfiec.librechat.feature.chat.viewmodel.StreamingHandle
 import com.garfiec.librechat.feature.chat.viewmodel.contentFilterNotice
+import com.garfiec.librechat.feature.chat.viewmodel.isServerCopyOf
 import com.garfiec.librechat.feature.chat.viewmodel.refusalErrorMarker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -65,7 +67,7 @@ class StreamingManagerDelegate(
     private val scope get() = handle.scope
 
     private var streamJob: Job? = null
-    private val buffer = StreamTextBuffer(handle)
+    private val buffer = StreamTextBuffer(handle, flushAlso = { comparisonDelegate.flushText() })
     private var wasStreaming = false
 
     private val networkRecovery = NetworkRecoveryTrigger(connectivityObserver, handle.scope, ::attemptNetworkRecovery)
@@ -252,10 +254,14 @@ class StreamingManagerDelegate(
      * The id a queued turn may anchor to when [messageId] is the visible branch tail, or null
      * when the server's id for it is not known yet. The tail of a run this client started is
      * the optimistic user message, an id the server never stored: a queued turn anchored there is
-     * dead-lettered `PARENT_NOT_FOUND` when the run ends instead of being sent.
+     * dead-lettered `PARENT_NOT_FOUND` when the run ends instead of being sent. A seed handed off
+     * from the landing is such a message too; its server id is the attached run's request id.
      */
-    fun queueAnchorFor(messageId: String): String? =
-        if (messageId in serverUserMessageIds) serverUserMessageIds[messageId] else messageId
+    fun queueAnchorFor(messageId: String): String? {
+        if (messageId in serverUserMessageIds) return serverUserMessageIds[messageId]
+        val content = handle.state.content
+        return if (messageId == content.pendingResumeUserMessage?.messageId) content.attachedRun?.requestId else messageId
+    }
 
     /**
      * Whether this turn reached the server's `created` milestone. Below that line nothing is
@@ -601,8 +607,8 @@ class StreamingManagerDelegate(
             handle.update { conversation = conversation.copy(conversationId = conversationId) }
         }
         if (isComparison) {
-            // Comparison reconciles via background reload (no in-memory finalize to fold the
-            // streaming-clear into), so clear the single-stream UI fields now.
+            // Comparison panes draw the lanes' text, which onFinal freezes, so the single-stream
+            // fields are cleared here rather than folded into finalizeChatDisplay.
             handle.update { content = content.resetLiveReply(isStreaming = false) }
             comparisonDelegate.onFinal(event.responseMessage ?: event.message)
         }
@@ -1282,20 +1288,43 @@ class StreamingManagerDelegate(
  * Streaming a run this screen attached to, without the saved copy of its reply (see
  * [MessagesState.attachedRun]). The path is rebuilt only when that changes it: otherwise the one on
  * screen stands, which may be truncated at a turn this screen sent.
+ *
+ * A request this screen holds no copy of (a queued turn the server ran itself) is seeded as
+ * [MessagesState.pendingResumeUserMessage] until the server's row lands: nothing reloads the
+ * conversation while its reply streams.
  */
 internal fun MessagesState.attachedTo(status: ChatStatusResponse): MessagesState {
     val run = AttachedRun(
         requestId = status.resumeState?.userMessage?.messageId?.takeIf { it.isNotBlank() },
         responseId = status.resumeState?.responseMessageId?.takeIf { it.isNotBlank() },
     )
+    val unseenRequest = status.resumeState?.userMessage?.toMessage()?.takeIf { request ->
+        messages.none { it.messageId == request.messageId || request.isServerCopyOf(it) }
+    }
+    val tree = unseenRequest?.let { messages + it } ?: messages
     return copy(
         isStreaming = true,
         attachedRun = run,
-        displayMessages = if (run.changesPath(messages, activeBranches)) {
-            run.displayPath(messages, activeBranches)
+        messages = tree,
+        pendingResumeUserMessage = unseenRequest ?: pendingResumeUserMessage,
+        displayMessages = if (run.changesPath(tree, activeBranches)) {
+            run.displayPath(tree, activeBranches)
         } else {
             displayMessages
         },
+    )
+}
+
+private fun StatusResumeUserMessage.toMessage(): Message? {
+    val id = messageId?.takeIf { it.isNotBlank() } ?: return null
+    return Message(
+        messageId = id,
+        conversationId = conversationId ?: return null,
+        parentMessageId = parentMessageId,
+        text = text ?: return null,
+        isCreatedByUser = true,
+        sender = "User",
+        privacyRevision = privacyRevision,
     )
 }
 

@@ -34,13 +34,20 @@ data class MessagesState(
     val messages: List<Message> = emptyList(),
     val displayMessages: List<MessageNode> = emptyList(),
     /**
-     * A just-sent optimistic user message handed off from the NewChat landing VM, kept on screen
-     * until the server persists its own copy. `loadConversation` drops it once the server's copy
-     * arrives, matched by id or by content ([isServerCopyOf] — rc3+ re-mints the id). Null in every
-     * other case. See [NewChatSelectionHandoff].
+     * A user message the server has not saved yet, kept on screen until it persists its own copy:
+     * the optimistic one handed off from the NewChat landing VM ([NewChatSelectionHandoff]), or the
+     * request of an attached run this screen never sent (`attachedTo`). `loadConversation` drops it
+     * once the server's copy arrives, matched by id or by content ([isServerCopyOf] — rc3+ re-mints
+     * the id). Null in every other case.
      */
     val pendingResumeUserMessage: Message? = null,
     val activeBranches: Map<String, Int> = emptyMap(),
+    /**
+     * Pins a finalized turn made stale (its new sibling's parent keys), dropped from [activeBranches]
+     * by the Room reconcile once its read holds [PendingUnpin.messageId]. Dropping them at Final
+     * instead would rebuild the path from the pre-turn Room rows and hide the finished reply.
+     */
+    val unpinWhenCached: PendingUnpin? = null,
     /**
      * The response message that just took over from the streaming bubble, or null.
      *
@@ -212,6 +219,12 @@ data class MessagesState(
 )
 
 @Immutable
+data class PendingUnpin(
+    val messageId: String,
+    val keys: Set<String>,
+)
+
+@Immutable
 data class RetryInfo(
     val attempt: Int,
     val maxAttempts: Int,
@@ -249,6 +262,8 @@ data class ActiveToolCall(
     val authUrl: String? = null,
     /** The MCP server [authUrl] signs in to; null when neither the URL nor the call names one. */
     val authServerName: String? = null,
+    /** The agent action [authUrl] signs in to, when the prompt is an action's rather than an MCP server's. */
+    val authActionId: String? = null,
     /** Server epoch ms the prompt expires at. Display only; never compared to the device clock. */
     val authExpiresAt: Long? = null,
     /**
