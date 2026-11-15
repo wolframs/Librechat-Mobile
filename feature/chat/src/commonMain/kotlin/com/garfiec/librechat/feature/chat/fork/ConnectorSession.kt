@@ -51,7 +51,7 @@ suspend fun receiveConnectorState(
     if (account != null && conversation.mcpOff != null) scope.launch { store?.remember(account, chat, off) }
 }
 
-fun effectiveConnectors(selection: ModelSelectionState): Set<String> {
+fun effectiveConnectors(selection: ModelSelectionState, hidden: Set<String>): Set<String> {
     val selected = if (selection.selectedSpec == null) {
         selection.selectedMcpServerNames
     } else {
@@ -62,8 +62,7 @@ fun effectiveConnectors(selection: ModelSelectionState): Set<String> {
         selected, selection.mcpServers.filter { it.defaultOn }.map { it.name }.toSet(), selection.connectors.off,
     )
     // Upstream's rule: outside a spec, a server the chat does not offer is never in use.
-    if (selection.selectedSpec != null) return effective
-    return effective - selection.mcpServers.filterNot { it.chatSelectable }.map { it.name }.toSet()
+    return if (selection.selectedSpec == null) effective - hidden else effective
 }
 
 fun seedConnectorHandoff(state: ChatUiState, off: Set<String>?): ChatUiState = state.copy(

@@ -59,7 +59,9 @@ class ChatOverflowSectionsTest {
             compactNudgeVisible, firstTurnStreaming, bookmarksEnabled, isTemporaryChat, hasPullRequest, openApps,
             findInRail,
         ),
-    )
+    // FORK-HOOK(fonts): require Text, then isolate upstream conversation-action assertions
+    ).also { check(ChatOverflowItem.TEXT in it.flatten()) }
+        .map { it.filterNot { item -> item == ChatOverflowItem.TEXT } }.filter { it.isNotEmpty() }
 
     private fun bar(
         rail: Boolean = true,
@@ -78,9 +80,7 @@ class ChatOverflowSectionsTest {
             rail, hasDrawer, sidebarOpen, conversationId, hasNewChat, showTempChatToggle, showPullRequestChip, backgroundTasksVisible,
             contextUsageEnabled, contextBarPlacement, usedTokens,
         ),
-    // FORK-HOOK(fonts): require Text, then isolate upstream conversation-action assertions
-    ).also { check(ChatOverflowItem.TEXT in it.flatten()) }
-        .map { it.filterNot { item -> item == ChatOverflowItem.TEXT } }.filter { it.isNotEmpty() }
+    )
 
     @Test
     fun compactAppearsUnderContextOnlyWhenDueAndTheGaugeLivesInTheMenu() {
@@ -197,7 +197,8 @@ class ChatOverflowSectionsTest {
     fun findLeavesTheMenuOnlyWhileTheRailShowsIt() {
         assertTrue(SEARCH in sections().flatten())
         assertFalse(SEARCH in sections(findInRail = true).flatten())
-        assertEquals(listOf(SHOW_ALL_MEDIA, LOAD_PRESET), sections(findInRail = true)[0].take(2))
+        // FORK-HOOK(composer): presets moved to the composer sheets.
+        assertEquals(listOf(SHOW_ALL_MEDIA, TRACE), sections(findInRail = true)[0].take(2))
     }
 
     @Test

@@ -188,7 +188,8 @@ data class ModelSelectionState(
 
     /** The MCP servers in use, by the same rule as [effectiveTools]. */
     val effectiveMcpServerNames: Set<String>
-        get() = com.garfiec.librechat.feature.chat.fork.effectiveConnectors(this) // FORK-HOOK(mcp-default-on)
+        // FORK-HOOK(mcp-default-on)
+        get() = com.garfiec.librechat.feature.chat.fork.effectiveConnectors(this, hiddenMcpServerNames)
 
     /**
      * The parameters the chat shows: [modelParameters], with web search and URL context taken from
