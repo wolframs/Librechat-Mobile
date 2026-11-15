@@ -54,7 +54,7 @@ Size: S under an hour of focused work, M a few hours, L a day or more.
 | 1 | Cache TTL rail: one-shot 1h/5m arm, countdown, per-message marker | M | Upstream has only the per-conversation TTL dropdown. Touches about 10 upstream files; upstream's server-owned queue rows would lose an armed 1h. |
 | 2 | "Prices and costs" panel and the `/cost` link | M | Not in upstream. On iOS the top bar is native now; the hook is an overflow-menu entry. |
 | 3 | Server parameter overlay: defaults, ranges, read-only, locked prompt cache | M | Upstream picks the parameter set from the server but applies no overlay. Check against the deployed backend that skipped keys are not erased from the stored conversation. |
-| 4 | Endpoint `provider` / `extendedCacheTTL`, and upload routing by provider | S | Two fields and two expressions. |
+| 4 | Endpoint `provider` / `extendedCacheTTL`, and upload routing by provider | S | Two fields and two expressions. The fields are back, with the cache window control. The two routing expressions are not: PDFs need none (the server converts them on both Surplus rows), and Appendix A's recipe would also switch `fileConfigEndpoint` to the provider's file policy. See `reports/gap-checks-2026-11-15/G3-pdfs-as-text.md`. |
 | 5 | Draft attachments survive process death | M | Upstream drafts are text only. Paused-queue recovery after process death would be L on top; upstream restores the queue's text only. |
 | 6 | Tool and MCP selections per account, and validated at send time | S | Upstream's keys are still global and stale names are still sent. |
 | 7 | Paragraph spacing preference | S | One padding hook, one settings row. |

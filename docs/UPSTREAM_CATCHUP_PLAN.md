@@ -70,6 +70,8 @@ built itself are dropped.
 - [ ] 7. Mobile gaps against the deployed backend fork (OptMem switches,
       routing and cost data, PDFs as text, web fetch, Markdown import): compare
       with the app code, then decide per item.
+      Compared 2026-11-15: `reports/gap-checks-2026-11-15/SUMMARY.md` and one
+      file per point there. The decisions per item are still open.
 - [ ] 7a. The app check of 2026-11-13 (`docs/APP_CHECK_2026-11-13.md`): decide
       per bug and improvement whether it is fixed here, behind a hook, or
       reported upstream. B5 (default-on servers) belongs to step 7.
@@ -82,6 +84,9 @@ built itself are dropped.
       name), 2 (first model should be one that can answer), 5 (empty line on
       MCP server cards). Improvement 6 is the server's title step. Not checked:
       whether upstream's commits since 2026-11-13 fixed any of B2 to B6.
+      Checked 2026-11-15 in the same reports folder: B2, improvements 1 and 2
+      are real gaps that upstream has not touched; B3, B4's live half, B6 and
+      improvement 5 still need the emulator.
 - [ ] 8. Device acceptance on the Pixel with the real password manager: a
       picked saved login signs in directly (built 2026-11-13, not yet tried
       there). The old debug app id is gone since the rebrand, so the upgrade
