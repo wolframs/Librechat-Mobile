@@ -73,9 +73,19 @@ built itself are dropped.
 - [ ] 7a. The app check of 2026-11-13 (`docs/APP_CHECK_2026-11-13.md`): decide
       per bug and improvement whether it is fixed here, behind a hook, or
       reported upstream. B5 (default-on servers) belongs to step 7.
-- [ ] 8. Device acceptance on the Pixel (real password manager; the build under
-      the old debug app id over the existing install). Pushed to both remotes
-      on 2026-11-13 at the operator's word, before this step.
+      Stock-take 2026-11-15, from the ledger: done in the fork are B1 and B5
+      (default-on connectors and first-send selection), improvement 3 (usable
+      providers first in the model list) and improvement 4 (opaque header).
+      Undecided: B2 (raw `no_user_key` error), B3 (a chat whose first message
+      failed is missing from the drawer), B4 (two status lines for one server),
+      B6 (a failed share shows internals), improvement 1 (tool calls by plain
+      name), 2 (first model should be one that can answer), 5 (empty line on
+      MCP server cards). Improvement 6 is the server's title step. Not checked:
+      whether upstream's commits since 2026-11-13 fixed any of B2 to B6.
+- [ ] 8. Device acceptance on the Pixel with the real password manager: a
+      picked saved login signs in directly (built 2026-11-13, not yet tried
+      there). The old debug app id is gone since the rebrand, so the upgrade
+      over the old install no longer applies.
 
 Fork features the operator did not name on 2026-11-13 stay out for now; they
 are listed in the ledger with sizes.

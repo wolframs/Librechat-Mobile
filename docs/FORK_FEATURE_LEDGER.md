@@ -238,11 +238,12 @@ writes `app/build/outputs/apk/foss/release/app-foss-release.apk`, minified, app 
 at the repository root (ignored by git) and falls back to the debug key when that file is missing,
 so a build on a machine without it is not installable over his app.
 
-The key was made on kubuntu on 2026-11-14 and lives there only: `~/.config/mercuric/` holds the
+The key was made on kubuntu on 2026-11-14; builds read it from there: `~/.config/mercuric/` holds the
 keystore (`mercuric-release.p12`, alias `mercuric`) and its password file, both readable by him
 alone. Certificate: `CN=Mercuric, O=wsiener.dev`, SHA-256
 `52a8d8515cbecd4e03161718b3d914e6fc997b2a296e2e0bc241430570fdea71`, valid until 2054. It is the
-one permanent key: without it no later build can update the installed app. Backing it up is his.
+one permanent key: without it no later build can update the installed app. Backing it up is his;
+done, by his word of 2026-11-15 ("we got a total of 3 locations for them now, one off-site").
 Check a build with `apksigner verify --print-certs` against that fingerprint.
 
 Run on the emulator 2026-11-14 as the minified release build: sign-in, a chat, the model sheet,
