@@ -79,3 +79,11 @@ built itself are dropped.
 
 Fork features the operator did not name on 2026-11-13 stay out for now; they
 are listed in the ledger with sizes.
+
+## Merges since the catch-up
+
+- 2026-11-15: `upstream/develop` at `af0ea66e` (v2026.11.2), 39 commits, 9 files in conflict, all at
+  hook lines. One hook moved without a conflict: git put the Text hook of
+  `ChatOverflowSectionsTest` onto a helper upstream had added below the old one, and only the test
+  compile showed it. `fork-hooks.py` counts hooks per file and cannot see that; after a merge,
+  compile the tests too (`./gradlew :feature:chat:testDebugUnitTest`), not only the app.

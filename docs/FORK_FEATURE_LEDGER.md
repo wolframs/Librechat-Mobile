@@ -113,7 +113,34 @@ module, `fork/README.md` wins.
 | Reading settings: fonts in three slots, text size, line and paragraph spacing | in. Three rounds against the design critic (GPT-6 Astra) from emulator screenshots, 8 to 9 out of 10, light, dark and font scale 1.3. Not seen: Liquid Glass, iOS (never compiled here), the faces on the Pixel's screen. | `fonts` |
 | Thread, header, landing and full model list restyle | in. Same three critic rounds, 8 to 9. Not seen: a streaming reply and tool cards under the critic, comparison panes (they keep upstream's look), Liquid Glass, iOS. | `thread` |
 | Launcher icon: the dyad sigil in three palettes, chosen in Settings > Appearance > App icon | in. On the emulator 2026-11-14: update over the build without aliases, each palette picked, with "Close now" and with "Later" (applied when the app went to the background, the process survived), the drawer showed the new icon, the app opened from the new entry. Not seen: what a launcher does with an icon pinned to the home screen, the Pixel, iOS (no choice there), the F-Droid metadata icon. Debug builds no longer differ by background colour. | `icon` |
-| Resend Files switch tells the truth | in. Upstream's app shows the switch off by default and sends nothing at its default, while the server resends unless a request says `resendFiles: false`; so "off" resent every earlier file. The default is now on, as on web, and off is sent. On the emulator against the live server 2026-11-14: switched off on `Surplus (Claude)`, the server stored `resendFiles=false`; on the Pixel the operator's refused turn went through with it off. Reported upstream as garfiec/Librechat-Mobile#873 (2026-11-14); when upstream takes the fix, drop these hooks. | `resend-files` |
+| Resend Files as a count | in. The operator's server (backend fork, `963e17dbc`, 2026-11-15) stores `resendFiles` as `true`, `false` or a whole number, and the app shows one count field in place of upstream's switch: blank resends every earlier file, 0 none, N the most recent N. On the emulator against the live server 2026-11-15: 2 typed and stored as `2`, read back from the server after the app's cache was deleted; 0 stored as `false`; blank stored as `true`; a preset saved with 3, shown in the preset editor and applied in a new chat; with 1 on `Surplus (Claude)` and two image turns the model saw the second image and quoted the server's note for the first. Not run: the agent editor's Advanced panel, German, iOS, the Pixel. The earlier fix of the switch's default (reported as garfiec/Librechat-Mobile#873) is upstream's since #888 and its hooks are gone. | `resend-files` |
+
+### Resend Files as a count: how it is built
+
+The contract is the backend fork's (`packages/data-provider/src/schemas.ts`, `getResendFilesLimit`):
+`resendFiles` on a conversation, a preset and a request is `true` (or absent) for every earlier
+file, `false` or `0` for none, a whole number for the most recent N; files on the new message are
+always sent; the web panel stores blank as `true` and 0 as `false`, range 0 to 1000. Anything else
+(a quoted number, say) reads as every file.
+
+- `core/model/fork/ResendFiles` reads and writes all three shapes. `Conversation.resendFiles` and
+  `Preset.resendFiles` are of that type (two hook lines); upstream's `Boolean?` could not decode a
+  count, and one such chat or preset fails the whole response. `ChatRequest.resendFiles` is never
+  set (parameters travel as the payload map) and keeps upstream's type.
+- `ModelParameters` keeps upstream's `resendFiles: Boolean` (any earlier file) and gains
+  `resendFilesCount` (the N, else null). Under the key `resendFiles` it reads and writes the count
+  field's text: blank, `0`, `N`, and also `true`/`false`, which an agent's stored parameters carry.
+- The definition is upstream's single `resendFiles()` turned into a text field with the placeholder
+  "All" (`core/ui/fork/resendfiles`), so the chat's Advanced settings, the preset editor and the
+  agent editor all show it. Its two strings are fork-only files in `:core:ui`'s resources (English
+  and German), because a core module cannot read `:fork`'s; other languages show the English.
+- A text field would be sent as a string, which the server does not take: the chat payload and the
+  agent editor encode this one key with `resendFilesWire` (`false`, or the number). Blank is not
+  sent, and the server then stores `true`.
+- A new chat starts blank; a count belongs to the chat or preset it was set on.
+
+The Presets page reloads the list when it opens (`fork/ComposerPresets.kt`): each chat's view model
+reads it once when created, so a preset saved in another chat or on the web was missing until restart.
 
 ### Reading settings: how it is built
 

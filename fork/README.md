@@ -46,6 +46,7 @@ git fetch upstream
 git merge upstream/develop
 fork/scripts/fork-hooks.py        # every hook still there?
 ./gradlew :app:assembleFossDebug
+./gradlew :feature:chat:testDebugUnitTest   # hooks in test files compile only here
 ```
 
 A conflict at a hook line: take upstream's side, then put the hook back where the code it calls

@@ -83,6 +83,9 @@ internal fun ComposerPresets(
     val state = context.state
     val vm = context.viewModel
     val presets = state.presets
+    // Each chat's view model read the list when it was created: one saved since, in another chat
+    // or on the web, shows only after a reload.
+    LaunchedEffect(Unit) { vm.reloadPresets() }
     var open by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var deleting by remember { mutableStateOf<PresetDisplayData?>(null) }
     when {
