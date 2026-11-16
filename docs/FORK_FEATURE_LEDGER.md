@@ -119,6 +119,17 @@ module, `fork/README.md` wins.
 | Credential-aware first model | in. New-chat final fallback waits for key metadata, then picks the first usable provider in catalogue order; none usable retains the existing setup path. Emulator and iOS acceptance pending. | `first-model` |
 | Chat import (Markdown and JSON) | implemented; Android picker, progress, imported-chat navigation and bulk-success refresh. Emulator and iOS CI acceptance pending. | `chat-import` |
 | Readable key errors in saved replies and ERROR parts | in. Reuses the snackbar messages; emulator acceptance pending. Thin, removable fix for upstream #895. | `key-errors` |
+| MCP server card summaries | implemented. A nonblank server description wins; otherwise already-loaded catalogue tool names fill the existing two-line slot. Fork/settings unit tests and Android build checked locally; emulator and iOS acceptance pending. | `mcp-card-summary` |
+
+### MCP server card summaries: how it is built
+
+`:fork`'s `mcpcards/McpCardSummary.kt` supplies presentation copies of servers to the existing
+row builder through one `mcp-card-summary` hook in `McpViewModel`. Nonblank descriptions stay
+verbatim; otherwise tool names for that server are joined with commas in catalogue order.
+No available names leaves the server unchanged. The raw state, requests and card stay unchanged:
+the existing card reserves two lines and ellipsizes overflow, including in a grid.
+There are no new strings, per-server descriptions or requests. Two `McpCardSummaryTest` cases
+cover precedence, server association, missing/blank names and preserving the original config.
 
 ### Chat import: how it is built
 

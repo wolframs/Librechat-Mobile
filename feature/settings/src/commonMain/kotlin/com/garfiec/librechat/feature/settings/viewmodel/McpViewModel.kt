@@ -143,7 +143,7 @@ class McpViewModel(
     val uiState: StateFlow<McpUiState> =
         combine(_uiState, roleRepository.userPermissions, serverDataStore.currentUrlFlow) { state, role, baseUrl ->
             val allRows = mcpServerRows(
-                servers = state.servers,
+                servers = com.garfiec.librechat.fork.mcpcards.withMcpCardSummaries(state.servers, state.tools), // FORK-HOOK(mcp-card-summary): catalogue fallback
                 connectionStatus = state.connectionStatus,
                 toolCounts = state.tools.groupingBy { it.serverName.orEmpty() }.eachCount(),
                 reinitializing = state.reinitializingServers,
