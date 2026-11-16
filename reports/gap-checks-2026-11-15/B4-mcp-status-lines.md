@@ -1,6 +1,6 @@
 # B4: Two status lines for one MCP server
 
-Checked 2026-11-15 by gpt-6.1-sol.
+Checked 2026-11-15 by gpt-6.1-sol. Live follow-up 2026-11-16 by gpt-6.1-sol.
 
 ## Question
 Where do Add to chat → Connectors and Workspace → MCP servers get their status today? Can they disagree after a tool runs?
@@ -37,16 +37,36 @@ Where do Add to chat → Connectors and Workspace → MCP servers get their stat
 
 5. They can still hold different status snapshots (inference from independent reads and refresh triggers). Chat loads initially, after sign-in/cancel/variable operations, and on return to chat. The page loads on creation, explicit refresh and later resumes. No tool-completion status reload occurs in the delegate call sites inspected. Merely reopening the sheet does not reload the connection-status map. `toolbarShown` means tool availability, not sheet visibility; its watcher can request pending discovery but is not a sheet-open status refresh. A changed server state or failed read can therefore leave different snapshots. This does not establish that today's web connector exhibits it.
 6. Upstream since `08bca78f` changed this delegate only to propagate `chatSelectable = chatMenu && !consumeOnly` ([#885](https://github.com/garfiec/Librechat-Mobile/pull/885), merged 2026-11-15). Common status folding already exists at `08bca78f`; it is not a post-check fix. #885 also permits different membership: chat filters hidden/consume-only servers unless spec-locked; management lists them.
-7. No chat was sent, no credit was consumed, and no reply or web tool execution was observed. The live server roster was not read. No per-server labels were observed on either surface, immediately or after reopening. Historical server names from November 13 are not evidence of today's roster.
+7. In the 2026-11-15 attempt, no chat was sent, no credit was consumed, and no reply or web tool execution was observed. The live server roster was not read. No per-server labels were observed on either surface, immediately or after reopening. Historical server names from November 13 are not evidence of today's roster.
+
+## Live run 2026-11-16
+- Read the binding brief and required project guidance; retained the code investigation above without repeating it. Checkout was `develop`, HEAD `33c5e811` at entry. Another agent owns concurrent code/build work; this run used the installed debug app and did not establish its exact source revision.
+- Opened `local` / `emulator-5554` with `device_open`; all UI actions used its bound `agent-device` command, session `t3-0e3da3f4cf6eb24ad291d705`. Launched only `dev.wsiener.mercuric.debug` with the brief's explicit MainActivity and `--relaunch`.
+- Evidence: device snapshots and visually inspected `device_screenshot` images before/after. Device clock read 2:30–2:33 (not treated as host wall time). No screenshot files were written by this run.
+- On the empty chat, opened composer tools → Connectors, then closed it and opened drawer → Workspace → MCP servers. Chose the same server, `web`, for every comparison. Never tapped Connect or changed connector selection.
+- Live roster: `optmem`, `web`, `imager`, `code-agent`, `audio-ears`. Connectors had `optmem` and `web` enabled, the others off. Its helper text said “Enabled connectors connect when you send a message.”
+- Selected `Surplus` / `deepseek-v4.1-flash`. Sent exactly one turn: “Use web to fetch https://example.com exactly once and reply only with its page title; use no other tools.”
+- Observed one `fetch_mcp_web` card reach Complete, then the reply “Example Domain”; no other tool card appeared. Chat title: “Fetch Example.com Exactly Once”. No second turn, image generation or code-agent job.
+
+| When / server `web` | Connectors | MCP servers |
+|---|---|---|
+| Before the turn | Enabled; no status line | Not connected; Connect button; View only |
+| First visits after the completed reply (Connectors first, management second) | Enabled; Connected | Connected; 1 tool; View only; no Connect button |
+| Connectors closed and reopened after the management visit | Enabled; Connected | Most recent management observation above: Connected |
+
+- Before the call, the surfaces differ in label visibility, not opposing status claims: an enabled switch is selection, not a connection claim. After the call, both explicitly agree on Connected. The historical “Not connected” in Connectors versus “Connected” in management did not reproduce at any sampled point.
+- The first post-reply observation is on the chat created by that first send. This run does not prove that the old landing's status map refreshed on tool completion; navigation may have created a fresh chat view model (inference). The two surfaces were read sequentially, not simultaneously; no claim about unsampled transient states.
+- One stale-ref tap was rejected before acting; retried with the tool's exact emitted ref and succeeded. Closed the sheets, selected drawer New Chat, verified empty composer/new landing, and called `device_close(shutdown=false)` successfully.
+- No Gradle, app install/reinstall, backend shell/HTTP requests, direct database access, code edits or commits. Only this report was edited.
 
 ## Verdict
-**cannot tell** for the live B4 reproduction: device ownership blocked both permitted attempts. Static evidence shows shared status semantics, different label visibility and independent snapshots. It does not justify calling the live discrepancy fixed or a confirmed remaining bug.
+**already fine** for the scoped live `web` check on 2026-11-16: both surfaces said Connected after the successful tool call and Connectors still did after reopening. Before the call, management said Not connected while Connectors omitted status. This does not establish an upstream fix or exclude stale snapshots in other lifecycles; the static risk above remains an inference.
 
 ## Recommended action
-**S: rerun the scoped emulator check once the device is free**, with one new-chat deepseek-v4.1-flash prompt to fetch https://example.com using web and name its title. Record each actual server's labels on both surfaces immediately and after reopening. No code change recommended from this incomplete run. If stale status reproduces, prefer reporting the delegate refresh issue upstream; a fork-only label change belongs in `chat/fork/ComposerToolsSheetContent.kt` under fork/README rule 2.
+**Nothing** for B4 from this live run. Do not change code or report an upstream bug based on a post-tool disagreement that did not reproduce. If it recurs, capture the exact server and navigation sequence before choosing a refresh fix; fork-only label changes belong in `chat/fork/ComposerToolsSheetContent.kt` under fork/README rule 2.
 
 ## Only the operator can answer
-Nothing about product behavior yet. Device ownership needs coordination before another run; I did not disturb the holder.
+Nothing needed for this scoped check.
 
 ## Not checked
-Live server roster/labels, model selection, web execution, reply title, reopening behavior, installed-build/source identity, OAuth/reconnect, failure/offline states, iOS, release app or backend implementation. The app could not be opened, so I could not leave it on a new chat; no app UI was changed by this run.
+Exact installed-build/source identity; continuous or simultaneous status sampling; a tool call in an already established chat; OAuth/reconnect, failure/offline states, other servers' tool execution, iOS, release app or backend implementation. The earlier code findings describe the 2026-11-15 checkout, not the other agent's concurrent changes.
