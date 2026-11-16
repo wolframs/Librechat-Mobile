@@ -208,7 +208,7 @@ internal fun StreamErrorPart(raw: String, modifier: Modifier = Modifier) {
     val headline = if (status != null) {
         stringResource(Res.string.error_upstream_model_error_status, status)
     } else {
-        localizedStreamError(classified)
+        com.garfiec.librechat.feature.chat.fork.keyerrors.threadKeyErrorMessage(raw) ?: localizedStreamError(classified) // FORK-HOOK(key-errors): readable saved key failures
     }
     ErrorContentPart(errorText = headline, detail = detail?.message, modifier = modifier)
 }

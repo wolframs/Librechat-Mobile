@@ -82,6 +82,7 @@ fonts	shared/src/commonMain/kotlin/com/garfiec/librechat/shared/app/LibreChatApp
 icon	app/src/main/AndroidManifest.xml	3
 icon	app/src/main/kotlin/com/garfiec/librechat/shortcuts/ModelShortcuts.kt	1
 icon	feature/settings/src/commonMain/kotlin/com/garfiec/librechat/feature/settings/screen/AppearanceSettingsScreen.kt	10
+key-errors	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/StreamErrorMessages.kt	1
 mcp-default-on	core/model/src/commonMain/kotlin/com/garfiec/librechat/core/model/Conversation.kt	1
 mcp-default-on	core/model/src/commonMain/kotlin/com/garfiec/librechat/core/model/mcp/McpServer.kt	1
 mcp-default-on	core/model/src/commonMain/kotlin/com/garfiec/librechat/core/model/request/EphemeralAgent.kt	1
