@@ -34,7 +34,7 @@ launch read only in parallel, as long as they have permission to write their res
 ## With the emulator, one after another (in this order)
 
 - [x] B4 two status lines for one server → `B4-mcp-status-lines.md`
-- [ ] I5 empty line on MCP server cards → `I5-mcp-server-cards.md`
+- [x] I5 empty line on MCP server cards → `I5-mcp-server-cards.md`
 - [ ] B6 a failed share shows internals → `B6-failed-share.md`
 - [ ] B3 a chat whose first message failed is missing from the drawer → `B3-failed-first-message.md`
 

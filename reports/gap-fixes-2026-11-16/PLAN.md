@@ -43,7 +43,7 @@ running from any earlier thread"
 ## Emulator checks (result files in `../gap-checks-2026-11-15/`)
 
 - [x] B4 live half → `B4-mcp-status-lines.md` (add to the file)
-- [ ] I5 → `I5-mcp-server-cards.md`
+- [x] I5 → `I5-mcp-server-cards.md`
 - [ ] B6 → `B6-failed-share.md`
 - [ ] B3 → `B3-failed-first-message.md`
 
