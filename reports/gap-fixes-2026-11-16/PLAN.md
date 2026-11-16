@@ -46,7 +46,7 @@ running from any earlier thread"
 
 - [x] B4 live half → `B4-mcp-status-lines.md` (add to the file)
 - [x] I5 → `I5-mcp-server-cards.md`
-- [ ] B6 → `B6-failed-share.md`
+- [x] B6 → `B6-failed-share.md`
 - [ ] B3 → `B3-failed-first-message.md`
 
 ## Afterwards (lead)
