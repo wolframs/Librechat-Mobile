@@ -115,7 +115,23 @@ module, `fork/README.md` wins.
 | Launcher icon: the dyad sigil in three palettes, chosen in Settings > Appearance > App icon | in. On the emulator 2026-11-14: update over the build without aliases, each palette picked, with "Close now" and with "Later" (applied when the app went to the background, the process survived), the drawer showed the new icon, the app opened from the new entry. Not seen: what a launcher does with an icon pinned to the home screen, the Pixel, iOS (no choice there), the F-Droid metadata icon. Debug builds no longer differ by background colour. | `icon` |
 | Tool-call labels | in. Shared live/settled fallback, PTC and background-task labels; unit tests cover the title rule. Not yet checked on the emulator or iOS. | `tool-labels` |
 | Resend Files as a count | in. The operator's server (backend fork, `963e17dbc`, 2026-11-15) stores `resendFiles` as `true`, `false` or a whole number, and the app shows one count field in place of upstream's switch: blank resends every earlier file, 0 none, N the most recent N. On the emulator against the live server 2026-11-15: 2 typed and stored as `2`, read back from the server after the app's cache was deleted; 0 stored as `false`; blank stored as `true`; a preset saved with 3, shown in the preset editor and applied in a new chat; with 1 on `Surplus (Claude)` and two image turns the model saw the second image and quoted the server's note for the first. Not run: the agent editor's Advanced panel, German, iOS, the Pixel. The earlier fix of the switch's default (reported as garfiec/Librechat-Mobile#873) is upstream's since #888 and its hooks are gone. | `resend-files` |
+| Credential-aware first model | in. New-chat final fallback waits for key metadata, then picks the first usable provider in catalogue order; none usable retains the existing setup path. Emulator and iOS acceptance pending. | `first-model` |
 | Readable key errors in saved replies and ERROR parts | in. Reuses the snackbar messages; emulator acceptance pending. Thin, removable fix for upstream #895. | `key-errors` |
+
+### First model with a usable key: how it is built
+
+`first-model` changes only new-chat tier 3, after route picks, specs, last-used and agents.
+`:fork`'s `modelseed/FirstModel.kt` reads the filtered catalogue in its existing order and the
+same endpoint flags and `endpointKeyStates` used by the picker. The first nonempty row needing
+neither a user key nor a user URL, or having `KeyState.Set`, wins. An earlier unresolved key or
+missing endpoint config waits; key-state changes wake the seeder through `chat/fork/FirstModel.kt`.
+When all rows are resolved and blocked, the original first row keeps the existing setup path.
+There are no provider exceptions, probes, new strings or stored choices; `SpecSeed.kt` is unchanged.
+
+`FirstModelTest` covers stored, missing, loading and expired keys, URL gating, empty lists,
+keyless rows and list order. The seeder regression covers delayed config/key arrivals with no
+last-used or agents; existing seeder tests cover route/spec/last-used/agent precedence.
+Android build and fork/chat tests are checked locally; emulator and iOS acceptance are pending.
 
 ### Readable key errors in the thread: how it is built
 

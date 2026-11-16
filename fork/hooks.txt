@@ -63,6 +63,8 @@ composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/c
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatPullUpSheet.kt	3
 composer	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatScreen.kt	3
 composer	feature/chat/src/commonTest/kotlin/com/garfiec/librechat/feature/chat/components/ChatOverflowSectionsTest.kt	3
+first-model	feature/chat/src/androidUnitTest/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/ModelSelectionDelegateTest.kt	6
+first-model	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/viewmodel/delegate/ModelSelectionDelegate.kt	2
 fonts	app/build.gradle.kts	1
 fonts	app/src/main/kotlin/com/garfiec/librechat/SwitchboardTheme.kt	2
 fonts	core/ui/src/commonMain/kotlin/com/garfiec/librechat/core/ui/theme/Theme.kt	2

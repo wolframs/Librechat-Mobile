@@ -548,7 +548,7 @@ class ModelSelectionDelegate(
                 settingsDataStore.lastUsedSelection,
                 configRepository.availableModels,
                 configRepository.endpointConfigs,
-                agentsInput(),
+                com.garfiec.librechat.feature.chat.fork.firstModelKeyUpdates(agentsInput(), handle), // FORK-HOOK(first-model): wake on key resolution
                 combine(configRepository.startupConfig, preferLastUsedModel) { config, preferLastUsed ->
                     SpecConfig(config?.modelSpecs, config?.interfaceConfig?.modelSelect ?: true, preferLastUsed)
                 }.distinctUntilChanged(),
@@ -827,7 +827,7 @@ class ModelSelectionDelegate(
 
         // Tier 3: first available config model.
         if (filtered.isEmpty()) return // WAIT for models
-        val firstEntry = filtered.entries.firstOrNull() ?: return
+        val firstEntry = com.garfiec.librechat.fork.modelseed.firstModelEntry(filtered, input.endpointConfigs, handle.state.endpointKeyStates) ?: return // FORK-HOOK(first-model): credential-aware last fallback
         applySelection(ModelChoice.Raw(firstEntry.key, firstEntry.value.firstOrNull()), reason = "tier3-firstModel")
     }
 
