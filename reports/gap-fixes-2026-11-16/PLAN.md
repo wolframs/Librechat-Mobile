@@ -47,7 +47,7 @@ running from any earlier thread"
 - [x] B4 live half → `B4-mcp-status-lines.md` (add to the file)
 - [x] I5 → `I5-mcp-server-cards.md`
 - [x] B6 → `B6-failed-share.md`
-- [ ] B3 → `B3-failed-first-message.md`
+- [x] B3 → `B3-failed-first-message.md`
 
 ## Afterwards (lead)
 
@@ -68,3 +68,8 @@ running from any earlier thread"
   without a read grant or of a missing item; a normal share from a cooperating app was not shown to
   fail, and "Build for what users hit" applies. It is upstream's code and unreported there; the
   operator's go-ahead of today covers the B2 report only, so B6 is not filed. Offer it to him.
+- 2026-11-16, B3 decided (the lead's choice): nothing built. It could not be reproduced without
+  touching the test account's keys (rows without a key cannot be selected in the fork's model
+  list). Upstream's #872 reloads the drawer when it opens with an old list, and a pull to refresh
+  or a relaunch reloads it too, so a missing row is cleared by a refresh; "Build for what users
+  hit" applies. Reopen if it shows up again in daily use, with the steps.
