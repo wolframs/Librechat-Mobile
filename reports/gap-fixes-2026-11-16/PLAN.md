@@ -39,6 +39,8 @@ running from any earlier thread"
 - [ ] 5. First model with a usable key (I2, M)
 - [ ] 6. Markdown import (G5, M)
 - [ ] 7. Spend card and trusted-sellers switch (G2, M)
+- [ ] 8. MCP server cards: tool names fill the empty line when the server has no description (I5, S;
+      added 2026-11-16 from the emulator check, the lead's choice)
 
 ## Emulator checks (result files in `../gap-checks-2026-11-15/`)
 
