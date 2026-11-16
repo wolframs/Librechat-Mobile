@@ -41,7 +41,7 @@ running from any earlier thread"
       `lacksProviderWebSearch(resolvedBaseURL)`; that is a backend change, outside this plan.
 - [x] 5. First model with a usable key (I2, M)
 - [x] 6. Markdown import (G5, M)
-- [ ] 7. Spend card and trusted-sellers switch (G2, M)
+- [x] 7. Spend card and trusted-sellers switch (G2, M)
 - [ ] 8. MCP server cards: tool names fill the empty line when the server has no description (I5, S;
       added 2026-11-16 from the emulator check, the lead's choice)
 
