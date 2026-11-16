@@ -29,8 +29,9 @@ fun ChatImportRow(snackbar: SnackbarHostState, viewModel: ChatImportViewModel = 
     }
     LaunchedEffect(message) {
         if (message != null) {
-            viewModel.dismissStatus()
+            // Dismissing first would null the key and cancel this effect mid-snackbar.
             snackbar.showSnackbar(message)
+            viewModel.dismissStatus()
         }
     }
     SettingsRow(

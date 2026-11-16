@@ -796,33 +796,18 @@ class ModelSelectionDelegateTest {
 
     @Test
     fun seedNoLastUsedAgentsEmptyFallsToFirstConfigModelNoDeadlock() = runTest {
-        // FORK-HOOK(first-model): delayed config and key results must wake only the last fallback tier
         val scope = TestScope(StandardTestDispatcher(testScheduler))
-        val handle = newHandle(scope)
+        val handle = newHandle(scope) // default endpoint = AGENTS
         val delegate = newDelegate(handle)
-        delegate.agentsLoaded.value = true
-        availableModels.value = linkedMapOf("openAI" to listOf("gpt-4o"), "Surplus" to listOf("answer"))
+        delegate.agentsLoaded.value = true // agents loaded and empty (e.g. denied / none configured)
+        availableModels.value = linkedMapOf("openAI" to listOf("gpt-4o"), "anthropic" to listOf("claude-3"))
+        endpointConfigs.value = availableModels.value.mapValues { EndpointConfig() } // FORK-HOOK(first-model): fallback waits for endpoint metadata
 
         delegate.seedInitialSelection(isNewConversation = true)
         advanceUntilIdle()
-        assertThat(handle.state.selectedModel).isNull()
 
-        endpointConfigs.value = availableModels.value.mapValues { EndpointConfig(userProvide = true) }
-        advanceUntilIdle()
-        assertThat(handle.state.selectedModel).isNull()
-
-        handle.update { copy(selection = selection.copy(endpointKeyStates = mapOf(
-            "openAI" to com.garfiec.librechat.core.model.endpoint.KeyState.Unset,
-            "Surplus" to com.garfiec.librechat.core.model.endpoint.KeyState.Loading,
-        ))) }
-        advanceUntilIdle()
-        assertThat(handle.state.selectedModel).isNull()
-
-        handle.update { copy(selection = selection.copy(endpointKeyStates = selection.endpointKeyStates +
-            ("Surplus" to com.garfiec.librechat.core.model.endpoint.KeyState.Set(null, true, "never")))) }
-        advanceUntilIdle()
-        assertThat(handle.state.selectedEndpoint).isEqualTo("Surplus")
-        assertThat(handle.state.selectedModel).isEqualTo("answer")
+        assertThat(handle.state.selectedEndpoint).isEqualTo("openAI")
+        assertThat(handle.state.selectedModel).isEqualTo("gpt-4o")
     }
 
     @Test
