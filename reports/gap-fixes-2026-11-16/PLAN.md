@@ -31,7 +31,7 @@ running from any earlier thread"
 
 ## Build, in the operator's order
 
-- [ ] 1. Prices sheet: unknown price for this key is shown as unknown (G2, S)
+- [x] 1. Prices sheet: unknown price for this key is shown as unknown (G2, S)
 - [ ] 2. Tool-call names: one naming function for every card (I1, M; settles half of G4)
 - [ ] 3. Raw key error in the thread (B2, M)
 - [ ] 3u. Upstream report for B2: Opus agent checks whether it is upstream's and unreported, files it if so

@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "fork" / "hooks.txt"
 MARKER = re.compile(r"FORK-HOOK\(([a-z0-9-]+)\)")
 # Fork-owned places: a marker there is documentation, not a hook into upstream's code.
-OWNED = ("fork/", "docs/", "UX_GAP_WORKLOG.md", "CLAUDE.md")
+OWNED = ("fork/", "docs/", "reports/", "UX_GAP_WORKLOG.md", "CLAUDE.md")
 
 
 def is_owned(path: str) -> bool:
