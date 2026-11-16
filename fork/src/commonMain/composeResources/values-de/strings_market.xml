@@ -31,4 +31,21 @@
     <string name="market_key_price_unknown">Einige Preise für deinen Key sind unbekannt. Möglicherweise sind Routing oder Anbieter-Vertrauen ungeklärt, oder es gibt kein zulässiges Angebot.</string>
     <string name="market_headline_key">Bestes Angebot für deinen Key</string>
     <string name="market_headline_best">Bestes Angebot am Markt</string>
+    <string name="market_spend">Ausgaben · USD</string>
+    <string name="market_credit">Restguthaben</string>
+    <string name="market_spend_today">Heute (UTC)</string>
+    <string name="market_spend_month">Letzte 30 Tage</string>
+    <string name="market_spend_scope">Serverweite Ausgaben inklusive Tools; noch nicht abgerechnete Kosten sind Schätzungen. Das Guthaben gehört zum Marktplatzkonto.</string>
+    <string name="market_trust">Nur vertrauenswürdige Anbieter</string>
+    <string name="market_trust_help">Beschränkt die Anbieter für den gemeinsamen Marktplatzschlüssel auf allen zugehörigen Endpunkten, für alle Nutzer.</string>
+    <string name="market_trust_on">An</string>
+    <string name="market_trust_off">Aus</string>
+    <string name="market_trust_inherit">Übernehmen</string>
+    <string name="market_trust_default">Marktplatzstandard</string>
+    <string name="market_trust_key">Schlüssel</string>
+    <string name="market_trust_account">Konto</string>
+    <string name="market_trust_effective">Wirksam: %1$s · Quelle: %2$s</string>
+    <string name="market_trust_readonly">Der Server erlaubt diesem Schlüssel keine Routingänderungen.</string>
+    <string name="market_trust_saving">Wird gespeichert…</string>
+    <string name="market_trust_failed">Die Änderung konnte nicht gespeichert werden. Die zuletzt vom Server gelesene Einstellung wird angezeigt.</string>
 </resources>

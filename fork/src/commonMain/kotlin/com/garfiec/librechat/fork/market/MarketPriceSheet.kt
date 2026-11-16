@@ -55,11 +55,13 @@ fun MarketPriceContent(server: String, model: String, onDismiss: () -> Unit, mod
     var attempt by remember { mutableIntStateOf(0) }
     val browser = LocalExternalUriHandler.current ?: LocalUriHandler.current
     LaunchedEffect(model, attempt) { state.load(model) }
+    LaunchedEffect(state, attempt) { state.loadAccount() }
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         com.garfiec.librechat.fork.composer.ComposerSheetHeader(
             stringResource(Res.string.composer_prices), onNavigate = onDismiss)
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            MarketAccountContent(state, model)
             Text(model, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             Text(stringResource(Res.string.market_units), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             when {

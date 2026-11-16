@@ -107,6 +107,7 @@ module, `fork/README.md` wins.
 | Guard for the old fork's cache database, and the build switch for the old debug app id | removed 2026-11-14: both only served installs under `com.garfiec.librechat`, which the new id never updates. | none |
 | Saved login: system password manager (Android Credential Manager) and remembered server addresses | in. On the emulator 2026-11-13: a server remembered by the old fork build was still offered after sign-out, with Forget; "Use saved login" opened the system chooser; a sign-in asked the system to save. On the Pixel (operator, 2026-11-13): the password manager offered the saved login and filled it; the build then only filled the fields and he had to tap Sign in. Since then a picked login signs in directly; that step is not yet tried on the Pixel. iOS has no-op actuals. | `saved-login` |
 | Cache window control | in. Run on the emulator on native Anthropic and on `Surplus (Claude)` (2026-11-13): countdown from the server's marker, the cycle 1h, 5m, off, an armed send stored as `1h`, arming from the model sheet's Cache window page. Since the composer regrouping it is a quiet "Cache 4:47" in the composer, shown only while a window runs or is armed. Not run: OpenRouter, a row that cannot arm, a saved agent, branches, a queued message, restart, iOS. | `cache-ttl` |
+| Credit, recent spend and shared-key trust control in Prices | implemented 2026-11-16. Overview/routing are fetched through the authenticated client; denied reads add nothing. Configured routing shows On/Off/Inherit, effective source, and shared-key scope; `writable: false` disables changes. English/German. Payload and permission decisions have unit coverage for admin and ordinary-account cases; no live admin or ordinary-account acceptance in this change. | none of its own |
 | Prices sheet | in. Run on the emulator on `Surplus (Claude)` and the plain `Surplus` row with live data. Opened from the model sheet (More options, Prices) since the composer regrouping. Not run: the dashboard button, Retry, a saved agent, a server without the sidecar, iOS. | none of its own |
 | Default-on connectors and first-send selection | in. On the emulator against the live server (2026-11-13): a new chat starts with the default-on servers on; one switched off stays off for that chat across a reopen and a cold start while other chats keep it on; the model named the picked servers on the first message. Not run: offline reopen, a switch-off made in the web UI arriving on the phone. | `mcp-default-on` |
 | Composer regrouping (model capsule, model sheet, Add to chat, conversation-only menu, Lucide icons) | in. Five rounds against a design critic (GPT-6 Astra) from device screenshots, 5.5 to 9 out of 10, light, dark and font scale 1.3. Not seen: the composer with the keyboard open (the emulator's test keyboard is invisible), the Liquid Glass style, iOS. | `composer` |
@@ -413,6 +414,19 @@ No backend change or endpoint-name inference is part of the wording fix.
   routing or seller trust, or the absence of an eligible offer. Covered by `MarketPriceTest`; this
   unknown-price state is not yet checked on the emulator.
 - One fetch when it opens and on Retry, no polling. A change of account, server or model drops it.
+- `MarketAccount.kt`, `MarketAccountContent.kt` and `MarketPriceState` add the permitted slice of
+  `GET /cost/overview` and `GET /cost/routing`: marketplace credit, today (UTC), last 30 days,
+  server-wide scope including tools and estimated unsettled charges. The existing `/cost` link
+  stays below prices. No role names are inferred: failed/denied reads are null and add no card.
+- Configured routing shows trusted sellers On/Off/Inherit, key/account/default source and shared-key
+  scope across endpoints. `writable: false` disables the control; absent/null offers writes as the
+  web client does. `PUT /cost/routing` sends only `allowUntrusted` (false/true/explicit null).
+  A failed write re-reads routing, falls back to the last server value if the read also fails, and
+  shows a plain failure sentence. Quotes refresh after a write attempt. No new hooks or network
+  helper are needed: `MarketApi` already uses the authenticated, browser-UA HTTP client directly.
+- `MarketAccountTest` covers both payloads, missing data, tri-state inversion and permission/visibility
+  decisions for admin and ordinary-account responses. Live permission/write behaviour, German,
+  Liquid Glass and iOS remain untested; no emulator or backend HTTP call is part of this change.
 
 ### Composer regrouping: how it is built (2026-11-13)
 

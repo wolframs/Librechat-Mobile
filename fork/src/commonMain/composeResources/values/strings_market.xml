@@ -31,4 +31,21 @@
     <string name="market_key_price_unknown">Some prices for your key are unknown. Routing or seller trust may be unknown, or no eligible offer may be available.</string>
     <string name="market_headline_key">Best offer your key can get</string>
     <string name="market_headline_best">Best offer on the market</string>
+    <string name="market_spend">Spend · USD</string>
+    <string name="market_credit">Credit left</string>
+    <string name="market_spend_today">Today (UTC)</string>
+    <string name="market_spend_month">Last 30 days</string>
+    <string name="market_spend_scope">Server-wide spend, including tools; unsettled charges are estimates. Credit is the marketplace account balance.</string>
+    <string name="market_trust">Trusted sellers only</string>
+    <string name="market_trust_help">Limits sellers for the shared marketplace key across its endpoints, for everyone using it.</string>
+    <string name="market_trust_on">On</string>
+    <string name="market_trust_off">Off</string>
+    <string name="market_trust_inherit">Inherit</string>
+    <string name="market_trust_default">Marketplace default</string>
+    <string name="market_trust_key">Key</string>
+    <string name="market_trust_account">Account</string>
+    <string name="market_trust_effective">In effect: %1$s · Source: %2$s</string>
+    <string name="market_trust_readonly">The server does not allow this key to change routing.</string>
+    <string name="market_trust_saving">Saving…</string>
+    <string name="market_trust_failed">Could not save the change. Showing the last setting read from the server.</string>
 </resources>
