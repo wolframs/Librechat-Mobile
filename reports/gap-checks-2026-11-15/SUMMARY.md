@@ -6,8 +6,12 @@ fork `local-features` at `6f42475e`), without builds, device runs or server requ
 says otherwise. The lead (Claude) read every file; the order of work below is the lead's
 recommendation, not a decision of the operator's.
 
-State: 8 of 12 points are complete. The four that need the emulator (B4's live half, I5, B6, B3) are
-not run: the emulator was held by another thread's device session (see `PLAN.md`).
+Update 2026-11-16: all 12 points are checked, the operator answered the three questions below, and
+the fixes are built: see `../gap-fixes-2026-11-16/OUTCOME.md`. The rest of this file is as written on
+15 November.
+
+State on 15 November: 8 of 12 points are complete. The four that need the emulator (B4's live half, I5, B6, B3) are
+not run: the emulator was held by another thread's device session (freed on 16 November).
 
 ## Verdicts
 

@@ -67,12 +67,12 @@ built itself are dropped.
   - [x] 6e. Upgrade test on the emulator (2026-11-13): old fork build signed in,
         new build over it, opens signed in, database on upstream's v15. Still
         to do on the Pixel, with the build under the old debug app id.
-- [ ] 7. Mobile gaps against the deployed backend fork (OptMem switches,
+- [x] 7. Mobile gaps against the deployed backend fork (OptMem switches,
       routing and cost data, PDFs as text, web fetch, Markdown import): compare
       with the app code, then decide per item.
       Compared 2026-11-15: `reports/gap-checks-2026-11-15/SUMMARY.md` and one
       file per point there. The decisions per item are still open.
-- [ ] 7a. The app check of 2026-11-13 (`docs/APP_CHECK_2026-11-13.md`): decide
+- [x] 7a. The app check of 2026-11-13 (`docs/APP_CHECK_2026-11-13.md`): decide
       per bug and improvement whether it is fixed here, behind a hook, or
       reported upstream. B5 (default-on servers) belongs to step 7.
       Stock-take 2026-11-15, from the ledger: done in the fork are B1 and B5
@@ -87,6 +87,10 @@ built itself are dropped.
       Checked 2026-11-15 in the same reports folder: B2, improvements 1 and 2
       are real gaps that upstream has not touched; B3, B4's live half, B6 and
       improvement 5 still need the emulator.
+      Built and decided 2026-11-16 (steps 7 and 7a together): what was built, seen on the
+      emulator, left out and why is in `reports/gap-fixes-2026-11-16/OUTCOME.md`. Still open from
+      it: the search caption needs a field served by the backend; the admin spend view, the trust
+      switch's write and the first-model fallback have not run for real.
 - [ ] 8. Device acceptance on the Pixel with the real password manager: a
       picked saved login signs in directly (built 2026-11-13, not yet tried
       there). The old debug app id is gone since the rebrand, so the upgrade
