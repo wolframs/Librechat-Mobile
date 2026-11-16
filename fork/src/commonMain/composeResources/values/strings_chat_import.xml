@@ -1,0 +1,8 @@
+<resources>
+    <string name="chat_import_title">Import chat</string>
+    <string name="chat_import_summary">Markdown transcript or JSON export</string>
+    <string name="chat_import_progress">Importing…</string>
+    <string name="chat_import_success">Chats imported successfully</string>
+    <string name="chat_import_failed">Chat import failed. Please try again.</string>
+    <string name="chat_import_invalid">Choose a .md, .markdown or .json file.</string>
+</resources>

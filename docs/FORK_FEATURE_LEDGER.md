@@ -116,7 +116,30 @@ module, `fork/README.md` wins.
 | Tool-call labels | in. Shared live/settled fallback, PTC and background-task labels; unit tests cover the title rule. Not yet checked on the emulator or iOS. | `tool-labels` |
 | Resend Files as a count | in. The operator's server (backend fork, `963e17dbc`, 2026-11-15) stores `resendFiles` as `true`, `false` or a whole number, and the app shows one count field in place of upstream's switch: blank resends every earlier file, 0 none, N the most recent N. On the emulator against the live server 2026-11-15: 2 typed and stored as `2`, read back from the server after the app's cache was deleted; 0 stored as `false`; blank stored as `true`; a preset saved with 3, shown in the preset editor and applied in a new chat; with 1 on `Surplus (Claude)` and two image turns the model saw the second image and quoted the server's note for the first. Not run: the agent editor's Advanced panel, German, iOS, the Pixel. The earlier fix of the switch's default (reported as garfiec/Librechat-Mobile#873) is upstream's since #888 and its hooks are gone. | `resend-files` |
 | Credential-aware first model | in. New-chat final fallback waits for key metadata, then picks the first usable provider in catalogue order; none usable retains the existing setup path. Emulator and iOS acceptance pending. | `first-model` |
+| Chat import (Markdown and JSON) | implemented; Android picker, progress, imported-chat navigation and bulk-success refresh. Emulator and iOS CI acceptance pending. | `chat-import` |
 | Readable key errors in saved replies and ERROR parts | in. Reuses the snackbar messages; emulator acceptance pending. Thin, removable fix for upstream #895. | `key-errors` |
+
+### Chat import: how it is built
+
+Settings → Privacy & data offers Import chat on Android. OpenDocument accepts all MIME types;
+the filename must end in `.md`, `.markdown` or `.json` (case insensitive). The picker follows the
+existing project attachment picker pattern in fork-owned files because feature modules cannot
+share picker implementations. iOS uses the existing nullable-launcher expect/actual pattern and
+hides the row.
+
+`:fork`'s `chatimport` owns the picker, state, import handoff and English/German strings;
+`feature/settings/fork/chatimport` adapts the existing SettingsRow. `core/network/fork/chatimport`
+uses the existing multipart upload plumbing against `api/convos/import`, preserving the file
+bytes, URI-encoding the filename and sending `maxImages=5` and JavaScript-sign `timezoneOffset`.
+The server parses the transcript. Its acknowledgement is not cached as a conversation: an ID
+triggers a real conversation fetch and navigation, while a bulk JSON acknowledgement refreshes
+the drawer and shows “Chats imported successfully”. Importing disables the row; invalid files
+and failures show plain messages. Two `chat-import` hooks attach the row and navigation handoff.
+The upstream import method remains unchanged and unused by this flow.
+
+The multipart and acknowledgement tests run in `:fork`. Backend source was read through
+`ssh air-agents`; no backend writes or HTTP imports were made. The Foss debug build and unit tests for fork, core/network, feature/settings and shared pass.
+Emulator acceptance and iOS CI compile are pending; there is no local parser or last-N prompt.
 
 ### First model with a usable key: how it is built
 

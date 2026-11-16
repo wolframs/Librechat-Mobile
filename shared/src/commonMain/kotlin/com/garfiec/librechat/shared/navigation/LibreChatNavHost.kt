@@ -358,6 +358,7 @@ fun LibreChatNavHost(
     // every other link does. The platform handler stays reachable for the viewer's own
     // "Open in browser", which must not route back into the viewer.
     val platformUriHandler = LocalUriHandler.current
+    com.garfiec.librechat.fork.chatimport.ChatImportNavigation(onImported = { id -> drawerViewModel.refreshConversations(); if (id != null) navigator.navigateToChat(id) }) // FORK-HOOK(chat-import): refresh imports and open a returned chat.
     val linkScope = rememberCoroutineScope()
     val sharedLinkUriHandler = remember(platformUriHandler, navigator, navHostViewModel) {
         SharedLinkUriHandler(platformUriHandler) { url ->

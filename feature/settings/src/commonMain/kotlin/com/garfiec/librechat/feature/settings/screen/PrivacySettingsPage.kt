@@ -65,6 +65,7 @@ fun PrivacySettingsPage(
             AdaptiveSectionHeader(stringResource(Res.string.section_your_chats))
         }
         adaptiveSection {
+            row(key = "chat_import") { com.garfiec.librechat.feature.settings.fork.chatimport.ChatImportRow(snackbarHostState) } // FORK-HOOK(chat-import): pick and upload a transcript.
             row(key = "archived_chats") {
                 SettingsRow(
                     title = stringResource(Res.string.archived_conversations),

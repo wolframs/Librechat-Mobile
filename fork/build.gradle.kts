@@ -35,12 +35,16 @@ kotlin {
             implementation(libs.ktor.client.core)
         }
         androidMain.dependencies {
+            implementation(libs.activity.compose)
             implementation(libs.fork.credentials)
             implementation(libs.fork.credentials.play.services.auth)
             implementation(libs.koin.android)
         }
         getByName("androidUnitTest").dependencies {
             implementation(libs.koin.test)
+            implementation(libs.ktor.client.mock)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.kotlinx.json)
         }
     }
 }

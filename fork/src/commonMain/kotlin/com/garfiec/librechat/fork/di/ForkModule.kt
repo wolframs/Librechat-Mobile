@@ -14,6 +14,9 @@ val forkModule = module {
             get(com.garfiec.librechat.core.common.di.KoinQualifiers.IO),
         )
     }
+    single { com.garfiec.librechat.core.network.fork.chatimport.ChatImportApi(get()) }
+    single { com.garfiec.librechat.fork.chatimport.ChatImportHandoff() }
+    factory { com.garfiec.librechat.fork.chatimport.ChatImportViewModel(get(), get(), get(), get()) }
     includes(forkPlatformModule)
     single { com.garfiec.librechat.fork.mcp.ConnectorStore(get()) }
     includes(com.garfiec.librechat.fork.login.di.savedLoginModule)
