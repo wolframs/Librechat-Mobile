@@ -39,7 +39,7 @@ running from any earlier thread"
       the server sends nothing that tells the phone it runs its own search on a row. The backend
       would have to serve a per-endpoint `providerWebSearchReplacement: "librechat"`, derived from
       `lacksProviderWebSearch(resolvedBaseURL)`; that is a backend change, outside this plan.
-- [ ] 5. First model with a usable key (I2, M)
+- [x] 5. First model with a usable key (I2, M)
 - [ ] 6. Markdown import (G5, M)
 - [ ] 7. Spend card and trusted-sellers switch (G2, M)
 - [ ] 8. MCP server cards: tool names fill the empty line when the server has no description (I5, S;
