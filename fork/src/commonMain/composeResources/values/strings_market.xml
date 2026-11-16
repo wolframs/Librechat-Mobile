@@ -13,7 +13,8 @@
     <string name="market_cache_read">Cache read</string>
     <string name="market_cache_write">Cache write</string>
     <string name="market_reasoning">Reasoning</string>
-    <string name="market_routing">Trusted sellers only; %1$s seller families hidden.</string>
+    <string name="market_routing">Trusted sellers only; hidden seller families: %1$s.</string>
+    <string name="market_list_only">list %1$s</string>
     <string name="market_sellers">Seller families</string>
     <string name="market_trusted">trusted</string>
     <string name="market_untrusted">not trusted</string>

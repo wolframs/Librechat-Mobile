@@ -110,7 +110,8 @@ private fun MarketQuote(quote: MarketPrice) {
                 val list = quote.listPrice(lane)
                 if (lane == PriceLane.INPUT || lane == PriceLane.OUTPUT) {
                     val against = list?.let {
-                        stringResource(Res.string.market_against_list, marketUsd(it, unknown), marketDiscount(price, it, unknown))
+                        if (price == null) stringResource(Res.string.market_list_only, marketUsd(it, unknown))
+                        else stringResource(Res.string.market_against_list, marketUsd(it, unknown), marketDiscount(price, it, unknown))
                     }
                     HeadlinePrice(label, value, against)
                 } else {

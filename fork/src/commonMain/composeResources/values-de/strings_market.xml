@@ -13,7 +13,8 @@
     <string name="market_cache_read">Cache lesen</string>
     <string name="market_cache_write">Cache schreiben</string>
     <string name="market_reasoning">Denken</string>
-    <string name="market_routing">Nur vertrauenswürdige Anbieter; %1$s Anbieterfamilien ausgeblendet.</string>
+    <string name="market_routing">Nur vertrauenswürdige Anbieter; ausgeblendete Anbieterfamilien: %1$s.</string>
+    <string name="market_list_only">Liste %1$s</string>
     <string name="market_sellers">Anbieterfamilien</string>
     <string name="market_trusted">vertrauenswürdig</string>
     <string name="market_untrusted">nicht vertrauenswürdig</string>
