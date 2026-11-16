@@ -313,9 +313,30 @@ renaming one drops that icon. The model shortcuts take the icon in force. iOS ha
 
 ### Default-on connectors: how it is built
 
+The Connectors page says its switches apply only to this chat. Each row shows the server's
+nonblank description first; only `optmem` and `web` have English/German fallbacks. OptMem is
+notes kept across chats, with a reminder that switching it off stops further memory use without
+removing memory already in the conversation; web fetches pages by address. This is wording only,
+in `feature/chat/fork/ComposerToolsSheetContent.kt` and `:fork`'s `strings_composer.xml`, with no
+new hooks or changes to selection or refresh behavior. Backend source checked read-only on the
+Air: `memoryTools.ts` refuses calls when switched off; `contextSnapshots.ts` retains earlier context.
+Android build and fork/chat unit tests pass; phone layout and German/iOS acceptance remain pending.
+
 - `mcp-default-on`: plain selection, toggle and request rules in `:fork` `mcp/`; the chat fork package bridges the chat slices. All connector surfaces and the plus badge read the same effective set.
 - Conversation detail is the truth. An open chat holds nullable opt-outs in memory; null sends no `mcpOff`. A bounded DataStore sidecar (`acct:<id>:mcp_off`, last 100 chats, removed by account purge) seeds cached offline opens. A chat's detail is read again once per process and whenever its `updatedAt` moved (upstream's own backfill gate, widened by one hook), not on every open. Room is unchanged. Picker edits outrank an in-flight read; new landings start with no opt-outs, and the new-chat handoff carries them.
 - First-send readiness now includes selection restoration; a late startup snapshot cannot replace a connector pick made while loading. These are marked upstream hooks; the navigation handoff itself runs after the first request.
+
+### Search caption: blocked on served metadata
+
+The remapped-search caption stays unbuilt. On Air backend `local-features` at
+`b473d660a592e8b2fed3b6987c18b1eab098a5ca`, `endpoints/providerWebSearch.ts` decides from the
+private base URL's hostname. `endpoints/custom/config.ts` does not serve that URL or a remapping
+flag; `endpoints/config/endpoints.ts` passes that custom config through. `provider: anthropic`
+and `customParams.defaultParamsEndpoint: anthropic` describe the native client and parameter set,
+not search execution. `providerId` is brand identity (with icon/name fallbacks); `extendedCacheTTL`
+describes caching. Neither establishes remapping. The backend would need to serve, per endpoint,
+`providerWebSearchReplacement: "librechat"`, derived from `lacksProviderWebSearch(resolvedBaseURL)`.
+No backend change or endpoint-name inference is part of the wording fix.
 
 ### Saved login: what differs from the old fork
 

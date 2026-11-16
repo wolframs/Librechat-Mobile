@@ -30,7 +30,9 @@
     <string name="composer_files_detail">Hochgeladene Dateien durchsuchen</string>
     <string name="composer_artifacts_detail">Das Modell kann Dokumente und Apps zur Vorschau erstellen</string>
     <string name="composer_skills_detail">Das Modell kann deine wiederverwendbaren Anweisungen laden</string>
-    <string name="composer_connector_detail">Aktivierte Konnektoren verbinden sich, wenn du eine Nachricht sendest.</string>
+    <string name="composer_connector_detail">Diese Schalter gelten nur für diesen Chat.</string>
+    <string name="composer_connector_memory">Notizen, die sich der Assistent über Chats hinweg merkt. Aus stoppt das Lesen und Speichern von Notizen; was schon im Gespräch steht, bleibt.</string>
+    <string name="composer_connector_web">Ruft Webseiten über ihre Adresse ab.</string>
     <string name="composer_none_on">Keine aktiv</string>
     <string name="composer_n_on">%1$d aktiv</string>
     <string name="composer_cache">Cache</string>

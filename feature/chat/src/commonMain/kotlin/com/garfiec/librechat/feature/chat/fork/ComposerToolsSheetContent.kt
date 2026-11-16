@@ -658,6 +658,18 @@ private fun McpServerToggleRow(
                 fontWeight = FontWeight.Normal,
                 overflow = TextOverflow.Ellipsis,
             )
+            val description = server.description?.takeIf { it.isNotBlank() } ?: when (server.name) {
+                "optmem" -> stringResource(ForkRes.string.composer_connector_memory)
+                "web" -> stringResource(ForkRes.string.composer_connector_web)
+                else -> null
+            }
+            if (description != null) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             val status = when {
                 server.status.needsAttention || server.signInPending -> stringResource(mcpStatusLabel(server.status))
                 !isSelected -> ""

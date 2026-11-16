@@ -30,7 +30,9 @@
     <string name="composer_files_detail">Search uploaded files</string>
     <string name="composer_artifacts_detail">The model can create documents and apps to preview</string>
     <string name="composer_skills_detail">The model can load your reusable instructions</string>
-    <string name="composer_connector_detail">Enabled connectors connect when you send a message.</string>
+    <string name="composer_connector_detail">These switches apply only to this chat.</string>
+    <string name="composer_connector_memory">Notes the assistant keeps across chats. Off stops further memory use here; memory already in the conversation stays.</string>
+    <string name="composer_connector_web">Fetches web pages by address.</string>
     <string name="composer_none_on">None on</string>
     <string name="composer_n_on">%1$d on</string>
     <string name="composer_cache">Cache</string>
