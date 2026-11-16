@@ -96,7 +96,13 @@ fun MarketPrice.listPrice(lane: PriceLane): Double? = when (lane) {
     else -> null // The sidecar supplies no list price for cache or reasoning lanes.
 }
 
-fun marketNumber(value: Double): String = (round(value * 10000) / 10000).toString().removeSuffix(".0")
+// Built from the ten-thousandths as an integer: Double.toString prints small values as 2.0E-4.
+fun marketNumber(value: Double): String {
+    val units = round(kotlin.math.abs(value) * 10000).toLong()
+    val fraction = (units % 10000).toString().padStart(4, '0').trimEnd('0')
+    val sign = if (value < 0 && units != 0L) "-" else ""
+    return sign + (units / 10000) + if (fraction.isEmpty()) "" else ".$fraction"
+}
 
 /** Missing and invalid quotes must not look like free offers. */
 fun marketUsd(value: Double?, unknown: String): String = when {

@@ -66,6 +66,7 @@ class MarketPriceTest {
     @Test fun dollarsAndDiscountsDoNotInventZeroPrices() {
         assertEquals("\$1.2346", marketUsd(1.234567, "unknown"))
         assertEquals("\$0", marketUsd(0.0, "unknown"))
+        assertEquals("\$0.0002", marketUsd(0.0002, "unknown"))
         assertEquals("<\$0.0001", marketUsd(0.000001, "unknown"))
         assertEquals("unknown", marketUsd(Double.NaN, "unknown"))
         assertEquals("unknown", marketUsd(-1.0, "unknown"))
