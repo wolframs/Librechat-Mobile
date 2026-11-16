@@ -249,7 +249,7 @@ private fun BackgroundTaskRow(
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                task.toolName,
+                com.garfiec.librechat.feature.chat.fork.toolCallLabel(task.toolName), // FORK-HOOK(tool-labels): shared task call identity
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

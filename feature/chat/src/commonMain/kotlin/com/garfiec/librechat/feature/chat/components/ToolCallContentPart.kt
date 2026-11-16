@@ -189,7 +189,7 @@ private fun ToolCallDispatcherContent(
     val intent = remember(toolCall) {
         parseToolIntent(toolCall?.args) ?: parseToolIntent(toolCall?.function?.arguments)
     }
-    val displayName = intent ?: toolName
+    val displayName = com.garfiec.librechat.feature.chat.fork.toolCallLabel(toolName, intent) // FORK-HOOK(tool-labels): shared call identity
     // Once it is the card's title, leaving it in the expanded argument dump prints it twice.
     val displayArgs = remember(toolCall, intent) {
         if (intent == null) toolCall?.function?.arguments else argsWithoutIntent(toolCall?.function?.arguments)

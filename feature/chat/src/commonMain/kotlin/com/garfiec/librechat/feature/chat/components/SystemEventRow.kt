@@ -251,7 +251,7 @@ private fun WakeupTaskCard(task: WakeupTask, kind: WakeupKind, fontSizeMultiplie
             .padding(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val title = if (kind == WakeupKind.SUBAGENT) task.subagentType else task.toolName
+            val title = if (kind == WakeupKind.SUBAGENT) task.subagentType else task.toolName?.let { com.garfiec.librechat.feature.chat.fork.toolCallLabel(it) } // FORK-HOOK(tool-labels): shared wakeup call identity
             if (!title.isNullOrEmpty()) {
                 Text(
                     title,

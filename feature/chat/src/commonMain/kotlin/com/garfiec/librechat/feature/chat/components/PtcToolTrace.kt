@@ -94,9 +94,7 @@ internal fun PtcToolTrace(trace: PtcTrace, modifier: Modifier = Modifier) {
 private fun PtcTraceLine(entry: PtcTraceEntry) {
     val colors = MaterialTheme.colorScheme
     val failed = entry.status == PtcCallStatus.ERROR
-    val parsed = parseToolName(entry.name)
-    val toolLabel = parsed.friendlyName?.let { stringResource(it) } ?: parsed.toolName
-    val label = parsed.mcpServer?.let { "$it · $toolLabel" } ?: toolLabel
+    val label = com.garfiec.librechat.feature.chat.fork.toolCallLabel(entry.name, parseToolIntent(entry.args)) // FORK-HOOK(tool-labels): shared trace call identity
     val statusLabel = stringResource(
         when (entry.status) {
             PtcCallStatus.RUNNING -> Res.string.ptc_trace_running

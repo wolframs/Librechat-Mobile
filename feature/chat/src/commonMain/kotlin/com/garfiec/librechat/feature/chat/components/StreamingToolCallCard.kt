@@ -334,8 +334,7 @@ private fun GenericStreamingToolCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = preparingToolLabel(toolCall)?.let { stringResource(Res.string.tool_preparing, it) }
-                            ?: toolCall.name,
+                        text = com.garfiec.librechat.feature.chat.fork.streamingToolCallLabel(toolCall), // FORK-HOOK(tool-labels): shared live call identity
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),

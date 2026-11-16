@@ -128,3 +128,9 @@ thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/com
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatContent.kt	3
 thread	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/screen/ChatScreen.kt	1
 thread	feature/chat/src/iosMain/kotlin/com/garfiec/librechat/feature/chat/components/PlatformChatComponents.ios.kt	1
+tool-labels	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/BackgroundTaskCallCard.kt	1
+tool-labels	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/BackgroundTasksChip.kt	1
+tool-labels	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/PtcToolTrace.kt	1
+tool-labels	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/StreamingToolCallCard.kt	1
+tool-labels	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/SystemEventRow.kt	1
+tool-labels	feature/chat/src/commonMain/kotlin/com/garfiec/librechat/feature/chat/components/ToolCallContentPart.kt	1

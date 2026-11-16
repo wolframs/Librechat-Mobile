@@ -200,7 +200,7 @@ private fun PolledTaskBlock(task: PolledTask, stateKey: String) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (task.toolName == SUBAGENT_TOOL) stringResource(Res.string.background_tasks_subagent) else task.toolName,
+                    if (task.toolName == SUBAGENT_TOOL) stringResource(Res.string.background_tasks_subagent) else com.garfiec.librechat.feature.chat.fork.toolCallLabel(task.toolName), // FORK-HOOK(tool-labels): shared task call identity
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

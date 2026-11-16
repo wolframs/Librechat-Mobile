@@ -113,7 +113,27 @@ module, `fork/README.md` wins.
 | Reading settings: fonts in three slots, text size, line and paragraph spacing | in. Three rounds against the design critic (GPT-6 Astra) from emulator screenshots, 8 to 9 out of 10, light, dark and font scale 1.3. Not seen: Liquid Glass, iOS (never compiled here), the faces on the Pixel's screen. | `fonts` |
 | Thread, header, landing and full model list restyle | in. Same three critic rounds, 8 to 9. Not seen: a streaming reply and tool cards under the critic, comparison panes (they keep upstream's look), Liquid Glass, iOS. | `thread` |
 | Launcher icon: the dyad sigil in three palettes, chosen in Settings > Appearance > App icon | in. On the emulator 2026-11-14: update over the build without aliases, each palette picked, with "Close now" and with "Later" (applied when the app went to the background, the process survived), the drawer showed the new icon, the app opened from the new entry. Not seen: what a launcher does with an icon pinned to the home screen, the Pixel, iOS (no choice there), the F-Droid metadata icon. Debug builds no longer differ by background colour. | `icon` |
+| Tool-call labels | in. Shared live/settled fallback, PTC and background-task labels; unit tests cover the title rule. Not yet checked on the emulator or iOS. | `tool-labels` |
 | Resend Files as a count | in. The operator's server (backend fork, `963e17dbc`, 2026-11-15) stores `resendFiles` as `true`, `false` or a whole number, and the app shows one count field in place of upstream's switch: blank resends every earlier file, 0 none, N the most recent N. On the emulator against the live server 2026-11-15: 2 typed and stored as `2`, read back from the server after the app's cache was deleted; 0 stored as `false`; blank stored as `true`; a preset saved with 3, shown in the preset editor and applied in a new chat; with 1 on `Surplus (Claude)` and two image turns the model saw the second image and quoted the server's note for the first. Not run: the agent editor's Advanced panel, German, iOS, the Pixel. The earlier fix of the switch's default (reported as garfiec/Librechat-Mobile#873) is upstream's since #888 and its hooks are gone. | `resend-files` |
+
+### Tool-call labels: how it is built
+
+`feature/chat/fork/ToolCallLabels.kt` adapts the existing first-key intent parser, last-delimiter
+MCP parser and localized native-name resources to `:fork`'s `toollabels/ToolCallTitle.kt`.
+The same resolver supplies generic live and settled cards, PTC trace rows, background-task rows and wakeup
+call-name fallbacks (`tool-labels`, six hooks). A valid first-key intent wins; otherwise
+`fetch_mcp_web` reads `web · fetch`, `generate_image_mcp_imager` reads
+`imager · generate_image`, and `web_fetch_mcp_web` reads `web · web_fetch`. The tool half keeps
+its underscores. Native friendly names use the current locale; unknown names stay raw.
+Preparation wording stays outside identity parsing and still excludes MCP/action calls.
+A later-key intent stays an argument. Resource titles, OAuth instructions, activity labels,
+output titles, subagent task labels and dispatch/classification keep their own semantics.
+
+`ToolCallTitleTest` covers connector formatting, validated intent precedence, native localization
+and unknown names. First-key validation and argument stripping reuse upstream's parser unchanged; existing
+`ToolIntentTest`, `ToolLabelsTest` and `ToolCallPreparationTest` cover those parser/preparation rules.
+Build and module tests are checked locally; live/settled visual parity, resource/OAuth rendering,
+German and iOS still need device acceptance.
 
 ### Resend Files as a count: how it is built
 
