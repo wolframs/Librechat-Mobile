@@ -1,6 +1,6 @@
 # Brief for one build item
 
-You build one item of `PLAN.md` in this folder. Your item and its report are named in your task.
+You build one item. The item and its report are named in your task.
 Other agents work in this checkout at the same time, but only on the emulator and on files under
 `reports/`; you are the only one changing code.
 
