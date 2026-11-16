@@ -57,3 +57,8 @@ running from any earlier thread"
 ## State
 
 - 2026-11-16 14:35: plan written, emulator free.
+- 2026-11-16 14:40: started through T3 `delegate_task` (a completion wakes the lead's thread; no
+  polling): build 1 (Sol), emulator check B4 (Sol), the upstream report (Opus 5.5, high; writes
+  `B2-upstream-report.md` here). Next builder starts when the one before is read and accepted;
+  next emulator check (I5, then B6, then B3; their questions are in
+  `../gap-checks-2026-11-15/PLAN.md`) when the one before reports.
