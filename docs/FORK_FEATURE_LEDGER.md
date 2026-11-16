@@ -308,7 +308,11 @@ renaming one drops that icon. The model shortcuts take the icon in force. iOS ha
 - The sheet opens from the model sheet (More options, Prices), only when the server's
   `/cost/markets/endpoints` lists the chat's endpoint. It leads with the input and output price this
   key can get (`effective`, else the best offer, and the heading says which), with list price and
-  discount beneath; sellers and performance are behind two disclosure rows.
+  discount beneath; sellers and performance are behind two disclosure rows. An existing `effective`
+  quote keeps null lanes unknown, including cache prices; only a response without that quote falls
+  back to market best. Missing displayed key prices get an English/German explanation of unknown
+  routing or seller trust, or the absence of an eligible offer. Covered by `MarketPriceTest`; this
+  unknown-price state is not yet checked on the emulator.
 - One fetch when it opens and on Retry, no polling. A change of account, server or model drops it.
 
 ### Composer regrouping: how it is built (2026-11-13)

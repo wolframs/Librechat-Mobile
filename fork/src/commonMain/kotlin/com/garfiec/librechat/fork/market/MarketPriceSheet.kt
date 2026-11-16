@@ -83,7 +83,7 @@ fun MarketPriceContent(server: String, model: String, onDismiss: () -> Unit, mod
 private fun MarketQuote(quote: MarketPrice) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val unknown = stringResource(Res.string.market_unknown)
-        // Says whose price leads: what this key's routing allows, or the cheapest offer when that is unknown.
+        // Only responses without an effective quote lead with the whole market's best offer.
         Text(
             stringResource(if (quote.effective != null) Res.string.market_headline_key else Res.string.market_headline_best),
             fontSize = 13.sp,
@@ -102,7 +102,7 @@ private fun MarketQuote(quote: MarketPrice) {
                         PriceLane.REASONING -> Res.string.market_reasoning
                     },
                 )
-                val estimated = quote.effective?.cacheEstimated == true &&
+                val estimated = price != null && quote.effective?.cacheEstimated == true &&
                     lane in listOf(PriceLane.CACHE_READ, PriceLane.CACHE_WRITE)
                 val value = (if (estimated) "≈" else "") + marketUsd(price, unknown)
                 val list = quote.listPrice(lane)
@@ -115,6 +115,9 @@ private fun MarketQuote(quote: MarketPrice) {
                     FigureRow(label, value, small = true)
                 }
             }
+        }
+        if (quote.effective != null && PriceLane.entries.any { it != PriceLane.REASONING && quote.price(it) == null }) {
+            Text(stringResource(Res.string.market_key_price_unknown), fontSize = 13.sp, color = muted())
         }
         if (quote.routing?.trustedOnly == true) {
             Text(

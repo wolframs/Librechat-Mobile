@@ -79,7 +79,8 @@ data class MarketStats(
 
 enum class PriceLane { INPUT, OUTPUT, CACHE_READ, CACHE_WRITE, REASONING }
 
-fun MarketPrice.price(lane: PriceLane): Double? = effective?.value(lane) ?: best.value(lane)
+// An effective quote owns every lane, including unknown prices; only older responses use market best.
+fun MarketPrice.price(lane: PriceLane): Double? = (effective ?: best).value(lane)
 
 private fun MarketRates.value(lane: PriceLane): Double? = when (lane) {
     PriceLane.INPUT -> input

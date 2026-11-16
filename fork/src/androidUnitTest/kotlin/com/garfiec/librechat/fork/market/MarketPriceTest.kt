@@ -38,12 +38,29 @@ class MarketPriceTest {
         assertEquals(listOf(null, 70.0, 80.0), quote.trend!!.buckets)
     }
 
-    @Test fun effectiveFallsBackPerLaneAndPreservesZero() {
+    @Test fun effectivePreservesZeroAndMissingLanes() {
         val quote = MarketPrice("m", MarketRates(input = 1.0, output = 2.0), MarketReference(),
             effective = MarketRates(input = 0.0))
         assertEquals(0.0, quote.price(PriceLane.INPUT))
-        assertEquals(2.0, quote.price(PriceLane.OUTPUT))
+        assertNull(quote.price(PriceLane.OUTPUT))
         assertNull(quote.listPrice(PriceLane.CACHE_READ))
+    }
+
+    @Test fun nullEffectiveLanesStayUnknownDespiteMarketOffers() {
+        val quote = json.decodeFromString<MarketPrice>("""{
+            "model":"m", "best":{"input":1,"output":2,"cacheRead":0.1,"cacheWrite":1.25,"reasoning":3},
+            "direct":{}, "effective":{"input":null,"output":null,"cacheRead":null,"cacheWrite":null,"reasoning":null}
+        }""")
+        PriceLane.entries.forEach { assertNull(quote.price(it), it.name) }
+    }
+
+    @Test fun missingEffectiveUsesMarketOffersForEveryLane() {
+        val quote = json.decodeFromString<MarketPrice>("""{
+            "model":"m", "best":{"input":1,"output":2,"cacheRead":0.1,"cacheWrite":1.25,"reasoning":3},
+            "direct":{}
+        }""")
+        val expected = listOf(1.0, 2.0, 0.1, 1.25, 3.0)
+        PriceLane.entries.forEachIndexed { index, lane -> assertEquals(expected[index], quote.price(lane), lane.name) }
     }
 
     @Test fun dollarsAndDiscountsDoNotInventZeroPrices() {
