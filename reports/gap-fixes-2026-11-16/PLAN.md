@@ -64,3 +64,7 @@ running from any earlier thread"
   `B2-upstream-report.md` here). Next builder starts when the one before is read and accepted;
   next emulator check (I5, then B6, then B3; their questions are in
   `../gap-checks-2026-11-15/PLAN.md`) when the one before reports.
+- 2026-11-16, B6 decided (the lead's choice): no fix in the fork. Both failures came from test shares
+  without a read grant or of a missing item; a normal share from a cooperating app was not shown to
+  fail, and "Build for what users hit" applies. It is upstream's code and unreported there; the
+  operator's go-ahead of today covers the B2 report only, so B6 is not filed. Offer it to him.
