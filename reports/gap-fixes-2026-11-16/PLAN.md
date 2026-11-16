@@ -35,7 +35,10 @@ running from any earlier thread"
 - [x] 2. Tool-call names: one naming function for every card (I1, M; settles half of G4)
 - [x] 3. Raw key error in the thread (B2, M)
 - [x] 3u. Upstream report for B2: Opus agent checks whether it is upstream's and unreported, files it if so Filed as garfiec/Librechat-Mobile#895; see `B2-upstream-report.md`.
-- [ ] 4. Connector wording (G1, S) and the search caption (G4, S)
+- [x] 4. Connector wording (G1, S) and the search caption (G4, S). Wording built. Caption not built:
+      the server sends nothing that tells the phone it runs its own search on a row. The backend
+      would have to serve a per-endpoint `providerWebSearchReplacement: "librechat"`, derived from
+      `lacksProviderWebSearch(resolvedBaseURL)`; that is a backend change, outside this plan.
 - [ ] 5. First model with a usable key (I2, M)
 - [ ] 6. Markdown import (G5, M)
 - [ ] 7. Spend card and trusted-sellers switch (G2, M)
