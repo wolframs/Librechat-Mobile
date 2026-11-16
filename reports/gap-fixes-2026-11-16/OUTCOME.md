@@ -25,7 +25,7 @@ running from any earlier thread"
 | Search caption on `Surplus (Claude)` (G4) | Not built. The server sends nothing that tells the phone it runs its own search on a row. It would have to serve a per-endpoint `providerWebSearchReplacement: "librechat"`, derived from `lacksProviderWebSearch(resolvedBaseURL)`. Backend change, not done. |
 | First model with a usable key (I2) | Built, unit-tested. Not seen: needs an install with no earlier choice, and the emulator's sign-in was left alone. No special case for Ollama (the lead's choice on the operator's "indifferent"). |
 | Chat import (G5) | Seen: a text-only `.md` transcript picked from Downloads opened as a chat. JSON, transcripts with images and failure messages not tried. Fixed `maxImages` of 5. iOS: row absent. |
-| Spend and trusted sellers in Prices (G2) | Built, unit-tested. Seen only that an ordinary account gets the Prices sheet unchanged. The admin view and a real write of the trust setting have not run anywhere: the test account is not an admin. A write sends only `allowUntrusted`. |
+| Spend and trusted sellers in Prices (G2) | Seen, both views. Ordinary account: Prices unchanged. Admin (the test account, made admin for the check on the operator's word of 2026-11-16 and set back to USER afterwards): credit left, today and last 30 days, and the control. One real write: Off, then On again; "In effect" and the hidden-seller count followed, and the key ended as it began (On, source Key). A write sends only `allowUntrusted`. Inherit and a failed write were not tried. |
 | MCP server cards: tool names when there is no description (I5) | Seen. `optmem` stays empty: the tool catalogue has no entry for it. |
 
 ## Emulator checks (reports in `../gap-checks-2026-11-15/`)

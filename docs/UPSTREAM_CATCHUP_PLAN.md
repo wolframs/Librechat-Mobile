@@ -89,8 +89,7 @@ built itself are dropped.
       improvement 5 still need the emulator.
       Built and decided 2026-11-16 (steps 7 and 7a together): what was built, seen on the
       emulator, left out and why is in `reports/gap-fixes-2026-11-16/OUTCOME.md`. Still open from
-      it: the search caption needs a field served by the backend; the admin spend view, the trust
-      switch's write and the first-model fallback have not run for real.
+      it: the search caption needs a field served by the backend; the first-model fallback has not run for real.
 - [ ] 8. Device acceptance on the Pixel with the real password manager: a
       picked saved login signs in directly (built 2026-11-13, not yet tried
       there). The old debug app id is gone since the rebrand, so the upgrade
